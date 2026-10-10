@@ -6,20 +6,25 @@
   "type": "module",
   "exports": {
     "./engine": "./src/engine.ts",
-    "./react": "./src/react.tsx"
+    "./react": "./src/react.tsx",
+    "./stream-quality": "./src/stream-quality.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@music/commands": "workspace:*",
-    "@music/sdk": "workspace:*"
+    "@music/sdk": "workspace:*",
+    "convex": "catalog:",
+    "effect": "catalog:"
   },
   "devDependencies": {
     "@music/config": "workspace:*",
     "@types/react": "catalog:",
+    "fast-check": "^4.10.2",
     "react": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "5.0.3"
   },
   "peerDependencies": {
     "react": "catalog:"
