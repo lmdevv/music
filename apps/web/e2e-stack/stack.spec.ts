@@ -286,3 +286,30 @@ test("the seek and volume sliders are named and work from the keyboard", async (
     .poll(async () => Number(await volume.getAttribute("aria-valuenow")))
     .toBeLessThan(before);
 });
+
+test("the song menu's Q, Shift+Enter, and L keys do what the menu shows", async ({ page }) => {
+  await signIn(page);
+  await openFirstAlbum(page);
+
+  const row = page.locator("main [role=row]").nth(3);
+  const title = (await row.locator("[role=cell]").nth(1).textContent())?.trim() ?? "";
+  const menu = row.getByRole("button", { name: `More actions for ${title}` });
+
+  await row.hover();
+  await menu.click();
+  await page.keyboard.press("q");
+  await expect(page.getByText(`Added ${title} to the queue`)).toBeVisible();
+  await expect(page.getByRole("menu")).toBeHidden();
+
+  await row.hover();
+  await menu.click();
+  await page.keyboard.press("Shift+Enter");
+  await expect(page.getByText(`${title} plays next`)).toBeVisible();
+
+  await row.hover();
+  await menu.click();
+  await page.keyboard.press("l");
+  await expect(page.getByText(`Liked ${title}`)).toBeVisible();
+  await page.goto("/liked");
+  await expect(page.locator("main [role=row]").filter({ hasText: title })).toBeVisible();
+});
