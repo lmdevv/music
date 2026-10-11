@@ -19,8 +19,9 @@ RUN corepack enable
 WORKDIR /src
 COPY . .
 RUN pnpm install --frozen-lockfile --ignore-scripts --os=linux --cpu=x64 --cpu=arm64 --libc=glibc
-RUN pnpm --filter web build \
- && pnpm --filter @music/media build
+# The install adds binaries for both target CPUs, so skip pnpm's re-install check before runs.
+RUN pnpm --config.verify-deps-before-run=false --filter web build \
+ && pnpm --config.verify-deps-before-run=false --filter @music/media build
 # Standalone package directories with production node_modules.
 RUN pnpm --filter @music/backend deploy --prod --legacy /out/backend \
  && pnpm --filter @music/media deploy --prod --legacy /out/media \
