@@ -73,10 +73,7 @@ function HomePage() {
     .filter((tile, index, all) => all.findIndex((other) => other.key === tile.key) === index)
     .slice(0, 6);
 
-  const artists = home.recentlyPlayed
-    .map((album) => ({ id: album.artistId, name: album.artist, artUrl: null }))
-    .filter((artist, index, all) => all.findIndex((other) => other.id === artist.id) === index)
-    .slice(0, 6);
+  const artists = home.recentlyPlayedArtists.slice(0, 6);
 
   const scanning = scan !== undefined;
 

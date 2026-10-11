@@ -217,3 +217,26 @@ test("playlists: create with N, add from a song's menu, remove, rename, and dele
   await expect(page.getByRole("link", { name: /Night drive/ })).toHaveCount(0);
   expect(errors.filter((text) => text.includes("Playlist not found"))).toEqual([]);
 });
+
+test("home and artists show each artist's art", async ({ page }) => {
+  await signIn(page);
+
+  const recent = page.locator("section").filter({
+    has: page.getByRole("heading", { name: "Recently played artists" }),
+  });
+
+  const circles = recent.locator("a[href^='/artists/']");
+
+  await expect(circles.first()).toBeVisible();
+  await expect(recent.locator("a[href^='/artists/'] img")).toHaveCount(await circles.count());
+
+  await page
+    .getByRole("navigation", { name: "Library" })
+    .getByRole("link", { name: "Artists" })
+    .click();
+
+  const artists = page.locator("main a[href^='/artists/']");
+
+  await expect(artists.first()).toBeVisible();
+  await expect(page.locator("main a[href^='/artists/'] img")).toHaveCount(await artists.count());
+});
