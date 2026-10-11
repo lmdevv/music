@@ -368,3 +368,13 @@ test("phone queue keeps the transport on screen and the device list fits", async
     .toBe(true);
   await context.close();
 });
+
+test("Esc closes the desktop queue panel", async ({ page }) => {
+  await signIn(page);
+  await openFirstAlbum(page);
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await page.getByRole("region", { name: "Player" }).getByRole("button", { name: "Queue" }).click();
+  await expect(page.getByRole("complementary", { name: "Queue" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("complementary", { name: "Queue" })).toBeHidden();
+});
