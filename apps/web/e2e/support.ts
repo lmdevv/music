@@ -28,6 +28,11 @@ export const seed = (pending = false): void => {
   });
 };
 
+/** Registers a stand-in phone called `name` and moves playback to it, as another device would. */
+export const seedDevice = (name: string): void => {
+  execFileSync("node", ["scripts/seed.ts", "--device", name], { cwd: backendDir, stdio: "pipe" });
+};
+
 /** Whether the backend already has an account (first-run setup has happened). */
 export const hasUsers = async (): Promise<boolean> =>
   (await new ConvexHttpClient(e2eConvexUrl()).query(setupStatus, {})).hasUsers;

@@ -16,7 +16,7 @@ export type Entity =
   | "device";
 
 /** How one argument is edited in the command menu's inline form. */
-export type FieldKind =
+type FieldKind =
   | { readonly kind: "text"; readonly mono: boolean }
   | {
       readonly kind: "number";

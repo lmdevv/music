@@ -32,7 +32,6 @@
   "devDependencies": {
     "@music/config": "workspace:*",
     "@playwright/test": "1.64.0",
-    "@tanstack/react-router-devtools": "^1.167.1",
     "@tanstack/router-plugin": "^1.168.35",
     "@types/node": "catalog:",
     "@types/react": "catalog:",

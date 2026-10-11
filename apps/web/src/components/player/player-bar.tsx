@@ -130,8 +130,8 @@ export function PlayerBar() {
           ) : (
             <>
               {remote && player.activeDevice !== null ? (
-                <Badge tone="surface" className="max-w-32 truncate text-text">
-                  On {player.activeDevice.name}
+                <Badge tone="surface" className="max-w-40 text-text">
+                  <span className="truncate">On {player.activeDevice.name}</span>
                 </Badge>
               ) : (
                 <Badge tone="accent">{formatQuality(track)}</Badge>
@@ -162,7 +162,7 @@ export function PlayerBar() {
 }
 
 /** The speaker button that opens the "Play on" popover. */
-export function DevicePickerButton() {
+function DevicePickerButton() {
   const { devicesOpen, setDevicesOpen } = useUi();
   const { onlineCount } = useDevices();
 

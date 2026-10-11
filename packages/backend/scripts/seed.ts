@@ -5,6 +5,7 @@
  *
  *   node scripts/seed.ts             # admin@music.local / password123, one library, full catalog
  *   node scripts/seed.ts --pending   # only finish pending scan jobs (a stand-in media worker)
+ *   node scripts/seed.ts --device "Lucía's iPhone"   # also move playback to a stand-in phone
  *
  * It targets the deployment in `packages/backend/.env.local` and reads the service secret with
  * `convex env get`, so run it from `packages/backend`.
@@ -417,7 +418,9 @@ const finishPendingJobs = async (client: ConvexHttpClient, secret: string): Prom
   return finished;
 };
 
-const { values } = parseArgs({ options: { pending: { type: "boolean", default: false } } });
+const { values } = parseArgs({
+  options: { pending: { type: "boolean", default: false }, device: { type: "string" } },
+});
 
 const client = new ConvexHttpClient(deploymentUrl());
 
@@ -452,4 +455,17 @@ if (values.pending) {
   }
 
   await finishPendingJobs(client, secret);
+
+  // A stand-in phone for remote-control testing: it checks in and playback moves to it.
+  if (values.device !== undefined) {
+    const deviceId = "seed-phone";
+
+    await client.mutation(runCommand, {
+      name: "devices.heartbeat",
+      args: { deviceId, name: values.device, kind: "phone" },
+    });
+
+    await client.mutation(runCommand, { name: "playback.transfer", args: { deviceId } });
+    console.log(`playback moved to ${values.device}`);
+  }
 }

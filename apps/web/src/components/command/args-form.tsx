@@ -19,7 +19,7 @@ export interface MenuContext {
 }
 
 /** One choice in an ID picker: the wire value, or a list of them for multi-song fields. */
-export interface EntityOption {
+interface EntityOption {
   readonly key: string;
   readonly value: string | ReadonlyArray<string>;
   readonly label: string;
@@ -30,7 +30,7 @@ export interface EntityOption {
  * The records an ID argument can point at, drawn from what is on screen and in your library:
  * the playing song and queue, the album or playlist in view, your playlists, devices, and so on.
  */
-export const useEntityOptions = (
+const useEntityOptions = (
   entity: Entity,
   many: boolean,
   context: MenuContext,

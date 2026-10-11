@@ -133,7 +133,7 @@ function PlaylistSubmenu({ tracks }: { readonly tracks: ReadonlyArray<Track> }) 
 }
 
 /** A file's tags and format, shown from "File info". */
-export function FileInfoDialog({
+function FileInfoDialog({
   track,
   open,
   onOpenChange,

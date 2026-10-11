@@ -171,12 +171,14 @@ function ScanBanner({ job }: { readonly job: Job }) {
             ? `Waiting to scan ${path}.`
             : `Scanning ${path}. New albums appear as they're found.`}
         </span>
-        <span className="font-mono text-xs/xs tracking-mono text-text-muted">
-          {job.total === null
-            ? formatCount(job.done)
-            : `${formatCount(job.done)} / ${formatCount(job.total)}`}
-          {eta === null ? "" : ` · ${eta}`}
-        </span>
+        {job.status === "pending" ? null : (
+          <span className="font-mono text-xs/xs tracking-mono text-text-muted">
+            {job.total === null
+              ? formatCount(job.done)
+              : `${formatCount(job.done)} / ${formatCount(job.total)}`}
+            {eta === null ? "" : ` · ${eta}`}
+          </span>
+        )}
       </div>
       <ProgressBar percent={percent} className="h-[3px]" label={`Scanning ${path}`} />
     </div>

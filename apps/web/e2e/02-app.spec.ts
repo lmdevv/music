@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { ADMIN, seed, signIn, unique } from "./support";
+import { ADMIN, seed, seedDevice, signIn, unique } from "./support";
 
 test.describe.configure({ mode: "serial" });
 
@@ -179,4 +179,33 @@ test("an admin invites someone who joins with the link", async ({ page, browser 
   await visitor.goto(link ?? "");
   await expect(visitor).toHaveURL(/\/$/);
   await guest.close();
+});
+
+test("remote control mode shows where music plays and controls it", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/albums");
+  await page.getByRole("link", { name: "Blue Lines" }).first().click();
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await expect(
+    page
+      .getByRole("region", { name: "Player" })
+      .getByRole("button", { name: "Pause", exact: true }),
+  ).toBeVisible();
+
+  // Another signed-in device takes over playback.
+  seedDevice("Lucía's iPhone");
+
+  await expect(
+    page.getByRole("status").filter({ hasText: "Playing on Lucía's iPhone" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Play on another device" }).click();
+  await expect(page.getByRole("menuitemradio", { name: /Lucía's iPhone/ })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  await page.keyboard.press("Escape");
+
+  const bar = page.getByRole("region", { name: "Player" });
+  await bar.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(bar.getByRole("button", { name: "Play", exact: true })).toBeVisible();
 });
