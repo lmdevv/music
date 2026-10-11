@@ -1,3 +1,5 @@
+import { usePlayer } from "@music/player/react";
+import type { StreamQuality } from "@music/player/stream-quality";
 import { Kbd } from "@music/ui/components/kbd";
 import { Segmented } from "@music/ui/components/segmented";
 import { createFileRoute } from "@tanstack/react-router";
@@ -16,6 +18,18 @@ const THEMES = [
 
 type ThemeChoice = (typeof THEMES)[number]["value"];
 
+const QUALITIES = [
+  { value: "lossless", label: "Lossless" },
+  { value: "high", label: "High" },
+  { value: "data-saver", label: "Data saver" },
+] as const satisfies ReadonlyArray<{ value: StreamQuality; label: string }>;
+
+const QUALITY_NOTES: Record<StreamQuality, string> = {
+  lossless: "FLAC for lossless files, gapless where the browser supports it.",
+  high: "AAC 256 kbps, gapless where the browser supports it.",
+  "data-saver": "AAC 128 kbps for slow or metered connections.",
+};
+
 const toChoice = (theme: string | undefined): ThemeChoice =>
   THEMES.find((option) => option.value === theme)?.value ?? "system";
 
@@ -32,6 +46,7 @@ const SHORTCUTS: ReadonlyArray<readonly [keys: ReadonlyArray<string>, action: st
 
 function PlaybackSettings() {
   const { theme, setTheme } = useTheme();
+  const { quality, setQuality, engine } = usePlayer();
 
   return (
     <div className="flex max-w-[720px] flex-col gap-7">
@@ -51,6 +66,23 @@ function PlaybackSettings() {
           value={toChoice(theme)}
           options={THEMES}
           onChange={setTheme}
+        />
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-6">
+        <div className="flex flex-col gap-0.5">
+          <span className="font-sans text-base/sm font-semibold text-text">Streaming quality</span>
+          <span className="font-sans text-sm/xs text-text-muted">
+            {QUALITY_NOTES[quality]} Applies from the next song.
+          </span>
+          <span className="font-mono text-xs/xs tracking-mono text-text-muted uppercase">
+            {engine === "mse" ? "Gapless engine" : "Standard engine"}
+          </span>
+        </div>
+        <Segmented
+          label="Streaming quality"
+          value={quality}
+          options={QUALITIES}
+          onChange={setQuality}
         />
       </div>
       <div className="flex flex-col gap-3">
