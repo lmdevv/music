@@ -151,3 +151,16 @@ test("the app runs under its Content-Security-Policy and security headers", asyn
 
   expect(await cspViolations(page)).toEqual([]);
 });
+
+test("a numeric search and the Add folder dialog keep their screens", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/search");
+  await page.locator("#search-input").fill("1999");
+  await expect(page).toHaveURL(/q=1999/);
+  await expect(page.getByRole("heading", { name: "Not in your library" })).toBeVisible();
+
+  await page.goto("/settings/libraries");
+  await page.getByRole("button", { name: "Add folder" }).click();
+  await expect(page).toHaveURL(/add=1/);
+  await expect(page.getByLabel("Library folder")).toBeVisible();
+});
