@@ -212,9 +212,13 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         ]);
         expect(Number(probed.format.duration)).toBeCloseTo(4, 0);
 
-        const ranged = yield* request(url, { headers: { Range: "bytes=0-99" } });
+        // Serving again marks the cache entry used without changing its validators, so a player
+        // that seeks with If-Range keeps getting partial content.
+        const etag = response.headers.get("ETag") ?? "";
+        const ranged = yield* request(url, { headers: { Range: "bytes=0-99", "If-Range": etag } });
 
         expect(ranged.status).toBe(206);
+        expect(ranged.headers.get("ETag")).toBe(etag);
 
         const lowUrl = yield* streamUrl(trackId(NEON), "aac-128");
 

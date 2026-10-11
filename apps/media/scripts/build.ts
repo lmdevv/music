@@ -35,7 +35,9 @@ const options: BuildOptions = {
 
 if (values.watch) {
   const builder = await context(options);
-  await builder.rebuild();
+
+  // A broken first build is reported by esbuild; keep watching so the next save can fix it.
+  await builder.rebuild().catch(() => undefined);
   await builder.watch();
 
   const service = spawn(

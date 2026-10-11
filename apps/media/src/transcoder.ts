@@ -84,7 +84,7 @@ class CacheKey implements Equal.Equal {
   }
 }
 
-/** Deletes the least recently touched files until the cache fits in `maxBytes`. */
+/** Deletes the least recently used files (by access time) until the cache fits in `maxBytes`. */
 const evict = Effect.fn("Transcoder.evict")(function* (
   cacheDir: string,
   maxBytes: number,
@@ -98,7 +98,7 @@ const evict = Effect.fn("Transcoder.evict")(function* (
   let total = files.reduce((sum, file) => sum + file.size, 0);
 
   if (total <= maxBytes) return;
-  const oldestFirst = files.toSorted((left, right) => left.mtimeMs - right.mtimeMs);
+  const oldestFirst = files.toSorted((left, right) => left.accessedMs - right.accessedMs);
 
   for (const file of oldestFirst) {
     if (total <= maxBytes) break;
@@ -130,7 +130,7 @@ const make = Effect.gen(function* () {
     const existing = yield* Files.statPath(output).pipe(Effect.option);
 
     if (Option.isSome(existing)) {
-      yield* Files.touchFile(output, now);
+      yield* Files.markAccessed(output, now);
 
       return output;
     }
