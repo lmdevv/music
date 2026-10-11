@@ -1,4 +1,5 @@
-import { Device, PlaybackState } from "@music/commands/models";
+import { JobId, LibraryId } from "@music/commands/ids";
+import { Device, Job, PlaybackState } from "@music/commands/models";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { Schema } from "effect";
@@ -12,6 +13,12 @@ let apiKey = "";
 const decodeDevices = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Device)));
 
 const decodeState = Schema.decodeUnknownSync(Schema.fromJsonString(PlaybackState));
+
+const decodeJob = Schema.decodeUnknownSync(Schema.fromJsonString(Job));
+
+const decodeCreated = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ libraryId: LibraryId, jobId: JobId })),
+);
 
 const openFirstAlbum = async (page: Page): Promise<string> => {
   await page
@@ -402,4 +409,154 @@ test("Esc closes the desktop queue panel", async ({ page }) => {
   await expect(page.getByRole("complementary", { name: "Queue" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("complementary", { name: "Queue" })).toBeHidden();
+});
+
+test("the sign-in screen shows the release version", async ({ page }) => {
+  // Every package carries the release version; the CLI prints its own.
+  const version = cli(apiKey, ["--version"]).trim();
+
+  expect(version).toMatch(/^\d+\.\d+\.\d+/);
+
+  await page.goto("/sign-in");
+  await expect(page.getByText(`· V${version}`)).toBeVisible();
+});
+
+test("album cards and song rows expose their play buttons", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/albums");
+  const card = page.locator("main a[href^='/albums/']").first();
+  const album = (await card.locator("span").first().textContent())?.trim() ?? "";
+
+  await card.hover();
+  await page.getByRole("button", { name: `Play ${album}`, exact: true }).click();
+  await expect(
+    page
+      .getByRole("region", { name: "Player" })
+      .getByRole("button", { name: "Pause", exact: true }),
+  ).toBeVisible();
+
+  await page.goto("/songs");
+
+  const row = page
+    .locator("main [role=row]")
+    .filter({ has: page.getByRole("button", { name: /^More actions for / }) })
+    .first();
+
+  await row.hover();
+  await expect(row.getByRole("button", { name: /^Play / })).toBeVisible();
+});
+
+test("the last song in the queue stops at its end instead of starting over", async ({ page }) => {
+  cli(apiKey, ["playback", "shuffle", "--no-on"]);
+  cli(apiKey, ["playback", "repeat", "off"]);
+
+  await signIn(page);
+  await openFirstAlbum(page);
+
+  const last = page
+    .locator("main [role=row]")
+    .filter({ has: page.getByRole("button", { name: /^More actions for / }) })
+    .last();
+
+  const label =
+    (await last.getByRole("button", { name: /^More actions for / }).getAttribute("aria-label")) ??
+    "";
+
+  const title = label.replace(/^More actions for /, "");
+
+  await last.hover();
+  await last.getByRole("button", { name: `Play ${title}`, exact: true }).click();
+  await expectAudioPast(page, 1);
+
+  const playing = decodeState(cli(apiKey, ["now", "--json"]));
+  const durationMs = playing.queue[playing.index]?.durationMs ?? 0;
+
+  expect(playing.index).toBe(playing.queue.length - 1);
+  cli(apiKey, ["playback", "seek", "--position-ms", String(Math.max(0, durationMs - 3000))]);
+
+  // The song reaches its end and playback stops there.
+  await expect
+    .poll(() => decodeState(cli(apiKey, ["now", "--json"])).playing, { timeout: 60_000 })
+    .toBe(false);
+
+  // The player reports its position every 15 seconds; a report that still says "playing" would
+  // restart the song, so it must stay stopped past one.
+  const stoppedAt = Date.now();
+
+  await expect
+    .poll(
+      async () =>
+        Date.now() - stoppedAt > 17_000 &&
+        !(await isPlayingAudio(page)) &&
+        !decodeState(cli(apiKey, ["now", "--json"])).playing,
+      { timeout: 30_000, intervals: [1000] },
+    )
+    .toBe(true);
+  await expect(
+    page.getByRole("region", { name: "Player" }).getByRole("button", { name: "Play", exact: true }),
+  ).toBeVisible();
+});
+
+test("the command menu rescans the only library folder with Enter", async ({ page }) => {
+  await signIn(page);
+  await page.keyboard.press("Control+k");
+  await page.getByRole("combobox").fill("Rescan a library folder");
+
+  const menu = page.getByRole("dialog");
+
+  // The only folder is already picked, so Enter runs the command.
+  await expect(
+    menu.getByRole("option", { name: /^Rescan a library folder/, selected: true }),
+  ).toBeVisible();
+  await expect(menu.getByRole("option", { name: /^\/music/, selected: true })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(menu.getByText("Scanning /music", { exact: true })).toBeVisible();
+  await expect(menu.getByRole("alert")).toHaveCount(0);
+});
+
+test("adding a folder that doesn't exist shows the failed scan and keeps open lists working", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto("/albums");
+  await expect(page.locator("main a[href^='/albums/']").first()).toBeVisible();
+
+  const created = decodeCreated(
+    cli(apiKey, ["libraries", "create", "--name", "Nowhere", "--path", "/nowhere", "--json"]),
+  );
+
+  try {
+    await expect
+      .poll(() => decodeJob(cli(apiKey, ["jobs", "get", created.jobId, "--json"])).status)
+      .toBe("failed");
+
+    // Every open list re-ran with the new folder in your libraries; none may fail.
+    await expect(page.getByText("This screen didn't load")).toHaveCount(0);
+    await expect(page.locator("main a[href^='/albums/']").first()).toBeVisible();
+
+    await page.goto("/settings/libraries");
+    const card = page.getByRole("region", { name: "/nowhere" });
+    await expect(card.getByText("Scan failed")).toBeVisible();
+    await expect(card.getByText(/unavailable/)).toBeVisible();
+  } finally {
+    cli(apiKey, ["libraries", "delete", created.libraryId]);
+  }
+});
+
+test("phone forms keep their buttons on screen", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const phone = await context.newPage();
+
+  const onScreen = async (name: string): Promise<boolean> => {
+    const box = await phone.getByRole("button", { name, exact: true }).boundingBox();
+
+    return box !== null && box.x >= 0 && box.x + box.width <= 390;
+  };
+
+  await signIn(phone);
+  await phone.goto("/songs");
+  await expect.poll(() => onScreen("Shuffle all")).toBe(true);
+  await phone.goto("/settings/account");
+  await expect.poll(() => onScreen("Save")).toBe(true);
+  await context.close();
 });

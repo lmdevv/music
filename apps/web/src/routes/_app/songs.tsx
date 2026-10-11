@@ -68,7 +68,7 @@ function SongsPage() {
               placeholder="Filter songs"
               value={filter}
               onChange={(event) => setFilter(event.target.value)}
-              fieldClassName="h-9 grow rounded-sm lg:w-sidebar lg:grow-0"
+              fieldClassName="h-9 min-w-0 shrink grow rounded-sm lg:w-sidebar lg:grow-0"
               start={<SearchIcon aria-hidden />}
             />
             <Button

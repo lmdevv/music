@@ -87,7 +87,9 @@ function Page<Item>({
 
   if (page === undefined) return <>{skeleton}</>;
 
-  if (first && page.items.length === 0) return <>{empty}</>;
+  // A page can be empty while more follow (its rows were in libraries you can't read); its
+  // sentinel stays in view and loads the next one, so only a finished empty list is "empty".
+  if (first && page.items.length === 0 && page.done) return <>{empty}</>;
 
   return (
     <>

@@ -681,6 +681,10 @@ export class PlaybackController {
       return;
     }
 
+    // The engine stopped at the end of the song, and engines don't report that stop as a pause.
+    // Mark it, or the periodic report would tell the server this device is still playing and
+    // restart the last song after `playback.next` stopped at the end of the queue.
+    this.#update({ engineStatus: "paused" });
     void this.capture(this.#client.run("playback.next", {}));
   }
 
