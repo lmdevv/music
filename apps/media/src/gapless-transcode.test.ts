@@ -100,11 +100,12 @@ describe("gapless transcodes", { timeout: MEDIA_TEST_TIMEOUT }, () => {
             sampleRate: 48_000,
           });
 
-          // Fragmented, with an empty moov and no edit list for browsers to apply on their own.
+          // Fragmented, with an empty moov, a fragment index for seeking, and no edit list for
+          // browsers to apply on their own.
           const bytes = yield* Files.readWholeFile(output.path);
           const boxes = boxNames(bytes);
 
-          expect(boxes.slice(0, 3)).toEqual(["ftyp", "moov", "moof"]);
+          expect(boxes.slice(0, 4)).toEqual(["ftyp", "moov", "sidx", "moof"]);
           expect(Buffer.from(bytes).includes("elst")).toBe(false);
 
           // After skipping the priming, the decoded output lines up with the decoded source

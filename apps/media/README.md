@@ -39,7 +39,7 @@ includes every dependency, `music-metadata` too; `dist/` needs nothing else at r
   of them.
   - `aac-320`, `aac-128`: fast-start AAC MP4 for `<audio>`. When ffmpeg fails on a
     browser-playable file they fall back to the original.
-  - `fmp4-flac`, `fmp4-aac`: fragmented MP4 (one-second fragments, empty `moov`, no edit list) for
+  - `fmp4-flac`, `fmp4-aac`: fragmented MP4 (one-second fragments, empty `moov`, a global `sidx` index, no edit list) for
     the gapless MSE engine. FLAC sources are remuxed into `fmp4-flac`, other sources are encoded;
     `fmp4-aac` is stereo AAC at 256 kbps. Responses carry `X-Music-Priming-Samples`,
     `X-Music-Duration-Samples`, and `X-Music-Sample-Rate`: the timeline starts with that many

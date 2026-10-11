@@ -11,7 +11,7 @@ import { runTool } from "../ffmpeg.ts";
 import * as Files from "../files.ts";
 
 /** Sample rate of the generated tone. */
-export const SINE_RATE = 48_000;
+const SINE_RATE = 48_000;
 
 /** The tone: 110 Hz at half scale, identical in both channels. */
 const TONE = "aevalsrc=0.5*sin(2*PI*110*t)|0.5*sin(2*PI*110*t)";

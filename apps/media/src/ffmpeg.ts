@@ -108,7 +108,7 @@ const FRAGMENT_MICROSECONDS = "1000000";
 
 const FRAGMENTED_MP4 = [
   "-movflags",
-  "+frag_keyframe+empty_moov+default_base_moof",
+  "+frag_keyframe+empty_moov+default_base_moof+global_sidx",
   "-frag_duration",
   FRAGMENT_MICROSECONDS,
   "-f",
@@ -126,8 +126,10 @@ const COUNT_OUTPUT = ["-c:a", "pcm_s32le", "-f", "framecrc", "-"];
  * - `fmp4-flac`: FLAC sources are remuxed untouched; other sources are encoded to FLAC.
  * - `fmp4-aac`: stereo AAC at 256 kbps, with `AAC_TAIL_PADDING` samples of silence appended.
  *
- * No edit list is written (fragmented output never has one), so the file's timeline starts with
- * the encoder's priming samples. The player trims them using the measured timing instead.
+ * The file starts with `ftyp`, `moov`, and a global `sidx` indexing every fragment, so a player
+ * can seek with one range request. No edit list is written (fragmented output never has one), so
+ * the timeline starts with the encoder's priming samples; the player trims them using the
+ * measured timing instead.
  */
 export const fragmentedArgs = (
   source: string,
