@@ -313,3 +313,49 @@ test("the song menu's Q, Shift+Enter, and L keys do what the menu shows", async 
   await page.goto("/liked");
   await expect(page.locator("main [role=row]").filter({ hasText: title })).toBeVisible();
 });
+
+test("phone queue keeps the transport on screen and the device list fits", async ({ browser }) => {
+  for (let index = 0; index < 12; index += 1) {
+    cli(apiKey, [
+      "devices",
+      "heartbeat",
+      "--device-id",
+      `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+      "--name",
+      `Old laptop ${index}`,
+      "--kind",
+      "web",
+    ]);
+  }
+
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const phone = await context.newPage();
+
+  await signIn(phone);
+  await phone.goto("/albums");
+  await phone.locator("main a[href^='/albums/']").first().click();
+  await phone.getByRole("button", { name: "Play", exact: true }).first().click();
+  await expectAudioPast(phone, 1);
+  await phone.getByRole("button", { name: /Open Now Playing/ }).click();
+  await phone.getByRole("button", { name: "Queue", exact: true }).click();
+
+  const fits = async (name: RegExp | string): Promise<boolean> => {
+    const box = await phone.getByRole("button", { name, exact: true }).last().boundingBox();
+
+    return box !== null && box.y >= 0 && box.y + box.height <= 844;
+  };
+
+  await expect.poll(() => fits("Next")).toBe(true);
+  await expect.poll(() => fits("Hide queue")).toBe(true);
+
+  await phone.getByRole("button", { name: /Play on another device/ }).click();
+
+  const list = phone.getByRole("menu", { name: "Play on" });
+
+  await expect(list.getByRole("menuitemradio", { name: /Old laptop 11/ })).toBeAttached();
+
+  const box = await list.boundingBox();
+
+  expect(box !== null && box.y + box.height <= 844).toBe(true);
+  await context.close();
+});
