@@ -156,7 +156,9 @@ export const isWithin = (root: string, path: string): boolean =>
  * Recursively lists regular files under `root` whose names pass `include`, skipping entries
  * whose names start with a dot. A symlink to a file counts only when its target resolves inside
  * `root`, so a link cannot pull outside files into the library; symlinks to directories are never
- * followed, which also rules out loops. Unreadable entries are skipped.
+ * followed, which also rules out loops. A folder that cannot be read fails the walk instead of
+ * being skipped: skipping it would make every song under it look deleted. A folder that vanishes
+ * mid-walk is skipped.
  */
 export const walkTree = async (
   root: string,
@@ -177,7 +179,11 @@ export const walkTree = async (
   };
 
   const visit = async (directory: string, prefix: string): Promise<void> => {
-    const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+    const entries = await readdir(directory, { withFileTypes: true }).catch((cause: unknown) => {
+      if (directory !== root && isMissing(cause)) return [];
+
+      throw new UnreadableFolder(directory, cause);
+    });
 
     await Promise.all(
       entries.map(async (entry) => {
@@ -208,6 +214,25 @@ export const walkTree = async (
 
   return found;
 };
+
+/** A folder in a library that the media service is not allowed to read. */
+export class UnreadableFolder extends Error {
+  override readonly name = "UnreadableFolder";
+
+  readonly path: string;
+
+  constructor(path: string, cause: unknown) {
+    const code = cause instanceof Error && "code" in cause ? String(cause.code) : "error";
+
+    const reason =
+      code === "EACCES" || code === "EPERM"
+        ? `permission denied for the media service (uid ${process.getuid?.() ?? "unknown"})`
+        : code;
+
+    super(`Can't read ${path}: ${reason}`, { cause });
+    this.path = path;
+  }
+}
 
 /** True when a Node error means the path does not exist. */
 export const isMissing = (cause: unknown): boolean =>
