@@ -280,6 +280,12 @@ function PhoneHome({
                   seed={album.id}
                   className="flex h-[320px] w-[250px] flex-col justify-end rounded-[14px] p-4"
                 >
+                  {/* Paper's placeholder art is dark; real covers can be light, so the white
+                      title gets a scrim to stay readable. */}
+                  <span
+                    aria-hidden
+                    className="absolute inset-x-0 bottom-0 h-1/2 bg-linear-to-t from-dark-canvas/65 to-transparent"
+                  />
                   <span className="relative font-sans text-[24px] leading-lg font-heavy tracking-[-0.01em] text-white drop-shadow-sm">
                     {album.title}
                   </span>
