@@ -8,6 +8,7 @@
  * environment written by `scripts/dev-backend.sh` is loaded; production never reads that file.
  */
 import { spawn } from "node:child_process";
+import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
@@ -32,6 +33,14 @@ const options: BuildOptions = {
     js: 'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);',
   },
 };
+
+// `dist/` stays runnable when copied on its own, for example into a container image.
+await mkdir(new URL("../dist", import.meta.url), { recursive: true });
+
+await writeFile(
+  new URL("../dist/package.json", import.meta.url),
+  `${JSON.stringify({ type: "module" })}\n`,
+);
 
 if (values.watch) {
   const builder = await context(options);
