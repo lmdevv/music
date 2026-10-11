@@ -168,6 +168,10 @@ test("a numeric search and the Add folder dialog keep their screens", async ({ p
 test("playlists: create with N, add from a song's menu, remove, rename, and delete", async ({
   page,
 }) => {
+  const errors: Array<string> = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
   await signIn(page);
   await openFirstAlbum(page);
 
@@ -211,4 +215,5 @@ test("playlists: create with N, add from a song's menu, remove, rename, and dele
   await expect(page).toHaveURL(/\/playlists$/);
   await expect(page.getByText("Deleted Night drive")).toBeVisible();
   await expect(page.getByRole("link", { name: /Night drive/ })).toHaveCount(0);
+  expect(errors.filter((text) => text.includes("Playlist not found"))).toEqual([]);
 });
