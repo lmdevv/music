@@ -629,7 +629,11 @@ export class PlaybackController {
       case "paused": {
         this.#update({ engineStatus: "paused" });
         this.#showNowPlaying();
-        void this.#report(false);
+
+        // A pause the session itself ordered is already on the server. Reporting it back could
+        // land after a Play pressed meanwhile and overwrite it, when the snapshot that ordered
+        // the pause was stale.
+        if (this.#view?.playing !== false) void this.#report(false);
         break;
       }
 
