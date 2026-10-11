@@ -5,6 +5,7 @@ import { randomToken, sha256Hex } from "../lib/crypto";
 import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
 import { presentJob, presentLibrary } from "../lib/present";
+import { endSession } from "../lib/sessions";
 import { canRead } from "../lib/viewer";
 import type { Viewer } from "../lib/viewer";
 import type { MutationHandlers, QueryHandlers } from "./types";
@@ -235,7 +236,9 @@ export const adminMutations = {
     const key = await ctx.db.get(tableId(ctx, "apiKeys", args.apiKeyId));
 
     if (key === null || key.userId !== viewer.id) return fail("not_found", "Key not found");
-    await ctx.db.patch(key._id, { revokedAt: Date.now() });
+    await ctx.db.patch(key._id, { revokedAt: Date.now(), sessionId: undefined });
+
+    if (key.sessionId !== undefined) await endSession(ctx, key.sessionId);
 
     return ok;
   },
