@@ -8,6 +8,7 @@
  */
 import { createReadStream } from "node:fs";
 import {
+  appendFile,
   cp,
   mkdir,
   open,
@@ -50,19 +51,27 @@ export const readRange = (path: string, start: number, end: number): ReadableStr
   // `encoding` option emits only `Buffer` chunks, and `Buffer` is a `Uint8Array`.
   Readable.toWeb(createReadStream(path, { start, end })) as ReadableStream<Uint8Array>;
 
-/** Reads up to `length` bytes from the start of a file. */
-export const readHead = async (path: string, length: number): Promise<Uint8Array> => {
+/** Reads up to `length` bytes of a file starting at byte `position`. */
+export const readAt = async (
+  path: string,
+  position: number,
+  length: number,
+): Promise<Uint8Array> => {
   const handle = await open(path, "r");
 
   try {
     const buffer = new Uint8Array(length);
-    const { bytesRead } = await handle.read(buffer, 0, length, 0);
+    const { bytesRead } = await handle.read(buffer, 0, length, position);
 
     return buffer.subarray(0, bytesRead);
   } finally {
     await handle.close();
   }
 };
+
+/** Reads up to `length` bytes from the start of a file. */
+export const readHead = (path: string, length: number): Promise<Uint8Array> =>
+  readAt(path, 0, length);
 
 /** Reads a whole file. */
 export const readWholeFile = (path: string): Promise<Uint8Array> => readFile(path);
@@ -205,3 +214,7 @@ export const isMissing = (cause: unknown): boolean =>
   cause instanceof Error &&
   "code" in cause &&
   (cause.code === "ENOENT" || cause.code === "ENOTDIR");
+
+/** Appends bytes to a file, creating it when missing. */
+export const appendToFile = (path: string, data: Uint8Array): Promise<void> =>
+  appendFile(path, data);
