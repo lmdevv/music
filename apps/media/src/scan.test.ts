@@ -213,6 +213,25 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       }),
     ));
 
+  it("stores only images as artwork", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root, scan, trackAt } = yield* setup;
+        const folder = join(root, "The Sine Waves", "Folder Art");
+
+        yield* Files.writeFileAtomic(
+          join(folder, "cover.jpg"),
+          new TextEncoder().encode("<html><script>alert(1)</script></html>"),
+          "x",
+        );
+
+        yield* scan;
+        expect((yield* trackAt("The Sine Waves/Folder Art/01 Brushes.m4a"))?.scanned.artHash).toBe(
+          undefined,
+        );
+      }),
+    ));
+
   it("fails with LibraryUnavailable when the folder is missing", () =>
     runScoped(
       Effect.gen(function* () {
