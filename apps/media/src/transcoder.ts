@@ -28,6 +28,7 @@ import {
 
 import {
   AAC_TAIL_PADDING,
+  aacSampleRate,
   countFrameSamples,
   fragmentedArgs,
   isFragmentedProfile,
@@ -66,6 +67,7 @@ const SourceProbe = Schema.Struct({
     Schema.Struct({
       duration_ts: Schema.optionalKey(Schema.Finite),
       time_base: Schema.String,
+      sample_rate: Schema.FiniteFromString,
     }),
   ]),
   format: Schema.Struct({ format_name: Schema.String }),
@@ -226,22 +228,29 @@ const make = Effect.gen(function* () {
     profile: FragmentedProfile,
     temporary: string,
   ) {
-    const encoded = yield* runTool(
-      config.ffmpegPath,
-      fragmentedArgs(input.source, temporary, profile, input.codec),
-    );
-
-    const probed = yield* runTool(config.ffprobePath, timelineProbeArgs(temporary));
     const sourceProbed = yield* runTool(config.ffprobePath, sourceProbeArgs(input.source));
-
-    const {
-      streams: [stream],
-    } = yield* decodeTimelineProbe(probed.stdout);
 
     const {
       streams: [sourceStream],
       format,
     } = yield* decodeSourceProbe(sourceProbed.stdout);
+
+    const encoded = yield* runTool(
+      config.ffmpegPath,
+      fragmentedArgs(
+        input.source,
+        temporary,
+        profile,
+        input.codec,
+        aacSampleRate(sourceStream.sample_rate),
+      ),
+    );
+
+    const probed = yield* runTool(config.ffprobePath, timelineProbeArgs(temporary));
+
+    const {
+      streams: [stream],
+    } = yield* decodeTimelineProbe(probed.stdout);
 
     const timing = measureTiming(
       stream.duration_ts,

@@ -182,7 +182,7 @@ describe("readHeader on the media service's real output", () => {
         "flac",
         source,
       ]);
-      execFileSync("ffmpeg", fragmentedArgs(source, output, profile, "flac"), {
+      execFileSync("ffmpeg", fragmentedArgs(source, output, profile, "flac", 48_000), {
         stdio: ["ignore", "ignore", "inherit"],
       });
 

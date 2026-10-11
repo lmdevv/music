@@ -1,9 +1,11 @@
+import { join } from "node:path";
+
 import { TrackId } from "@music/commands/ids";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
 
-import { AAC_TAIL_PADDING, countFrameSamples } from "./ffmpeg.ts";
+import { AAC_TAIL_PADDING, aacSampleRate, countFrameSamples, runTool } from "./ffmpeg.ts";
 import * as Files from "./files.ts";
 import { declaredLength, measureTiming } from "./sample-timing.ts";
 import { MEDIA_TEST_TIMEOUT, temporaryDirectory, testConfig } from "./testing/fixtures.ts";
@@ -134,6 +136,49 @@ describe("gapless transcodes", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       ));
   }
 
+  for (const [rate, profile, expected] of [
+    [96_000, "fmp4-aac", { primingSamples: 1024, durationSamples: 120_000, sampleRate: 48_000 }],
+    [88_200, "fmp4-aac", { primingSamples: 1024, durationSamples: 110_250, sampleRate: 44_100 }],
+    [44_100, "fmp4-aac", { primingSamples: 1024, durationSamples: 110_250, sampleRate: 44_100 }],
+    [96_000, "fmp4-flac", { primingSamples: 0, durationSamples: 240_000, sampleRate: 96_000 }],
+  ] as const) {
+    it(`measures ${profile} timing for a ${rate} Hz source`, () =>
+      runScoped(
+        Effect.gen(function* () {
+          const scratch = yield* temporaryDirectory("rate");
+          const source = join(scratch, "tone.flac");
+
+          yield* runTool("ffmpeg", [
+            "-hide_banner",
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            `sine=frequency=440:sample_rate=${rate}:duration=2.5`,
+            "-ac",
+            "2",
+            "-c:a",
+            "flac",
+            source,
+          ]);
+
+          const transcoder = yield* transcoderAt(yield* temporaryDirectory("data"));
+
+          const output = yield* transcoder.transcode({
+            trackId: TrackId.make(`rate-${rate}`),
+            profile,
+            source,
+            mtimeMs: 1,
+            codec: "flac",
+          });
+
+          expect(Option.getOrUndefined(output.timing)).toEqual(expected);
+        }),
+      ));
+  }
+
   it("re-encodes when the timing sidecar is missing", () =>
     runScoped(
       Effect.gen(function* () {
@@ -157,6 +202,29 @@ describe("gapless transcodes", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(yield* Files.statPath(`${first.path}.json`)).toMatchObject({ kind: "file" });
       }),
     ));
+});
+
+describe("aacSampleRate", () => {
+  it("keeps AAC rates and maps the rest into AAC's range", () => {
+    expect(aacSampleRate(44_100)).toBe(44_100);
+    expect(aacSampleRate(48_000)).toBe(48_000);
+    expect(aacSampleRate(22_050)).toBe(22_050);
+    expect(aacSampleRate(88_200)).toBe(44_100);
+    expect(aacSampleRate(176_400)).toBe(44_100);
+    expect(aacSampleRate(96_000)).toBe(48_000);
+    expect(aacSampleRate(192_000)).toBe(48_000);
+    expect(aacSampleRate(37_800)).toBe(48_000);
+  });
+
+  it("always lands on a rate AAC LC supports", () => {
+    const supported = [48_000, 44_100, 32_000, 24_000, 22_050, 16_000, 12_000, 11_025, 8000];
+
+    fc.assert(
+      fc.property(fc.integer({ min: 1000, max: 768_000 }), (rate) => {
+        expect(supported).toContain(aacSampleRate(rate));
+      }),
+    );
+  });
 });
 
 describe("countFrameSamples", () => {

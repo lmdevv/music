@@ -100,8 +100,20 @@ export const transcodeArgs = (
  */
 export const AAC_TAIL_PADDING = 2048;
 
-/** AAC sample rates the gapless profile keeps; anything else is resampled to the nearest one. */
-const AAC_SAMPLE_RATES = "48000|44100|32000|24000|22050|16000|12000|11025|8000";
+/** Sample rates AAC LC supports up to 48 kHz; the gapless profile keeps these. */
+const AAC_SAMPLE_RATES: ReadonlySet<number> = new Set([
+  48_000, 44_100, 32_000, 24_000, 22_050, 16_000, 12_000, 11_025, 8000,
+]);
+
+/**
+ * The output sample rate for `fmp4-aac`: the source's when AAC supports it, 44.1 kHz for higher
+ * rates in that family (88.2, 176.4 kHz), and 48 kHz for everything else.
+ */
+export const aacSampleRate = (sourceRate: number): number => {
+  if (AAC_SAMPLE_RATES.has(sourceRate)) return sourceRate;
+
+  return sourceRate > 48_000 && sourceRate % 44_100 === 0 ? 44_100 : 48_000;
+};
 
 /** Fragment length: playback can start once the first second of audio has arrived. */
 const FRAGMENT_MICROSECONDS = "1000000";
@@ -124,7 +136,8 @@ const COUNT_OUTPUT = ["-c:a", "pcm_s32le", "-f", "framecrc", "-"];
  * output; `countFrameSamples` turns it into the exact number of real samples.
  *
  * - `fmp4-flac`: FLAC sources are remuxed untouched; other sources are encoded to FLAC.
- * - `fmp4-aac`: stereo AAC at 256 kbps, with `AAC_TAIL_PADDING` samples of silence appended.
+ * - `fmp4-aac`: stereo AAC at 256 kbps and `aacRate` Hz (see `aacSampleRate`), with
+ *   `AAC_TAIL_PADDING` samples of silence appended. The count output sees the same resampling.
  *
  * The file starts with `ftyp`, `moov`, and a global `sidx` indexing every fragment, so a player
  * can seek with one range request. No edit list is written (fragmented output never has one), so
@@ -136,6 +149,7 @@ export const fragmentedArgs = (
   destination: string,
   profile: FragmentedProfile,
   sourceCodec: string,
+  aacRate: number,
 ): ReadonlyArray<string> => {
   const input = ["-hide_banner", "-nostdin", "-v", "error", "-y", "-i", source];
 
@@ -159,7 +173,7 @@ export const fragmentedArgs = (
   return [
     ...input,
     "-filter_complex",
-    `[0:a:0]aformat=sample_rates=${AAC_SAMPLE_RATES}:channel_layouts=stereo,asplit=2[count][encode];` +
+    `[0:a:0]aresample=${aacRate},aformat=channel_layouts=stereo,asplit=2[count][encode];` +
       `[encode]apad=pad_len=${AAC_TAIL_PADDING}[padded]`,
     "-map",
     "[padded]",
@@ -188,8 +202,8 @@ export const countFrameSamples = (listing: string): number =>
     .reduce((total, line) => total + Number(line.split(",")[3]?.trim() ?? Number.NaN), 0);
 
 /**
- * ffprobe arguments that print the container format and the first audio stream's declared length
- * (`duration_ts` in `time_base` units) of a source file.
+ * ffprobe arguments that print the container format and the first audio stream's sample rate and
+ * declared length (`duration_ts` in `time_base` units) of a source file.
  */
 export const sourceProbeArgs = (path: string): ReadonlyArray<string> => [
   "-v",
@@ -197,7 +211,7 @@ export const sourceProbeArgs = (path: string): ReadonlyArray<string> => [
   "-select_streams",
   "a:0",
   "-show_entries",
-  "stream=duration_ts,time_base:format=format_name",
+  "stream=duration_ts,time_base,sample_rate:format=format_name",
   "-of",
   "json",
   path,
