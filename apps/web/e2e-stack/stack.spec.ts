@@ -291,9 +291,17 @@ test("the song menu's Q, Shift+Enter, and L keys do what the menu shows", async 
   await signIn(page);
   await openFirstAlbum(page);
 
-  const row = page.locator("main [role=row]").nth(3);
-  const title = (await row.locator("[role=cell]").nth(1).textContent())?.trim() ?? "";
-  const menu = row.getByRole("button", { name: `More actions for ${title}` });
+  // The first song row (any library has one); its menu button names the song.
+  const row = page
+    .locator("main [role=row]")
+    .filter({ has: page.getByRole("button", { name: /^More actions for / }) })
+    .first();
+
+  const menu = row.getByRole("button", { name: /^More actions for / });
+  await row.hover();
+  const label = (await menu.getAttribute("aria-label")) ?? "";
+  const title = label.replace(/^More actions for /, "");
+  expect(title.length).toBeGreaterThan(0);
 
   // Keys reach the menu once it has focus, as after any click.
   const openMenu = async (): Promise<void> => {
