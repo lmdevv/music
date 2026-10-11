@@ -6,7 +6,8 @@
  *
  * One pump appends at a time, in song order: the current song, then the preloaded one. It reads
  * each response as it streams, stays at most `AHEAD_SECONDS` ahead of the playhead (the HTTP
- * stream waits meanwhile), and evicts what lies more than `BEHIND_SECONDS` behind it. Seeking
+ * stream waits meanwhile; less when the browser's buffer quota runs out first, as Firefox's does
+ * for hi-res FLAC), and evicts what lies more than `BEHIND_SECONDS` behind it. Seeking
  * outside the buffer drops everything and restarts the song from the fragment the `sidx` points
  * at with a range request.
  *
@@ -36,6 +37,12 @@ const BEHIND_SECONDS = 30;
 
 /** Evict only when at least this much can go, so removals stay rare. */
 const EVICT_MIN_SECONDS = 5;
+
+/**
+ * Largest single append. Browsers hand `fetch` chunks of any size (WebKit delivers megabytes at
+ * once), and one append larger than the buffer quota could never succeed.
+ */
+const MAX_APPEND_BYTES = 1024 * 1024;
 
 /** The pump re-checks the playhead at least this often while it waits. */
 const IDLE_MS = 250;
@@ -89,6 +96,8 @@ interface Session {
   configuredFor: Song | null;
   /** A removal from this time to the end, which the pump runs before its next append. */
   removeFrom: number | null;
+  /** Seconds to buffer ahead; lowered when the browser's buffer quota runs out first. */
+  aheadLimit: number;
   cancelled: boolean;
   wake: () => void;
 }
@@ -349,6 +358,7 @@ export class MseEngine implements PlayerEngine {
       codec: null,
       configuredFor: null,
       removeFrom: null,
+      aheadLimit: AHEAD_SECONDS,
       cancelled: false,
       wake: () => undefined,
     };
@@ -615,25 +625,29 @@ export class MseEngine implements PlayerEngine {
     }
 
     await new Promise<void>((resolve, reject) => {
-      const onEnd = (): void => {
+      const settle = (failure: Error | null): void => {
+        buffer.removeEventListener("updateend", onEnd);
         buffer.removeEventListener("error", onError);
-        resolve();
+
+        if (failure === null) resolve();
+        else reject(failure);
+      };
+
+      const onEnd = (): void => {
+        settle(null);
       };
 
       const onError = (): void => {
-        buffer.removeEventListener("updateend", onEnd);
-        reject(new EngineFailure("decode", "The browser could not decode the stream"));
+        settle(new EngineFailure("decode", "The browser could not decode the stream"));
       };
 
-      buffer.addEventListener("updateend", onEnd, { once: true });
-      buffer.addEventListener("error", onError, { once: true });
+      buffer.addEventListener("updateend", onEnd);
+      buffer.addEventListener("error", onError);
 
       try {
         operation(buffer);
       } catch (error) {
-        buffer.removeEventListener("updateend", onEnd);
-        buffer.removeEventListener("error", onError);
-        reject(error instanceof Error ? error : new Error(String(error)));
+        settle(error instanceof Error ? error : new Error(String(error)));
       }
     });
   }
@@ -708,7 +722,7 @@ export class MseEngine implements PlayerEngine {
       return;
     }
 
-    if (this.#aheadOfPlayhead() > AHEAD_SECONDS) {
+    if (this.#aheadOfPlayhead() > session.aheadLimit) {
       await this.#idle(session);
 
       return;
@@ -898,8 +912,17 @@ export class MseEngine implements PlayerEngine {
     // Bytes after the last indexed fragment (ffmpeg's `mfra`) are not media.
     const last = song.header?.index?.fragments.at(-1);
     const mediaEnd = last === undefined ? Infinity : last.offset + last.size;
-    const media = piece.bytes.subarray(0, Math.max(0, mediaEnd - piece.offset));
-    const finished = piece.offset + piece.bytes.length >= mediaEnd;
+    const usable = piece.bytes.subarray(0, Math.max(0, mediaEnd - piece.offset));
+    const media = usable.subarray(0, MAX_APPEND_BYTES);
+
+    if (usable.length > media.length) {
+      song.pending = {
+        offset: piece.offset + media.length,
+        bytes: usable.subarray(media.length),
+      };
+    }
+
+    const finished = song.pending === null && piece.offset + piece.bytes.length >= mediaEnd;
 
     if (finished && song.reader !== null) {
       // Only ffmpeg's trailing index is left; close the response.
@@ -915,8 +938,16 @@ export class MseEngine implements PlayerEngine {
         song.appended = true;
       } catch (error) {
         if (!(error instanceof DOMException && error.name === "QuotaExceededError")) throw error;
-        // The buffer is full: free what lies behind the playhead and try again later.
-        song.pending = { offset: piece.offset, bytes: media };
+
+        // Nothing to play out and evict: the stream can never fit.
+        if (this.#aheadOfPlayhead() < 1) {
+          throw new EngineFailure("decode", "The browser's buffer cannot hold the stream");
+        }
+
+        // The buffer is full: free what lies behind the playhead, and buffer less far ahead from
+        // now on so the pump waits for the playhead instead of retrying.
+        song.pending = { offset: piece.offset, bytes: usable };
+        session.aheadLimit = Math.max(EVICT_MIN_SECONDS, this.#aheadOfPlayhead() - 2);
         await this.#evictBehind(session, EVICT_MIN_SECONDS);
         await this.#idle(session);
 

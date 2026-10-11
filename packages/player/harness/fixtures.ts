@@ -122,14 +122,40 @@ const gaplessEncoders: Readonly<Record<GaplessSource, ReadonlyArray<string>>> = 
   m4a: ["-c:a", "aac", "-b:a", "192k"],
 };
 
-/** Decoded length of the first audio stream of `path`, in samples, from ffmpeg's frame list. */
-const decodedSamples = (path: string): number =>
-  execFileSync("ffmpeg", ["-v", "error", "-i", path, "-map", "0:a:0", "-f", "framecrc", "-"], {
-    encoding: "utf8",
-  })
+/**
+ * Real length of the first audio stream of `path`, in samples: ffmpeg's decoded frame count, or
+ * for an `.m4a` its edit list length (ffmpeg 6 decodes AAC in MP4 with its end padding).
+ */
+const realSamples = (path: string): number => {
+  if (path.endsWith(".m4a")) {
+    return Number(
+      execFileSync(
+        "ffprobe",
+        [
+          "-v",
+          "error",
+          "-select_streams",
+          "a:0",
+          "-show_entries",
+          "stream=duration_ts",
+          "-of",
+          "csv=p=0",
+          path,
+        ],
+        { encoding: "utf8" },
+      ).trim(),
+    );
+  }
+
+  return execFileSync(
+    "ffmpeg",
+    ["-v", "error", "-i", path, "-map", "0:a:0", "-f", "framecrc", "-"],
+    { encoding: "utf8" },
+  )
     .split("\n")
     .filter((line) => line.length > 0 && !line.startsWith("#"))
     .reduce((total, line) => total + Number(line.split(",")[3]), 0);
+};
 
 /**
  * Cuts one continuous sine into three parts per source codec. Each part must decode to exactly
@@ -162,7 +188,7 @@ const generateGapless = (): void => {
         target,
       ]);
 
-      const length = decodedSamples(target);
+      const length = realSamples(target);
 
       if (length !== end - start) {
         rmSync(target);
@@ -173,10 +199,43 @@ const generateGapless = (): void => {
   }
 };
 
+/**
+ * One minute of 24-bit 96 kHz stereo noise, which FLAC cannot compress (about 4.6 Mbit/s): more
+ * than the buffer quota of some browsers holds in the engine's look-ahead.
+ */
+export const HIRES_FIXTURE = "hires-noise.flac";
+
+const generateHires = (): void => {
+  const target = join(fixturesDir, HIRES_FIXTURE);
+
+  if (existsSync(target)) return;
+
+  execFileSync("ffmpeg", [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-f",
+    "lavfi",
+    "-i",
+    "anoisesrc=color=white:amplitude=0.3:sample_rate=96000:duration=60",
+    "-ac",
+    "2",
+    "-c:a",
+    "flac",
+    "-sample_fmt",
+    "s32",
+    "-bits_per_raw_sample",
+    "24",
+    target,
+  ]);
+};
+
 /** Writes every fixture that does not exist yet. Needs `ffmpeg` on PATH. */
 export const generateFixtures = (): void => {
   mkdirSync(fixturesDir, { recursive: true });
   generateGapless();
+  generateHires();
 
   for (const fixture of [...engineFixtures, ...sessionFixtures]) {
     const target = join(fixturesDir, fixture.file);

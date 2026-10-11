@@ -32,6 +32,7 @@ import {
   fragmentedArgs,
   isFragmentedProfile,
   runTool,
+  sourceProbeArgs,
   timelineProbeArgs,
   transcodeArgs,
   type FragmentedProfile,
@@ -40,7 +41,7 @@ import {
 } from "./ffmpeg.ts";
 import * as Files from "./files.ts";
 import { MediaConfig } from "./media-config.ts";
-import { measureTiming, SampleTiming } from "./sample-timing.ts";
+import { declaredLength, measureTiming, SampleTiming } from "./sample-timing.ts";
 
 const MAX_CONCURRENT_TRANSCODES = 2;
 
@@ -59,6 +60,18 @@ const TimelineProbe = Schema.Struct({
 });
 
 const decodeTimelineProbe = Schema.decodeEffect(Schema.fromJsonString(TimelineProbe));
+
+const SourceProbe = Schema.Struct({
+  streams: Schema.Tuple([
+    Schema.Struct({
+      duration_ts: Schema.optionalKey(Schema.Finite),
+      time_base: Schema.String,
+    }),
+  ]),
+  format: Schema.Struct({ format_name: Schema.String }),
+});
+
+const decodeSourceProbe = Schema.decodeEffect(Schema.fromJsonString(SourceProbe));
 
 const SidecarJson = Schema.fromJsonString(SampleTiming);
 
@@ -219,16 +232,28 @@ const make = Effect.gen(function* () {
     );
 
     const probed = yield* runTool(config.ffprobePath, timelineProbeArgs(temporary));
+    const sourceProbed = yield* runTool(config.ffprobePath, sourceProbeArgs(input.source));
 
     const {
       streams: [stream],
     } = yield* decodeTimelineProbe(probed.stdout);
+
+    const {
+      streams: [sourceStream],
+      format,
+    } = yield* decodeSourceProbe(sourceProbed.stdout);
 
     const timing = measureTiming(
       stream.duration_ts,
       countFrameSamples(encoded.stdout),
       profile === "fmp4-aac" ? AAC_TAIL_PADDING : 0,
       stream.sample_rate,
+      declaredLength(
+        format.format_name,
+        sourceStream.duration_ts,
+        sourceStream.time_base,
+        stream.sample_rate,
+      ),
     );
 
     if (Option.isNone(timing)) return yield* Effect.fail("timing" as const);

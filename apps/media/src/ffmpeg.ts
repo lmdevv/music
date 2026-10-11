@@ -187,6 +187,22 @@ export const countFrameSamples = (listing: string): number =>
     .filter((line) => line.length > 0 && !line.startsWith("#"))
     .reduce((total, line) => total + Number(line.split(",")[3]?.trim() ?? Number.NaN), 0);
 
+/**
+ * ffprobe arguments that print the container format and the first audio stream's declared length
+ * (`duration_ts` in `time_base` units) of a source file.
+ */
+export const sourceProbeArgs = (path: string): ReadonlyArray<string> => [
+  "-v",
+  "error",
+  "-select_streams",
+  "a:0",
+  "-show_entries",
+  "stream=duration_ts,time_base:format=format_name",
+  "-of",
+  "json",
+  path,
+];
+
 /** ffprobe arguments that print the first audio stream's timeline length and sample rate. */
 export const timelineProbeArgs = (path: string): ReadonlyArray<string> => [
   "-v",

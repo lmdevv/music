@@ -5,7 +5,7 @@ import { Effect, Layer, Option } from "effect";
 
 import { AAC_TAIL_PADDING, countFrameSamples } from "./ffmpeg.ts";
 import * as Files from "./files.ts";
-import { measureTiming } from "./sample-timing.ts";
+import { declaredLength, measureTiming } from "./sample-timing.ts";
 import { MEDIA_TEST_TIMEOUT, temporaryDirectory, testConfig } from "./testing/fixtures.ts";
 import { runScoped } from "./testing/run.ts";
 import { decodeMono, sineSegment } from "./testing/sine.ts";
@@ -110,14 +110,15 @@ describe("gapless transcodes", { timeout: MEDIA_TEST_TIMEOUT }, () => {
 
           // After skipping the priming, the decoded output lines up with the decoded source
           // sample for sample.
-          const expected = yield* decodeMono(source, scratch);
+          // ffmpeg 6 decodes an AAC .m4a with its end padding; only the real samples count.
+          const expected = (yield* decodeMono(source, scratch)).subarray(0, LENGTH);
           const decoded = yield* decodeMono(output.path, scratch);
 
           expect(expected.length).toBe(LENGTH);
 
           if (profile === "fmp4-flac") {
             expect(rmsAt(decoded, expected, priming)).toBeLessThan(1e-6);
-            expect(decoded.length).toBe(LENGTH);
+            expect(decoded.length).toBeGreaterThanOrEqual(LENGTH);
           } else {
             expect(bestOffset(decoded, expected, priming, 48)).toBe(priming);
             expect(rmsAt(decoded, expected, priming)).toBeLessThan(0.01);
@@ -181,7 +182,7 @@ describe("measureTiming", () => {
         fc.constantFrom(0, AAC_TAIL_PADDING),
         fc.constantFrom(44_100, 48_000, 96_000),
         (priming, real, tail, rate) => {
-          expect(measureTiming(priming + real + tail, real, tail, rate)).toEqual(
+          expect(measureTiming(priming + real + tail, real, tail, rate, null)).toEqual(
             Option.some({ primingSamples: priming, durationSamples: real, sampleRate: rate }),
           );
         },
@@ -189,11 +190,42 @@ describe("measureTiming", () => {
     );
   });
 
+  it("cuts decoded end padding at a shorter declared length, keeping the priming", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 10_000_000 }),
+        fc.integer({ min: 1, max: 1023 }),
+        (real, padding) => {
+          expect(
+            measureTiming(1024 + real + padding + 2048, real + padding, 2048, 48_000, real),
+          ).toEqual(
+            Option.some({ primingSamples: 1024, durationSamples: real, sampleRate: 48_000 }),
+          );
+          // A longer declared length (an estimate) never extends the decoded audio.
+          expect(measureTiming(real, real, 0, 48_000, real + padding)).toEqual(
+            Option.some({ primingSamples: 0, durationSamples: real, sampleRate: 48_000 }),
+          );
+        },
+      ),
+    );
+  });
+
   it("rejects numbers that do not add up", () => {
-    expect(measureTiming(1000, 2000, 0, 48_000)).toEqual(Option.none());
-    expect(measureTiming(100_000, 0, 0, 48_000)).toEqual(Option.none());
-    expect(measureTiming(100_000, 1000, 0, 48_000)).toEqual(Option.none());
-    expect(measureTiming(5000, 1000, 0, 0)).toEqual(Option.none());
-    expect(measureTiming(5000, Number.NaN, 0, 48_000)).toEqual(Option.none());
+    expect(measureTiming(1000, 2000, 0, 48_000, null)).toEqual(Option.none());
+    expect(measureTiming(100_000, 0, 0, 48_000, null)).toEqual(Option.none());
+    expect(measureTiming(100_000, 1000, 0, 48_000, null)).toEqual(Option.none());
+    expect(measureTiming(5000, 1000, 0, 0, null)).toEqual(Option.none());
+    expect(measureTiming(5000, Number.NaN, 0, 48_000, null)).toEqual(Option.none());
+  });
+});
+
+describe("declaredLength", () => {
+  it("trusts MP4 and MOV lengths only, converted to output samples", () => {
+    expect(declaredLength("mov,mp4,m4a,3gp,3g2,mj2", 156_336, "1/48000", 48_000)).toBe(156_336);
+    expect(declaredLength("mov,mp4,m4a,3gp,3g2,mj2", 88_200, "1/44100", 48_000)).toBe(96_000);
+    expect(declaredLength("mp3", 46_400_256, "1/14112000", 48_000)).toBeNull();
+    expect(declaredLength("flac", 156_336, "1/48000", 48_000)).toBeNull();
+    expect(declaredLength("mov,mp4,m4a,3gp,3g2,mj2", undefined, "1/48000", 48_000)).toBeNull();
+    expect(declaredLength("mov,mp4,m4a,3gp,3g2,mj2", 10, "1/0", 48_000)).toBeNull();
   });
 });

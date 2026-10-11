@@ -8,7 +8,13 @@ import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { mediaPort } from "../harness/config.ts";
-import { GAPLESS_CUTS, GAPLESS_FREQUENCY, GAPLESS_RATE, gaplessFile } from "../harness/fixtures.ts";
+import {
+  GAPLESS_CUTS,
+  GAPLESS_FREQUENCY,
+  GAPLESS_RATE,
+  gaplessFile,
+  HIRES_FIXTURE,
+} from "../harness/fixtures.ts";
 import type { GaplessSource } from "../harness/fixtures.ts";
 import type { TimedEvent } from "../harness/globals";
 import type { GapAnalysis } from "../src/testing/gap-analysis";
@@ -259,6 +265,26 @@ test.describe("MseEngine", () => {
 
       expect(gap?.soundMs ?? 0).toBeGreaterThan(1000);
     }
+  });
+
+  test("keeps playing a hi-res stream larger than the buffer quota", async ({ page }) => {
+    await page.evaluate(
+      (file) => window.harness?.load(file, 0, true),
+      `${HIRES_FIXTURE}?p=fmp4-flac`,
+    );
+    await waitForEvent(page, "playing");
+    const started = (await ofType(page, "waiting")).length;
+
+    // Long enough for the look-ahead to fill the quota (Firefox stops near 14 MB, ~24 s ahead).
+    await expect.poll(() => lastPosition(page), { timeout: 20_000 }).toBeGreaterThan(12_000);
+    expect((await ofType(page, "waiting")).length).toBe(started);
+
+    await page.evaluate(() => {
+      window.harness?.engine.seek(50_000);
+    });
+
+    await expect.poll(() => lastPosition(page), { timeout: 10_000 }).toBeGreaterThan(51_000);
+    expect(await ofType(page, "error")).toEqual([]);
   });
 
   test("ends without advancing when the preload is cleared", async ({ page }) => {
