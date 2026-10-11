@@ -240,3 +240,28 @@ test("home and artists show each artist's art", async ({ page }) => {
   await expect(artists.first()).toBeVisible();
   await expect(page.locator("main a[href^='/artists/'] img")).toHaveCount(await artists.count());
 });
+
+test("a phone shows where the music plays while another device plays it", async ({
+  page,
+  browser,
+}) => {
+  await signIn(page);
+  await openFirstAlbum(page);
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await expectAudioPast(page, 1);
+
+  const other = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const phone = await other.newPage();
+
+  await signIn(phone);
+
+  const mini = phone.getByRole("button", { name: /Open Now Playing: .+, playing on / });
+
+  await expect(mini).toBeVisible();
+  await expect(mini.getByText(/^Playing on /)).toBeVisible();
+  expect(await isPlayingAudio(phone)).toBe(false);
+
+  await mini.click();
+  await expect(phone.getByRole("status").filter({ hasText: /^Playing on / })).toBeVisible();
+  await other.close();
+});
