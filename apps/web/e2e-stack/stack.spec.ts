@@ -164,3 +164,51 @@ test("a numeric search and the Add folder dialog keep their screens", async ({ p
   await expect(page).toHaveURL(/add=1/);
   await expect(page.getByLabel("Library folder")).toBeVisible();
 });
+
+test("playlists: create with N, add from a song's menu, remove, rename, and delete", async ({
+  page,
+}) => {
+  await signIn(page);
+  await openFirstAlbum(page);
+
+  // The name field has focus when the dialog opens, so typing and Enter create the playlist.
+  await page.keyboard.press("n");
+  await expect(page.getByRole("dialog", { name: "New playlist" })).toBeVisible();
+  await page.keyboard.type("Road trip");
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/playlists\/[^/]+$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Road trip" })).toBeVisible();
+
+  await page.goBack();
+  const row = page.locator("main [role=row]").nth(1);
+  const title = (await row.locator("[role=cell]").nth(1).textContent())?.trim() ?? "";
+  await row.hover();
+  await row.getByRole("button", { name: `More actions for ${title}` }).click();
+  await page.getByRole("menuitem", { name: "Add to playlist" }).click();
+  await page.getByRole("menuitem", { name: "Road trip" }).click();
+  await expect(page.getByText("Added to Road trip")).toBeVisible();
+
+  await page
+    .getByRole("navigation", { name: "Library" })
+    .getByRole("link", { name: /Road trip/ })
+    .click();
+  const added = page.locator("main [role=row]").filter({ hasText: title });
+  await expect(added).toBeVisible();
+  await added.hover();
+  await added.getByRole("button", { name: `More actions for ${title}` }).click();
+  await page.getByRole("menuitem", { name: "Remove from this playlist" }).click();
+  await expect(page.getByText("Let's find something for this playlist")).toBeVisible();
+
+  await page.getByRole("button", { name: "More actions for Road trip" }).click();
+  await page.getByRole("menuitem", { name: "Rename…" }).click();
+  await page.getByLabel("Name", { exact: true }).fill("Night drive");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { level: 1, name: "Night drive" })).toBeVisible();
+
+  await page.getByRole("button", { name: "More actions for Night drive" }).click();
+  await page.getByRole("menuitem", { name: "Delete playlist…" }).click();
+  await page.getByRole("button", { name: "Delete playlist" }).click();
+  await expect(page).toHaveURL(/\/playlists$/);
+  await expect(page.getByText("Deleted Night drive")).toBeVisible();
+  await expect(page.getByRole("link", { name: /Night drive/ })).toHaveCount(0);
+});
