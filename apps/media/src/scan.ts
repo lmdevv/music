@@ -143,7 +143,11 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
           .toSorted((a, b) => folderArtRank(a) - folderArtRank(b));
 
         if (best === undefined) return undefined;
-        const bytes = yield* Files.readWholeFile(join(directory, best));
+        const inside = yield* Files.resolveWithin(library.path, join(directory, best));
+
+        // A cover that links out of the library would publish an outside file as artwork.
+        if (Option.isNone(inside)) return undefined;
+        const bytes = yield* Files.readWholeFile(inside.value);
 
         return yield* saveArt(dataDir, bytes);
       }),

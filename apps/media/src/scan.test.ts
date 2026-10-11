@@ -181,6 +181,38 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       }),
     ));
 
+  it("follows symlinks that stay inside the library and skips ones that leave it", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root, control, scan, trackAt } = yield* setup;
+        const outside = yield* temporaryDirectory("outside");
+        const dawn = "Aurora Tones/First Light/01 Dawn.flac";
+        const folderArt = join(root, "The Sine Waves", "Folder Art");
+
+        yield* Files.copyTree(join(root, dawn), join(outside, "secret.flac"));
+        yield* Files.copyTree(join(folderArt, "cover.jpg"), join(outside, "cover.jpg"));
+        yield* Files.makeSymlink(join(outside, "secret.flac"), join(root, "escape.flac"));
+        yield* Files.makeSymlink(outside, join(root, "Elsewhere"));
+        yield* Files.makeSymlink(root, join(root, "Loop"));
+        yield* Files.makeSymlink(join(root, dawn), join(root, "inside.flac"));
+
+        // A folder whose only artwork is a link to an image outside the library.
+        yield* Files.makeDirectory(join(root, "Bare"));
+        yield* Files.copyTree(join(folderArt, "01 Brushes.m4a"), join(root, "Bare", "song.m4a"));
+        yield* Files.makeSymlink(join(outside, "cover.jpg"), join(root, "Bare", "cover.jpg"));
+
+        expect(yield* scan).toEqual({ files: 12, updated: 12, missing: 0, failed: 0 });
+
+        const paths = (yield* control.tracks).map((track) => track.scanned.path);
+
+        expect(paths).toContain("inside.flac");
+        expect(paths).not.toContain("escape.flac");
+        expect(paths).not.toContain("Elsewhere/secret.flac");
+        expect(paths.filter((path) => path.startsWith("Loop/"))).toEqual([]);
+        expect((yield* trackAt("Bare/song.m4a"))?.scanned.artHash).toBeUndefined();
+      }),
+    ));
+
   it("fails with LibraryUnavailable when the folder is missing", () =>
     runScoped(
       Effect.gen(function* () {

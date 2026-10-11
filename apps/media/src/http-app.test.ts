@@ -349,6 +349,24 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       }),
     ));
 
+  it("refuses to serve a catalogued file that became a symlink out of the library", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root, trackId, request } = yield* setup;
+        const outside = yield* temporaryDirectory("outside");
+        const secret = join(outside, "secret.mp3");
+        const original = yield* streamUrl(trackId(NEON), "original");
+        const transcoded = yield* streamUrl(trackId(NEON), "aac-128");
+
+        yield* Files.copyTree(join(root, NEON), secret);
+        yield* Files.removePath(join(root, NEON));
+        yield* Files.makeSymlink(secret, join(root, NEON));
+
+        expect((yield* request(original)).status).toBe(404);
+        expect((yield* request(transcoded)).status).toBe(404);
+      }),
+    ));
+
   it("serves signed artwork as immutable", () =>
     runScoped(
       Effect.gen(function* () {
