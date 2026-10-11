@@ -45,12 +45,16 @@ interface Mutation {
   readonly args: unknown;
 }
 
-/** An engine that reports `playing` and `paused` as soon as it is told to play or pause. */
-const instantEngine = (): PlayerEngine => {
+/**
+ * An engine that reports `playing` and `paused` as soon as it is told to play or pause. `emit`
+ * stands in for pauses the browser or the OS cause on their own.
+ */
+const instantEngine = (): PlayerEngine & { readonly emit: (event: EngineEvent) => void } => {
   const listeners = new Set<(event: EngineEvent) => void>();
   const emit = (event: EngineEvent): void => listeners.forEach((listener) => listener(event));
 
   return {
+    emit,
     load: async (_source, _startMs, autoplay) => {
       if (autoplay) emit({ type: "playing" });
     },
@@ -86,6 +90,27 @@ const recordingTransport = (mutations: Array<Mutation>): CommandTransport => ({
 const reports = (mutations: ReadonlyArray<Mutation>): ReadonlyArray<unknown> =>
   mutations.flatMap(({ name, args }) => (name === "playback.report" ? [args] : []));
 
+/** A controller on a recording transport and an instant engine, started. */
+const setup = () => {
+  const mutations: Array<Mutation> = [];
+  const engine = instantEngine();
+
+  const controller = new PlaybackController(
+    makeMusicClient(recordingTransport(mutations)),
+    { mse: null, create: () => engine },
+    {
+      deviceId,
+      device: { name: "Test", kind: "web" },
+      canPlay: () => true,
+      now: () => 1000,
+      quality: "high",
+      saveQuality: () => {},
+    },
+  );
+
+  return { controller, engine, mutations, stop: controller.start() };
+};
+
 describe("PlaybackController", () => {
   beforeEach(() => {
     vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "visible" }));
@@ -96,22 +121,7 @@ describe("PlaybackController", () => {
   });
 
   it("does not report a pause that a session snapshot ordered", async () => {
-    const mutations: Array<Mutation> = [];
-
-    const controller = new PlaybackController(
-      makeMusicClient(recordingTransport(mutations)),
-      { mse: null, create: instantEngine },
-      {
-        deviceId,
-        device: { name: "Test", kind: "web" },
-        canPlay: () => true,
-        now: () => 1000,
-        quality: "high",
-        saveQuality: () => {},
-      },
-    );
-
-    const stop = controller.start();
+    const { controller, mutations, stop } = setup();
     controller.sync(session(true, 1));
     await vi.waitFor(() => expect(controller.getSnapshot().engineStatus).toBe("playing"));
     const before = reports(mutations).length;
@@ -122,6 +132,19 @@ describe("PlaybackController", () => {
     expect(controller.getSnapshot().engineStatus).toBe("paused");
     await Promise.resolve();
     expect(reports(mutations).slice(before)).toStrictEqual([]);
+    stop();
+  });
+
+  it("reports a pause the browser causes before the server confirms a Play", async () => {
+    const { controller, engine, mutations, stop } = setup();
+    controller.sync(session(false, 1));
+    await controller.togglePlay();
+    expect(controller.getSnapshot().engineStatus).toBe("playing");
+
+    // The session still says paused: the snapshot with the Play has not arrived yet.
+    engine.emit({ type: "paused" });
+
+    await vi.waitFor(() => expect(reports(mutations).at(-1)).toMatchObject({ playing: false }));
     stop();
   });
 });
