@@ -1,5 +1,6 @@
-import { Navigate, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 
+import { Redirect } from "@/components/redirect";
 import { SettingsNav } from "@/components/settings/settings-nav";
 import { useIsDesktop } from "@/lib/use-media";
 
@@ -9,7 +10,7 @@ export const Route = createFileRoute("/_app/settings/")({ component: SettingsInd
 function SettingsIndex() {
   const desktop = useIsDesktop();
 
-  if (desktop) return <Navigate to="/settings/account" replace />;
+  if (desktop) return <Redirect href="/settings/account" />;
 
   return <SettingsNav />;
 }

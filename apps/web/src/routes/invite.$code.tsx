@@ -1,9 +1,10 @@
 import { useAuthActions } from "@convex-dev/auth/react";
+import { Redirect } from "@/components/redirect";
 import { inviteLookup } from "@music/sdk/functions";
 import type { InviteDetails } from "@music/sdk/functions";
 import { Button, buttonClassName } from "@music/ui/components/button";
 import { FieldHint, FieldLabel, Input } from "@music/ui/components/input";
-import { Link, Navigate, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { useConvexAuth, useQuery } from "convex/react";
 import { useState } from "react";
 import type { FormEvent } from "react";
@@ -26,7 +27,7 @@ function InvitePage() {
 
   if (lookup === undefined || isLoading) return <div className="min-h-dvh bg-bg" />;
 
-  if (isAuthenticated) return <Navigate to="/" />;
+  if (isAuthenticated) return <Redirect href="/" />;
 
   if (lookup.state === "open" || joining) {
     return lookup.state === "invalid" ? (

@@ -1,8 +1,9 @@
 import { useAuthActions } from "@convex-dev/auth/react";
+import { Redirect } from "@/components/redirect";
 import { setupStatus } from "@music/sdk/functions";
 import { Button } from "@music/ui/components/button";
 import { FieldHint, FieldLabel, Input } from "@music/ui/components/input";
-import { Navigate, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useConvexAuth, useQuery } from "convex/react";
 import { Schema } from "effect";
 import { useState } from "react";
@@ -30,9 +31,9 @@ function SignInPage() {
 
   if (status === undefined || isLoading) return <div className="min-h-dvh bg-bg" />;
 
-  if (!status.hasUsers) return <Navigate to="/setup" />;
+  if (!status.hasUsers) return <Redirect href="/setup" />;
 
-  if (isAuthenticated) return <Navigate to={safeRedirect(redirect)} />;
+  if (isAuthenticated) return <Redirect href={safeRedirect(redirect)} />;
 
   return <SignInForm />;
 }

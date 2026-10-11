@@ -337,7 +337,7 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
   const deferred = useDeferredValue(query.trim());
   const search = useRead("search", deferred.length === 0 ? "skip" : { query: deferred, limit: 6 });
   const [lastSearch, setLastSearch] = useState(search);
-  const [active, setActive] = useState(0);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [detail, setDetail] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -545,12 +545,28 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
     return [...library, ...matched];
   }, [deferred, player.track, playlists, home, actions, lastSearch]);
 
+  const searching = deferred.length > 0 && search === undefined;
+
   useEffect(() => {
-    setActive(0);
+    setActiveId(null);
     setDetail(false);
   }, [deferred]);
 
-  const current = items[Math.min(active, Math.max(0, items.length - 1))];
+  // Once results for the query settle, the selection follows its item, so results arriving later
+  // never move what Enter runs.
+  useEffect(() => {
+    const [first] = items;
+
+    if (activeId === null && !searching && first !== undefined) setActiveId(first.id);
+  }, [activeId, items, searching]);
+
+  const active = Math.max(
+    0,
+    items.findIndex((item) => item.id === activeId),
+  );
+
+  const current = items[active];
+  const select = (index: number) => setActiveId(items[index]?.id ?? null);
 
   useEffect(() => {
     list.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
@@ -561,17 +577,16 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setActive((index) => Math.min(index + 1, items.length - 1));
+      select(Math.min(active + 1, items.length - 1));
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      setActive((index) => Math.max(index - 1, 0));
+      select(Math.max(active - 1, 0));
     } else if (event.key === "Enter" && !event.nativeEvent.isComposing) {
       event.preventDefault();
       runPrimary?.();
     }
   };
 
-  const searching = deferred.length > 0 && search === undefined;
   const empty = items.length === 0 && !searching;
 
   return (
@@ -633,9 +648,9 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
                 header={
                   index === 0 || items[index - 1]?.section !== item.section ? item.section : null
                 }
-                onHover={() => setActive(index)}
+                onHover={() => select(index)}
                 onSelect={() => {
-                  setActive(index);
+                  select(index);
 
                   if (item.kind === "command" && item.fields.length > 0) setDetail(true);
                   else if (item.kind === "now") setDetail(true);
@@ -1312,7 +1327,9 @@ function CommandPreview({
   const convex = useConvex();
   const client = useMemo(() => makeMusicClient(convex), [convex]);
   const navigate = useNavigate();
-  const [values, setValues] = useState<FormValues>(defaults);
+  // Only fields the person changed are kept; the rest follow live defaults such as the current song.
+  const [edits, setEdits] = useState<FormValues>({});
+  const values: FormValues = { ...defaults, ...edits };
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -1393,7 +1410,7 @@ function CommandPreview({
             fields={fields}
             values={values}
             context={context}
-            onChange={(field, value) => setValues((current) => ({ ...current, [field]: value }))}
+            onChange={(field, value) => setEdits((current) => ({ ...current, [field]: value }))}
           />
           <button type="submit" hidden />
         </form>

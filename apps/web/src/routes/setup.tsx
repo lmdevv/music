@@ -1,4 +1,5 @@
 import { useAuthActions } from "@convex-dev/auth/react";
+import { Redirect } from "@/components/redirect";
 import { JobId } from "@music/commands/ids";
 import type { Job } from "@music/commands/models";
 import { setupStatus } from "@music/sdk/functions";
@@ -6,7 +7,7 @@ import { useRead, useRun } from "@music/sdk/react";
 import { Button } from "@music/ui/components/button";
 import { Chip } from "@music/ui/components/chip";
 import { FieldHint, FieldLabel, Input } from "@music/ui/components/input";
-import { Navigate, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useConvexAuth, useQuery } from "convex/react";
 import { Schema } from "effect";
 import { CheckIcon, FolderIcon } from "lucide-react";
@@ -46,13 +47,13 @@ function SetupPage() {
 
   if (!status.hasUsers || creating) return <CreateAdminStep onCreating={setCreating} />;
 
-  if (!isAuthenticated) return <Navigate to="/sign-in" />;
+  if (!isAuthenticated) return <Redirect href="/sign-in" />;
 
   if (search.step === "scan" && search.jobId !== undefined) {
     return <ScanStep jobId={search.jobId} />;
   }
 
-  if (search.step === undefined && status.hasLibraries) return <Navigate to="/" />;
+  if (search.step === undefined && status.hasLibraries) return <Redirect href="/" />;
 
   return <LibraryStep />;
 }
