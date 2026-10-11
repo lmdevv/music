@@ -85,7 +85,11 @@ test("an album plays real audio, pauses, and skips", async ({ page }) => {
 test("Ctrl+N and Ctrl+P move through the command menu", async ({ page }) => {
   await signIn(page);
   await page.keyboard.press("ControlOrMeta+k");
-  const options = page.getByRole("dialog", { name: "Command menu" }).getByRole("option");
+  const menu = page.getByRole("dialog", { name: "Command menu" });
+  // With no query, a "Now playing" row can arrive after the first row was selected, and the
+  // selection stays put. A query selects its first result once the search settles.
+  await menu.getByRole("combobox").fill("queue");
+  const options = menu.getByRole("option");
   await expect(options.first()).toHaveAttribute("aria-selected", "true");
 
   await page.keyboard.press("Control+n");
