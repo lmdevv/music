@@ -162,7 +162,7 @@ test("a numeric search and the Add folder dialog keep their screens", async ({ p
   await page.goto("/settings/libraries");
   await page.getByRole("button", { name: "Add folder" }).click();
   await expect(page).toHaveURL(/add=1/);
-  await expect(page.getByLabel("Library folder")).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Library folder" })).toBeFocused();
 });
 
 test("playlists: create with N, add from a song's menu, remove, rename, and delete", async ({
