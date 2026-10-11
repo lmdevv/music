@@ -359,10 +359,22 @@ export class PlaybackController {
     }
   }
 
+  /**
+   * Awaits a background call whose failure the user cannot act on. Heartbeats and reports repeat
+   * on their own timers, so a failed one is simply superseded by the next.
+   */
+  async #quietly(call: Promise<unknown>): Promise<void> {
+    try {
+      await call;
+    } catch {
+      // Superseded by the next heartbeat or report.
+    }
+  }
+
   async #heartbeat(): Promise<void> {
     const { name, kind } = this.#env.device;
 
-    await this.capture(
+    await this.#quietly(
       this.#client.run("devices.heartbeat", { deviceId: this.deviceId, name, kind }),
     );
   }
@@ -374,7 +386,7 @@ export class PlaybackController {
     const positionMs = Math.max(0, Math.round(this.#positionMs));
     this.#reportedMs = positionMs;
 
-    await this.capture(
+    await this.#quietly(
       this.#client.run("playback.report", {
         deviceId: this.deviceId,
         index: loaded.index,

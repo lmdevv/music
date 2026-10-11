@@ -42,6 +42,15 @@ const openDevice = async (browser: Browser, tracks: ReadonlyArray<string>): Prom
   return page;
 };
 
+/** Presses "Play all" and waits until this page is the active device and outputs audio. */
+const playAllHere = async (page: Page): Promise<void> => {
+  await page.getByRole("button", { name: "Play all" }).click();
+  await expect(field(page, "this-device")).toHaveText("true");
+  await expect(field(page, "track")).toHaveText("Song One");
+  await expect(field(page, "status")).toHaveText("playing");
+  await expect.poll(() => outputsAudio(page)).toBe(true);
+};
+
 const setMedia = async (state: "up" | "down"): Promise<void> => {
   await fetch(`http://127.0.0.1:${mediaPort}/control/${state}`, { method: "POST" });
 };
@@ -60,11 +69,7 @@ test("hands playback from one device to another near the same position", async (
   const a = await openDevice(browser, tracks);
   const b = await openDevice(browser, tracks);
 
-  await a.getByRole("button", { name: "Play all" }).click();
-  await expect(field(a, "this-device")).toHaveText("true");
-  await expect(field(a, "status")).toHaveText("playing");
-  await expect(field(a, "track")).toHaveText("Song One");
-  await expect.poll(() => outputsAudio(a)).toBe(true);
+  await playAllHere(a);
   await expect(field(b, "this-device")).toHaveText("false");
   await expect(field(b, "status")).toHaveText("playing");
 
@@ -121,8 +126,7 @@ test("asks for a tap when the browser blocks audio after a handoff", async ({ br
     .poll(async () => (await client.read("devices.list", {})).some((d) => d.id === deviceB))
     .toBe(true);
 
-  await a.getByRole("button", { name: "Play all" }).click();
-  await expect(field(a, "status")).toHaveText("playing");
+  await playAllHere(a);
   // The transfer comes from a third device (the server client, as the CLI would send it). In
   // headless Chromium a click in context A also grants user activation to context B, which no
   // real pair of devices would share.
@@ -153,11 +157,57 @@ test("asks for a tap when the browser blocks audio after a handoff", async ({ br
   await context.close();
 });
 
+test("preloads the next song, advances without reloading, and reports it", async ({ browser }) => {
+  const a = await openDevice(browser, tracks);
+  const client = await harnessClient();
+  const streamRequests: Array<{ readonly track: string; readonly at: number }> = [];
+
+  a.on("request", (request) => {
+    const match = /\/media\/stream\/([^?]+)/u.exec(request.url());
+
+    if (match?.[1] !== undefined) streamRequests.push({ track: match[1], at: Date.now() });
+  });
+
+  await playAllHere(a);
+  await a.evaluate(() => window.player?.seek(84_000));
+  await expect.poll(() => position(a)).toBeGreaterThan(83_000);
+  await expect(field(a, "track")).toHaveText("Song Two", { timeout: 15_000 });
+  const changedAt = Date.now();
+
+  await expect.poll(async () => (await client.read("playback.state", {})).index).toBe(1);
+
+  await expect(field(a, "status")).toHaveText("playing");
+  await expect.poll(() => outputsAudio(a)).toBe(true);
+
+  const second = streamRequests.find((request) => request.track === tracks[1]);
+
+  // The second song was fetched ahead of time, not after the first one ended.
+  expect(second).toBeDefined();
+  expect(changedAt - (second?.at ?? changedAt)).toBeGreaterThan(2000);
+  expect(await a.evaluate(() => window.audioElements?.size)).toBe(2);
+
+  await a.context().close();
+});
+
+test("repeat one restarts the song at its end", async ({ browser }) => {
+  const a = await openDevice(browser, tracks);
+
+  await playAllHere(a);
+  await a.evaluate(() => window.player?.setRepeat("one"));
+  await a.evaluate(() => window.player?.seek(87_000));
+  await expect.poll(() => position(a)).toBeGreaterThan(86_000);
+  await expect.poll(() => position(a), { timeout: 10_000 }).toBeLessThan(5000);
+  await expect(field(a, "track")).toHaveText("Song One");
+  await expect(field(a, "status")).toHaveText("playing");
+  await a.evaluate(() => window.player?.setRepeat("off"));
+
+  await a.context().close();
+});
+
 test("marks the media service offline and recovers when it returns", async ({ browser }) => {
   const a = await openDevice(browser, tracks);
 
-  await a.getByRole("button", { name: "Play all" }).click();
-  await expect(field(a, "status")).toHaveText("playing");
+  await playAllHere(a);
 
   await setMedia("down");
   await a.getByRole("button", { name: "Next" }).click();
