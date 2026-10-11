@@ -12,6 +12,7 @@ reviews:
     enabled: true
     drafts: true
     auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 0
     base_branches: [".*"]
   path_filters:
     - "!**/_generated/**"
@@ -19,7 +20,6 @@ reviews:
     - "!apps/web/src/routeTree.gen.ts"
     - "!tools/oxlint/**"
     - "!docs/screenshots/**"
-    - "!skills/music/SKILL.md"
   path_instructions:
     - path: "**/*.{ts,tsx}"
       instructions: >-
