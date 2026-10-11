@@ -58,32 +58,59 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       }),
     ));
 
-  it("evicts the least recently served files when the cache is over its limit", () =>
+  it("evicts the least recently served file when the cache is over its limit", () =>
     runScoped(
       Effect.gen(function* () {
         const { root } = yield* fixtureLibrary;
-        const dataDir = yield* temporaryDirectory("data");
-        // Each fixture transcode is roughly 60 to 100 KB, so two of them overflow 150 KB.
-        const transcoder = yield* transcoderWith(dataDir, 150_000);
 
-        const transcode = (id: string, path: string) =>
+        const sources = {
+          a: join(root, "Aurora Tones/First Light/01 Dawn.flac"),
+          b: join(root, "Aurora Tones/First Light/02 Morning Haze.flac"),
+          c: join(root, "Aurora Tones/First Light/03 Golden Hour.flac"),
+        };
+
+        const transcodeWith = (
+          transcoder: Transcoder.Transcoder["Service"],
+          id: keyof typeof sources,
+        ) =>
           transcoder.transcode({
             trackId: TrackId.make(id),
             profile: "aac-320",
-            source: join(root, path),
+            source: sources[id],
             mtimeMs: 1,
           });
 
-        const first = yield* transcode("first", "Aurora Tones/First Light/01 Dawn.flac");
-        yield* Effect.sleep("20 millis");
+        // Measure the three outputs, then size the cache so any two fit and three do not.
+        const measuring = yield* transcoderWith(
+          yield* temporaryDirectory("measure"),
+          512 * 1024 * 1024,
+        );
 
-        const second = yield* transcode("second", "Aurora Tones/First Light/02 Morning Haze.flac");
+        const sizes = yield* Effect.forEach(["a", "b", "c"] as const, (id) =>
+          transcodeWith(measuring, id).pipe(
+            Effect.flatMap(Files.statPath),
+            Effect.map((info) => info.size),
+          ),
+        );
 
-        const remaining = yield* Files.listNames(join(dataDir, "cache", "aac-320"));
+        // The largest pair is everything except the smallest file.
+        const limit = sizes.reduce((sum, size) => sum + size, 0) - Math.min(...sizes);
+        const dataDir = yield* temporaryDirectory("data");
+        const transcoder = yield* transcoderWith(dataDir, limit);
 
-        expect(remaining).toEqual(["second-1.m4a"]);
-        expect(second.endsWith("second-1.m4a")).toBe(true);
-        expect(first.endsWith("first-1.m4a")).toBe(true);
+        yield* transcodeWith(transcoder, "a");
+        yield* Effect.sleep("5 millis");
+        yield* transcodeWith(transcoder, "b");
+        yield* Effect.sleep("5 millis");
+        // Serving A again makes B the least recently used entry.
+        yield* transcodeWith(transcoder, "a");
+        yield* Effect.sleep("5 millis");
+        yield* transcodeWith(transcoder, "c");
+
+        expect((yield* Files.listNames(join(dataDir, "cache", "aac-320"))).toSorted()).toEqual([
+          "a-1.m4a",
+          "c-1.m4a",
+        ]);
       }),
     ));
 });

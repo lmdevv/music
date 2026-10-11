@@ -18,6 +18,7 @@ import {
   Hash,
   Layer,
   Option,
+  Ref,
   Semaphore,
 } from "effect";
 
@@ -84,11 +85,17 @@ class CacheKey implements Equal.Equal {
   }
 }
 
-/** Deletes the least recently used files (by access time) until the cache fits in `maxBytes`. */
+/**
+ * Deletes the least recently used files until the cache fits in `maxBytes`. `lastUsed` holds the
+ * serve times seen by this process; older files fall back to their modification time. Files are
+ * never touched to record use, because their modification time feeds the `ETag` players send
+ * back in `If-Range`.
+ */
 const evict = Effect.fn("Transcoder.evict")(function* (
   cacheDir: string,
   maxBytes: number,
   keep: string,
+  lastUsed: ReadonlyMap<string, number>,
 ) {
   const listed = yield* Effect.forEach(PROFILES, (profile) =>
     Files.listFiles(join(cacheDir, profile)),
@@ -98,7 +105,11 @@ const evict = Effect.fn("Transcoder.evict")(function* (
   let total = files.reduce((sum, file) => sum + file.size, 0);
 
   if (total <= maxBytes) return;
-  const oldestFirst = files.toSorted((left, right) => left.accessedMs - right.accessedMs);
+
+  const usedAt = (file: { readonly path: string; readonly mtimeMs: number }): number =>
+    lastUsed.get(file.path) ?? file.mtimeMs;
+
+  const oldestFirst = files.toSorted((left, right) => usedAt(left) - usedAt(right));
 
   for (const file of oldestFirst) {
     if (total <= maxBytes) break;
@@ -116,13 +127,21 @@ const make = Effect.gen(function* () {
   const config = yield* MediaConfig;
   const cacheDir = join(config.dataDir, "cache");
   const permits = yield* Semaphore.make(MAX_CONCURRENT_TRANSCODES);
+  const lastUsed = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
+
+  const markUsed = (output: string, at: number): Effect.Effect<void> =>
+    Ref.update(lastUsed, (current) => new Map(current).set(output, at));
+
+  const evictNow = (keep: string): Effect.Effect<void> =>
+    Ref.get(lastUsed).pipe(
+      Effect.flatMap((used) => evict(cacheDir, config.cacheMaxBytes, keep, used)),
+      Effect.catchTag("FileError", (error) => Effect.logWarning("Transcoder.evict_failed", error)),
+    );
 
   yield* Effect.forEach(PROFILES, (profile) => Files.makeDirectory(join(cacheDir, profile))).pipe(
     Effect.orDie,
   );
-  yield* evict(cacheDir, config.cacheMaxBytes, "").pipe(
-    Effect.catchTag("FileError", (error) => Effect.logWarning("Transcoder.evict_failed", error)),
-  );
+  yield* evictNow("");
 
   const produce = Effect.fn("Transcoder.produce")(function* (key: CacheKey) {
     const { output, input } = key;
@@ -130,7 +149,7 @@ const make = Effect.gen(function* () {
     const existing = yield* Files.statPath(output).pipe(Effect.option);
 
     if (Option.isSome(existing)) {
-      yield* Files.markAccessed(output, now);
+      yield* markUsed(output, now);
 
       return output;
     }
@@ -161,9 +180,8 @@ const make = Effect.gen(function* () {
       }),
     );
 
-    yield* evict(cacheDir, config.cacheMaxBytes, output).pipe(
-      Effect.catchTag("FileError", (error) => Effect.logWarning("Transcoder.evict_failed", error)),
-    );
+    yield* markUsed(output, yield* Clock.currentTimeMillis);
+    yield* evictNow(output);
 
     return output;
   });

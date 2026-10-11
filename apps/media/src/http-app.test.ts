@@ -42,6 +42,9 @@ const artUrl = (hash: string): Effect.Effect<string> => {
   ).pipe(Effect.map((sig) => `/media/art/${hash}?exp=${expiresAt}&sig=${sig}`));
 };
 
+/** Changes the last character of a signed URL, which is always part of the signature. */
+const tamper = (url: string): string => `${url.slice(0, -1)}${url.endsWith("A") ? "B" : "A"}`;
+
 const bytes = (response: Response): Effect.Effect<Uint8Array> =>
   Effect.promise(async () => new Uint8Array(await response.arrayBuffer()));
 
@@ -183,7 +186,7 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const id = trackId(DAWN);
         const valid = yield* streamUrl(id, "original");
 
-        expect((yield* request(`${valid.slice(0, -1)}A`)).status).toBe(403);
+        expect((yield* request(tamper(valid))).status).toBe(403);
         expect((yield* request(yield* streamUrl(id, "original", Date.now() - 1000))).status).toBe(
           403,
         );
@@ -299,7 +302,7 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           new Uint8Array(yield* Files.readWholeFile(join(dataDir, "art", hash))),
         );
 
-        expect((yield* request(`${url.slice(0, -1)}A`)).status).toBe(403);
+        expect((yield* request(tamper(url))).status).toBe(403);
         expect((yield* request(yield* artUrl("0".repeat(64)))).status).toBe(404);
         expect((yield* request(yield* artUrl("../../etc/passwd"))).status).toBe(404);
       }),

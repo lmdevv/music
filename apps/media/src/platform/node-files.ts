@@ -7,18 +7,7 @@
  * only caller and translates each rejection into a typed error.
  */
 import { createReadStream } from "node:fs";
-import {
-  cp,
-  mkdir,
-  open,
-  readdir,
-  readFile,
-  rename,
-  rm,
-  stat,
-  utimes,
-  writeFile,
-} from "node:fs/promises";
+import { cp, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 
@@ -31,8 +20,6 @@ export interface FileStat {
 /** A regular file found while listing a directory. */
 export interface ListedFile extends FileStat {
   readonly path: string;
-  /** Last access time; the transcode cache sets it on every use. */
-  readonly accessedMs: number;
 }
 
 /** Stats a path and reports whether it is a regular file. */
@@ -94,15 +81,6 @@ export const makeDirectory = async (path: string): Promise<void> => {
 export const removePath = (path: string): Promise<void> =>
   rm(path, { recursive: true, force: true });
 
-/**
- * Sets a file's access time to `atMs` and keeps its modification time, so validators derived
- * from the modification time stay stable.
- */
-export const markAccessed = async (path: string, atMs: number): Promise<void> => {
-  const info = await stat(path);
-  await utimes(path, atMs / 1000, info.mtime);
-};
-
 /** Copies a directory tree, keeping modification times. */
 export const copyTree = (from: string, to: string): Promise<void> =>
   cp(from, to, { recursive: true, preserveTimestamps: true });
@@ -131,9 +109,7 @@ export const listFiles = async (path: string): Promise<ReadonlyArray<ListedFile>
         const filePath = join(path, entry.name);
         const info = await stat(filePath).catch(() => null);
 
-        return info === null
-          ? null
-          : { path: filePath, size: info.size, mtimeMs: info.mtimeMs, accessedMs: info.atimeMs };
+        return info === null ? null : { path: filePath, size: info.size, mtimeMs: info.mtimeMs };
       }),
   );
 

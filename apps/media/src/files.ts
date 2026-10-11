@@ -65,10 +65,6 @@ export const makeDirectory = (path: string): Effect.Effect<void, FileError> =>
 export const removePath = (path: string): Effect.Effect<void, FileError> =>
   attempt("remove", path, () => NodeFiles.removePath(path));
 
-/** Sets a file's access time and keeps its modification time. */
-export const markAccessed = (path: string, atMs: number): Effect.Effect<void, FileError> =>
-  attempt("markAccessed", path, () => NodeFiles.markAccessed(path, atMs));
-
 /** Copies a directory tree, keeping modification times. */
 export const copyTree = (from: string, to: string): Effect.Effect<void, FileError> =>
   attempt("copy", from, () => NodeFiles.copyTree(from, to));
