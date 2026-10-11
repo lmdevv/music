@@ -20,7 +20,14 @@ export const Route = createRootRoute({
 
 function RootComponent() {
   return (
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem storageKey="music-theme">
+    <ThemeProvider
+      attribute="class"
+      defaultTheme="system"
+      enableSystem
+      storageKey="music-theme"
+      // React never runs scripts it renders on the client; index.html sets the theme before paint.
+      scriptProps={{ type: "application/json" }}
+    >
       <TooltipProvider>
         <HeadContent />
         <Outlet />
