@@ -152,9 +152,12 @@ export interface WalkedFile extends FileStat {
 export const isWithin = (root: string, path: string): boolean =>
   path === root || path.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
 
+/** Folders a filesystem creates for itself. They are unreadable to non-root users and never hold music. */
+const systemFolders: ReadonlySet<string> = new Set(["lost+found"]);
+
 /**
  * Recursively lists regular files under `root` whose names pass `include`, skipping entries
- * whose names start with a dot. A symlink to a file counts only when its target resolves inside
+ * whose names start with a dot and filesystem folders such as `lost+found`. A symlink to a file counts only when its target resolves inside
  * `root`, so a link cannot pull outside files into the library; symlinks to directories are never
  * followed, which also rules out loops. A folder that cannot be read fails the walk instead of
  * being skipped: skipping it would make every song under it look deleted. A folder that vanishes
@@ -192,6 +195,7 @@ export const walkTree = async (
         const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
 
         if (entry.isDirectory()) {
+          if (systemFolders.has(entry.name)) return;
           await visit(absolute, relative);
 
           return;

@@ -255,6 +255,21 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       ),
   );
 
+  it.skipIf(runsAsRoot())("skips an unreadable lost+found folder at the library root", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root, scan } = yield* setup;
+        const lostAndFound = join(root, "lost+found");
+
+        yield* Files.makeDirectory(lostAndFound);
+        yield* Effect.promise(() => makeUnreadable(lostAndFound));
+        yield* Effect.addFinalizer(() => Effect.promise(() => makeReadable(lostAndFound)));
+
+        expect(yield* scan).toMatchObject({ missing: 0, failed: 0 });
+      }),
+    ),
+  );
+
   it("fails with LibraryUnavailable when the folder is missing", () =>
     runScoped(
       Effect.gen(function* () {
