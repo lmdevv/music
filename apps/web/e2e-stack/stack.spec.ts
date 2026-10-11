@@ -265,3 +265,24 @@ test("a phone shows where the music plays while another device plays it", async 
   await expect(phone.getByRole("status").filter({ hasText: /^Playing on / })).toBeVisible();
   await other.close();
 });
+
+test("the seek and volume sliders are named and work from the keyboard", async ({ page }) => {
+  await signIn(page);
+  await openFirstAlbum(page);
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await expectAudioPast(page, 1);
+
+  const bar = page.getByRole("region", { name: "Player" });
+  const seek = bar.getByRole("slider", { name: "Seek" });
+  const volume = bar.getByRole("slider", { name: "Volume" });
+
+  await expect(seek).toBeVisible();
+  await volume.focus();
+
+  const before = Number(await volume.getAttribute("aria-valuenow"));
+
+  await page.keyboard.press("ArrowLeft");
+  await expect
+    .poll(async () => Number(await volume.getAttribute("aria-valuenow")))
+    .toBeLessThan(before);
+});
