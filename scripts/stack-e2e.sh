@@ -23,6 +23,9 @@ library="${MUSIC_DIR:-}"
 if [[ -z "$library" ]]; then
   library="$(mktemp -d)"
   node "$root/apps/media/scripts/generate-fixtures.ts" "$library"
+  # mktemp makes the folder private to this user; the unprivileged media user (PUID) must read it,
+  # as it must read any real music folder.
+  chmod -R a+rX "$library"
 fi
 
 pnpm --dir "$root" --filter @music/cli build
