@@ -18,6 +18,7 @@ import {
 import type { ReactNode } from "react";
 
 import { describeDevice, loadDeviceId, readItem, writeItem } from "./device-identity";
+import type { PlayerEngine } from "./engine";
 import { HtmlAudioEngine } from "./html-audio-engine";
 import { PlaybackController } from "./playback-controller";
 import { parseStreamQuality } from "./stream-quality";
@@ -99,12 +100,17 @@ export const usePlayer = (): Player => {
 /** The live position in milliseconds. Separate from `usePlayer` because it changes often. */
 export const usePlayerPosition = (): number => useContext(PositionContext);
 
+const defaultEngine = (): PlayerEngine => new HtmlAudioEngine();
+
 /** Builds the controller from browser globals. Runs once per provider mount. */
-const createController = (convex: ReturnType<typeof useConvex>): PlaybackController => {
+const createController = (
+  convex: ReturnType<typeof useConvex>,
+  engine: () => PlayerEngine,
+): PlaybackController => {
   const storage = "localStorage" in globalThis ? localStorage : null;
   const probe = document.createElement("audio");
 
-  return new PlaybackController(makeMusicClient(convex), new HtmlAudioEngine(), {
+  return new PlaybackController(makeMusicClient(convex), engine(), {
     deviceId: loadDeviceId(storage, () => crypto.randomUUID()),
     device: describeDevice(navigator.userAgent, navigator.maxTouchPoints),
     canPlay: (mimeType) => probe.canPlayType(mimeType) !== "",
@@ -144,9 +150,19 @@ function PositionTicker({
  * user. It registers this browser as a device, plays audio while this browser is the session's
  * active device, and stops the moment another device takes over.
  */
-export function PlayerProvider({ children }: { readonly children: ReactNode }) {
+export function PlayerProvider({
+  children,
+  engine = defaultEngine,
+}: {
+  readonly children: ReactNode;
+  /**
+   * Builds the audio engine once per mount. Defaults to `HtmlAudioEngine`; this is where an MSE
+   * gapless engine plugs in. Pass a stable function.
+   */
+  readonly engine?: () => PlayerEngine;
+}) {
   const convex = useConvex();
-  const controller = useMemo(() => createController(convex), [convex]);
+  const controller = useMemo(() => createController(convex, engine), [convex, engine]);
   const state = useRead("playback.state", {});
   const local = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
 
