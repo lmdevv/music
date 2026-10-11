@@ -216,7 +216,7 @@ export const walkTree = async (
 };
 
 /** A folder in a library that the media service is not allowed to read. */
-export class UnreadableFolder extends Error {
+class UnreadableFolder extends Error {
   override readonly name = "UnreadableFolder";
 
   readonly path: string;
