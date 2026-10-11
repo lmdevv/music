@@ -447,6 +447,9 @@ test("album cards and song rows expose their play buttons", async ({ page }) => 
 });
 
 test("the last song in the queue stops at its end instead of starting over", async ({ page }) => {
+  // Its waits (audio start, reaching the end, and a stopped window past one report) can add up
+  // to more than the default 120 seconds on a slow machine.
+  test.setTimeout(180_000);
   cli(apiKey, ["playback", "shuffle", "--no-on"]);
   cli(apiKey, ["playback", "repeat", "off"]);
 
@@ -539,7 +542,12 @@ test("adding a folder that doesn't exist shows the failed scan and keeps open li
     await expect(card.getByText("Scan failed")).toBeVisible();
     await expect(card.getByText(/unavailable/)).toBeVisible();
   } finally {
-    cli(apiKey, ["libraries", "delete", created.libraryId]);
+    // A failed cleanup must not hide the assertion that failed first; report it instead.
+    try {
+      cli(apiKey, ["libraries", "delete", created.libraryId]);
+    } catch (cause) {
+      console.warn(`Could not remove the /nowhere library ${created.libraryId}`, cause);
+    }
   }
 });
 
