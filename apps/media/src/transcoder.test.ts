@@ -192,23 +192,24 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       }),
     ));
 
-  it("finishes a transcode into the cache after its only reader leaves", () =>
+  it("stops a transcode a second after its last reader leaves, and starts over later", () =>
     runScoped(
       Effect.gen(function* () {
         const scratch = yield* temporaryDirectory("sine");
-        const source = yield* sineSegment(scratch, "long", "flac", 0, 48_000 * 120);
+        const source = yield* sineSegment(scratch, "long", "mp3", 0, 48_000 * 240);
         const dataDir = yield* temporaryDirectory("data");
         const transcoder = yield* transcoderWith(dataDir, 512 * 1024 * 1024);
+        const cacheDir = join(dataDir, "cache", "fmp4-aac");
 
         const input = {
           trackId: TrackId.make("left"),
           profile: "fmp4-aac" as const,
           source,
           mtimeMs: 1,
-          codec: "flac",
+          codec: "mp3",
         };
 
-        const head = yield* Effect.scoped(
+        const firstChunk = Effect.scoped(
           transcoder
             .open(input)
             .pipe(
@@ -220,11 +221,26 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
             ),
         );
 
-        expect(head).toHaveLength(1);
+        const liveFiles = Files.listNames(cacheDir).pipe(
+          Effect.map((names) => names.filter((name) => name.endsWith(".live.part"))),
+        );
+
+        expect(yield* firstChunk).toHaveLength(1);
+        const running = yield* liveFiles;
+
+        // Back within the grace period: the same run (with the same live file) goes on.
+        expect(running).toHaveLength(1);
+        expect(yield* firstChunk).toHaveLength(1);
+        expect(yield* liveFiles).toEqual(running);
+
+        // Gone for longer: ffmpeg stops and leaves nothing behind.
+        yield* Effect.sleep("1500 millis");
+        expect(yield* Files.listNames(cacheDir)).toEqual([]);
+
         const finished = yield* transcoder.transcode(input);
 
         expect(Option.isSome(finished.timing)).toBe(true);
-        expect((yield* Files.listNames(join(dataDir, "cache", "fmp4-aac"))).toSorted()).toEqual([
+        expect((yield* Files.listNames(cacheDir)).toSorted()).toEqual([
           "left-1.m4a",
           "left-1.m4a.json",
         ]);

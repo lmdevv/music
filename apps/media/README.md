@@ -59,8 +59,8 @@ includes every dependency, `music-metadata` too; `dist/` needs nothing else at r
     (the source's declared length), and `X-Music-Duration-Estimated: 1`. It ends once the cached
     file and its sidecar exist, so a `HEAD` afterwards returns the exact length; a failure after
     the first byte aborts the response. `HEAD`, `Range`, `If-Range`, and `If-None-Match` requests
-    wait for the cached file instead, whose byte offsets differ. A transcode keeps running into
-    the cache when its readers leave.
+    wait for the cached file instead, whose byte offsets differ. A transcode that nobody reads
+    or waits for any more stops after a second, freeing its ffmpeg slot for the next song.
 - `GET|HEAD /media/art/:hash?exp=&sig=`: content-addressed artwork, cached as immutable.
 
 Bad or expired signatures get 403. Logs are JSON on stdout and never include query strings.

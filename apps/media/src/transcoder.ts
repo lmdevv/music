@@ -7,8 +7,8 @@
  * A fragmented transcode can be read while ffmpeg writes it: ffmpeg also writes the stream,
  * without its index, to a pipe the transcoder copies into a "live" file beside the output, and
  * readers follow that file as it grows. Concurrent requests for the same output share one ffmpeg
- * run, at most two ffmpeg runs happen at once, and the least recently served files are evicted
- * when the cache grows past its limit.
+ * run, at most two ffmpeg runs happen at once, a run that nobody waits for any more stops, and
+ * the least recently served files are evicted when the cache grows past its limit.
  */
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -19,9 +19,11 @@ import {
   Clock,
   Context,
   Data,
+  Deferred,
   Duration,
   Effect,
   Exit,
+  Fiber,
   Layer,
   Option,
   Ref,
@@ -56,6 +58,13 @@ import { declaredLength, estimatedLength, measureTiming, SampleTiming } from "./
 const MAX_CONCURRENT_TRANSCODES = 2;
 
 const TRANSCODE_TIMEOUT = Duration.minutes(10);
+
+/**
+ * How long a transcode keeps running after its last reader left. A listener who skips ahead frees
+ * the ffmpeg slot for the next song; one who seeks in a live stream fetches it again at once and
+ * finds the run still going.
+ */
+const ABANDON_GRACE = Duration.seconds(1);
 
 const PROFILES: ReadonlyArray<TranscodeProfile> = ["aac-320", "aac-128", "fmp4-flac", "fmp4-aac"];
 
@@ -170,7 +179,7 @@ export interface Interface {
    * Starts or joins the transcode of `input` and returns as soon as it can be read: the cached
    * file, or, for a fragmented profile, the live transcode once ffmpeg has written its first
    * bytes. Fails when the transcode fails before that. A live transcode stays readable until the
-   * scope closes.
+   * scope closes; once every scope holding a transcode has closed, it stops after a second.
    */
   readonly open: (input: TranscodeInput) => Effect.Effect<Opened, TranscodeError, Scope.Scope>;
   /** True when ffmpeg runs. Cached for a minute. */
@@ -210,6 +219,8 @@ interface Job {
    * once both say it is no longer needed.
    */
   readonly holds: Ref.Ref<{ readonly readers: number; readonly settled: boolean }>;
+  /** The fiber running ffmpeg, to stop it once nobody reads. */
+  readonly fiber: Deferred.Deferred<Fiber.Fiber<void>>;
 }
 
 /** One read of a live file: the bytes, and where the next read starts (none at the end). */
@@ -477,20 +488,23 @@ const make = Effect.gen(function* () {
   const deleteLive = (job: Job): Effect.Effect<void> =>
     Files.removePath(job.live).pipe(Effect.ignore);
 
+  /** Takes a job out of the registry, unless a newer job for its output took its place. */
+  const unregister = (job: Job): Effect.Effect<void> =>
+    Ref.update(jobs, (current) => {
+      if (current.get(job.output) !== job) return current;
+      const next = new Map(current);
+      next.delete(job.output);
+
+      return next;
+    });
+
   /**
    * Retires a job once ffmpeg is done: new requests find the cached file (or start over after a
    * failure), readers learn the outcome, and the live file goes once no reader holds it.
    */
   const settle = (job: Job, input: TranscodeInput, exit: Exit.Exit<Transcoded, TranscodeError>) =>
     Effect.gen(function* () {
-      yield* registry.withPermits(1)(
-        Ref.update(jobs, (current) => {
-          const next = new Map(current);
-          next.delete(job.output);
-
-          return next;
-        }),
-      );
+      yield* registry.withPermits(1)(unregister(job));
 
       // Settled before readers hear the outcome, so the last one to leave deletes the live file.
       const unused = yield* Ref.modify(job.holds, (holds) => [
@@ -515,14 +529,47 @@ const make = Effect.gen(function* () {
       );
     });
 
-  /** Lets go of a job's live file; the last reader of a settled job deletes it. */
+  /** Lets go of a job; the last reader of a settled job deletes its live file. */
   const release = (job: Job) =>
-    Ref.modify(job.holds, (holds) => [
-      holds.settled && holds.readers === 1,
-      { ...holds, readers: holds.readers - 1 },
-    ]).pipe(Effect.flatMap((last) => (last ? deleteLive(job) : Effect.void)));
+    Ref.modify(job.holds, (holds) => {
+      const readers = holds.readers - 1;
 
-  /** Holds a job's live file until the scope closes. Call under `registry`. */
+      return [
+        { readers, settled: holds.settled },
+        { ...holds, readers },
+      ] as const;
+    }).pipe(
+      Effect.flatMap(({ readers, settled }) => {
+        if (readers > 0) return Effect.void;
+
+        if (settled) return deleteLive(job);
+
+        return stopIfAbandoned(job).pipe(Effect.delay(ABANDON_GRACE), Effect.forkIn(scope));
+      }),
+    );
+
+  /**
+   * Stops a running job that still has no readers: new requests start over, and ffmpeg is
+   * killed, which frees its slot and lets `settle` clean up.
+   */
+  const stopIfAbandoned = (job: Job) =>
+    registry
+      .withPermits(1)(
+        Ref.get(job.holds).pipe(
+          Effect.flatMap((holds) =>
+            holds.readers === 0 && !holds.settled
+              ? unregister(job).pipe(Effect.as(true))
+              : Effect.succeed(false),
+          ),
+        ),
+      )
+      .pipe(
+        Effect.flatMap((abandoned) =>
+          abandoned ? Deferred.await(job.fiber).pipe(Effect.flatMap(Fiber.interrupt)) : Effect.void,
+        ),
+      );
+
+  /** Holds a job, running and with its live file, until the scope closes. Call under `registry`. */
   const hold = (job: Job) =>
     Effect.acquireRelease(
       Ref.update(job.holds, (holds) => ({ ...holds, readers: holds.readers + 1 })),
@@ -536,18 +583,20 @@ const make = Effect.gen(function* () {
       live: `${output}.${randomUUID()}.live${PARTIAL_SUFFIX}`,
       progress: yield* SubscriptionRef.make<Progress>(Progress.Queued()),
       holds: yield* Ref.make({ readers: 0, settled: false }),
+      fiber: yield* Deferred.make<Fiber.Fiber<void>>(),
     };
 
     yield* Ref.update(jobs, (current) => new Map(current).set(output, job));
 
-    // The job belongs to the transcoder, not the request: it finishes into the cache even when
-    // every reader leaves.
-    yield* produce(job, input).pipe(
+    // The job belongs to the transcoder, not to a request: requests come and go as readers.
+    const fiber = yield* produce(job, input).pipe(
       Effect.mapError(failure(input)),
       Effect.onExit((exit) => settle(job, input, exit)),
       Effect.ignore,
       Effect.forkIn(scope),
     );
+
+    yield* Deferred.succeed(job.fiber, fiber);
 
     return job;
   });
