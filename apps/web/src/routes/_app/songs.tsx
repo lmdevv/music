@@ -62,7 +62,7 @@ function SongsPage() {
         actions={
           <div className="flex w-full items-center gap-2 lg:w-auto">
             <Input
-              size="md"
+              size="sm"
               type="search"
               aria-label="Filter songs"
               placeholder="Filter songs"

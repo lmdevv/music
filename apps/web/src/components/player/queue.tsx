@@ -64,8 +64,9 @@ export function QueueRow({
     <div
       className={cn(
         "group/queue relative flex shrink-0 items-center gap-3 rounded-sm px-2",
-        glass ? "gap-3.5 rounded-md px-3 py-2 hover:bg-text/8" : "h-[52px] hover:bg-surface",
-        current && (glass ? "bg-text/8" : "h-row-touch bg-surface"),
+        glass ? "gap-3.5 rounded-md px-3 py-2 hover:bg-text/8" : "hover:bg-surface",
+        !glass && (current ? "h-row-touch bg-surface" : "h-[52px]"),
+        glass && current && "bg-text/8",
       )}
     >
       <button

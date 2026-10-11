@@ -13,6 +13,7 @@ const fieldVariants = cva(
   {
     variants: {
       size: {
+        sm: "h-9 px-3 text-base/sm [&_svg:not([class*='size-'])]:size-4",
         md: "h-row px-3 text-base/sm [&_svg:not([class*='size-'])]:size-4",
         lg: "h-11 px-3.5 text-md/base [&_svg:not([class*='size-'])]:size-4",
       },

@@ -130,7 +130,7 @@ function SearchPage() {
           className={cn("transition-opacity", updating && "opacity-(--opacity-muted)")}
           aria-busy={updating}
         >
-          <DesktopResults results={results} />
+          <DesktopResults results={results} query={forQuery} />
           <PhoneResults results={results} />
         </div>
       )}
@@ -169,18 +169,38 @@ type TopResult =
   | { readonly kind: "album"; readonly album: Album }
   | { readonly kind: "track"; readonly track: Track };
 
-const topResult = (results: SearchResults): TopResult | null => {
-  const [artist] = results.artists;
+/** How many of the query's words a name contains; ties keep artist, album, song order. */
+const overlap = (name: string, query: string): number => {
+  const lower = name.toLowerCase();
 
-  if (artist !== undefined) return { kind: "artist", artist };
+  return query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((word) => word.length > 0 && lower.includes(word)).length;
+};
 
-  const [album] = results.albums;
+const topResult = (results: SearchResults, query: string): TopResult | null => {
+  const candidates: ReadonlyArray<{ readonly result: TopResult; readonly name: string }> = [
+    ...results.artists
+      .slice(0, 1)
+      .map((artist) => ({ result: { kind: "artist", artist } as const, name: artist.name })),
+    ...results.albums
+      .slice(0, 1)
+      .map((album) => ({ result: { kind: "album", album } as const, name: album.title })),
+    ...results.tracks
+      .slice(0, 1)
+      .map((track) => ({ result: { kind: "track", track } as const, name: track.title })),
+  ];
 
-  if (album !== undefined) return { kind: "album", album };
+  let best: { readonly result: TopResult; readonly score: number } | null = null;
 
-  const [track] = results.tracks;
+  for (const candidate of candidates) {
+    const score = overlap(candidate.name, query);
 
-  return track === undefined ? null : { kind: "track", track };
+    if (best === null || score > best.score) best = { result: candidate.result, score };
+  }
+
+  return best?.result ?? null;
 };
 
 function TopResultCard({
@@ -310,8 +330,14 @@ function SongRow({
   );
 }
 
-function DesktopResults({ results }: { readonly results: SearchResults }) {
-  const top = topResult(results);
+function DesktopResults({
+  results,
+  query,
+}: {
+  readonly results: SearchResults;
+  readonly query: string;
+}) {
+  const top = topResult(results, query);
 
   return (
     <div className="hidden flex-col gap-8 lg:flex">

@@ -59,7 +59,6 @@ import { useQueueActions } from "@/components/playlists/track-menu";
 import { useUi } from "@/components/shell/ui-state";
 import { describeFailure, toastFailure } from "@/lib/action";
 import { formatCount, formatDuration, formatTotal, plural } from "@/lib/format";
-import { MOD } from "@/lib/keys";
 
 import { ArgsForm } from "./args-form";
 import type { MenuContext } from "./args-form";
@@ -403,7 +402,7 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
         title: "New playlist",
         detail: "Create a playlist, empty or from the queue or liked songs",
         icon: PlusIcon,
-        shortcut: `${MOD}N`,
+        shortcut: "N",
         label: "Create",
         run: () => {
           onClose();

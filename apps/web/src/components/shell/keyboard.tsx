@@ -15,7 +15,7 @@ export const SEARCH_INPUT_ID = "search-input";
 
 /**
  * Global shortcuts: space play/pause, ←/→ seek 10 s (with shift: previous/next), ⌘K command menu,
- * ⌘N new playlist, `/` search, `l` like the current song, `d` devices.
+ * N new playlist, `/` search, `l` like the current song, `d` devices.
  */
 export function KeyboardShortcuts() {
   const player = usePlayer();
@@ -45,13 +45,6 @@ export function KeyboardShortcuts() {
         state.newPlaylist !== null
       )
         return;
-
-      if (hasMod(event) && event.key.toLowerCase() === "n") {
-        event.preventDefault();
-        state.openNewPlaylist();
-
-        return;
-      }
 
       if (event.metaKey || event.ctrlKey || event.altKey) return;
 
@@ -98,6 +91,14 @@ export function KeyboardShortcuts() {
         case "l":
         case "L": {
           if (hasTrack) void liking.toggle();
+
+          return;
+        }
+
+        case "n":
+        case "N": {
+          event.preventDefault();
+          state.openNewPlaylist();
 
           return;
         }

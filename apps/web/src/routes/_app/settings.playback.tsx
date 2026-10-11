@@ -26,7 +26,7 @@ const SHORTCUTS: ReadonlyArray<readonly [keys: ReadonlyArray<string>, action: st
   [["L"], "Like or unlike the playing song"],
   [["/"], "Search"],
   [[`${MOD}K`], "Command menu: search and run any command"],
-  [[`${MOD}N`], "New playlist"],
+  [["N"], "New playlist"],
   [["D"], "Play on another device"],
 ];
 

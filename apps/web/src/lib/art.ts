@@ -57,8 +57,14 @@ export const placeholderAt = (index: number, angle = 140): string => {
   return `linear-gradient(in oklab ${angle}deg, ${from} 0%, ${to} 100%)`;
 };
 
-/** The lighter and darker stops of a cover's placeholder, used to tint Now Playing. */
-export const placeholderColors = (seed: string): readonly [string, string] => pick(seed);
+const lightness = (color: string): number => Number(/oklab\(([\d.]+)%/.exec(color)?.[1] ?? "0");
+
+/** The lighter and darker stops of a cover's placeholder, lighter first, to tint Now Playing. */
+export const placeholderColors = (seed: string): readonly [string, string] => {
+  const [from, to] = pick(seed);
+
+  return lightness(from) >= lightness(to) ? [from, to] : [to, from];
+};
 
 /**
  * Now Playing tints from a cover color, clamped dark enough that white text stays readable over

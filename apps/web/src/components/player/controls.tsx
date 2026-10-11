@@ -53,9 +53,11 @@ const roundIcon =
 export function PlayPauseButton({
   className,
   iconClassName = "size-4",
+  tone = "solid",
 }: {
   readonly className?: string;
   readonly iconClassName?: string;
+  readonly tone?: "solid" | "glass";
 }) {
   const player = usePlayer();
   const playing = player.status === "playing";
@@ -63,7 +65,7 @@ export function PlayPauseButton({
 
   if (waiting && player.track !== null) {
     return (
-      <span className={cn(roundIcon, "size-row text-text", className)}>
+      <span className={cn(roundIcon, "size-10 text-text", className)}>
         <Spinner label="Buffering" className="size-full" />
       </span>
     );
@@ -76,7 +78,12 @@ export function PlayPauseButton({
         aria-label={playing ? "Pause" : "Play"}
         disabled={player.track === null}
         onClick={() => perform(player.togglePlay())}
-        className={cn(roundIcon, "size-row bg-text text-text-inverse hover:scale-105", className)}
+        className={cn(
+          roundIcon,
+          "size-10 hover:scale-105",
+          tone === "solid" ? "bg-text text-text-inverse" : "bg-text/16 text-text hover:bg-text/24",
+          className,
+        )}
       >
         {playing ? (
           <PauseIcon className={iconClassName} fill="currentColor" strokeWidth={0} />

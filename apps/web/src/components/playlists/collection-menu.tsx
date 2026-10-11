@@ -48,7 +48,7 @@ export function CollectionMenu({
       <DropdownMenuTrigger
         aria-label={`More actions for ${label}`}
         className={cn(
-          "flex size-row shrink-0 items-center justify-center rounded-full border border-border text-text outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring/50 data-popup-open:bg-surface",
+          "flex size-10 shrink-0 items-center justify-center rounded-full border border-border text-text outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring/50 data-popup-open:bg-surface",
           className,
         )}
       >

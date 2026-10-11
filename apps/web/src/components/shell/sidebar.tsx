@@ -86,7 +86,7 @@ export function Sidebar() {
       <div className="flex min-h-0 grow flex-col gap-0.5">
         <div className="flex items-center justify-between px-2.5 pb-1.5">
           <span className="font-mono text-xs/xs tracking-mono text-text-muted">PLAYLISTS</span>
-          <Tooltip label="New playlist" shortcut={`${MOD}N`}>
+          <Tooltip label="New playlist" shortcut={"N"}>
             <button
               type="button"
               aria-label="New playlist"

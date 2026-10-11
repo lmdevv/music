@@ -205,10 +205,7 @@ function DesktopNowPlaying({ track, view, onView }: ViewProps) {
                 trackClassName="bg-text/16"
                 thumbClassName="bg-text"
               />
-              <PlayPauseButton
-                className="bg-text/16 text-text hover:bg-text/24"
-                iconClassName="size-4"
-              />
+              <PlayPauseButton tone="glass" iconClassName="size-4" />
               <ViewButton label="Exit cover view" active onClick={() => onView("player")}>
                 <ShrinkIcon className="size-4" />
               </ViewButton>

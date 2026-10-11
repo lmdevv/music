@@ -190,7 +190,7 @@ function PhoneSearchField() {
   return (
     <label
       className={cn(
-        "flex h-[62px] grow items-center gap-2.5 rounded-[31px] px-[18px]",
+        "flex h-[62px] min-w-0 grow items-center gap-2.5 rounded-[31px] px-[18px]",
         glassClassName,
       )}
     >
