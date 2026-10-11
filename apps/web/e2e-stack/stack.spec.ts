@@ -358,8 +358,13 @@ test("phone queue keeps the transport on screen and the device list fits", async
 
   await expect(list.getByRole("menuitemradio", { name: /Old laptop 11/ })).toBeAttached();
 
-  const box = await list.boundingBox();
+  // The sheet slides in; poll until it settles.
+  await expect
+    .poll(async () => {
+      const box = await list.boundingBox();
 
-  expect(box !== null && box.y + box.height <= 844).toBe(true);
+      return box !== null && box.y + box.height <= 844;
+    })
+    .toBe(true);
   await context.close();
 });
