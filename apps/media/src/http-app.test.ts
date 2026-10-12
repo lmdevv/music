@@ -25,6 +25,7 @@ import {
 import { layerMemory, MemoryMediaBackendControl } from "./testing/memory-media-backend.ts";
 import { adtsPayload } from "./testing/adts.ts";
 import { ffmpegFailingOnce } from "./testing/failing-ffmpeg.ts";
+import { ffmpegRecordingRuns } from "./testing/recording-ffmpeg.ts";
 import { fragmentDecodeTimes, mediaData, withoutIndex } from "./testing/mp4-boxes.ts";
 import { sineSegment } from "./testing/sine.ts";
 import * as Transcoder from "./transcoder.ts";
@@ -812,6 +813,55 @@ describe("media HTTP server", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         );
 
         expect(remaining).toEqual([]);
+      }),
+    ));
+
+  it("frees the run of every seek whose client goes away before it streams", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const scratch = yield* temporaryDirectory("ffmpeg");
+        const ffmpeg = yield* Effect.promise(() => ffmpegRecordingRuns(scratch));
+        const { app, root, scan, findTrackId } = yield* setupWith(ffmpeg.path);
+
+        // Two minutes of tone: an unread offset run fills its pipe and blocks long before the end.
+        yield* sineSegment(root, "long", "mp3", 0, 48_000 * 120);
+        yield* scan;
+        const url = `${yield* streamUrl(yield* findTrackId("long.mp3"), "aac-128")}&start=1000`;
+        const port = yield* listen(app);
+
+        // As many seeks as there are runs, each left while ffprobe and ffmpeg start.
+        yield* Effect.forEach(
+          Array.from(
+            { length: Transcoder.MAX_CONCURRENT_OFFSET_RUNS },
+            (_, index) => 5 + 2 * index,
+          ),
+          (afterMs) => abandonedGet(port, url, afterMs),
+          { concurrency: "unbounded" },
+        );
+
+        // Every ffmpeg they started is stopped.
+        const running = yield* Effect.promise(ffmpeg.running).pipe(
+          Effect.repeat({
+            until: (pids) => pids.length === 0,
+            schedule: Schedule.spaced("100 millis"),
+            times: 50,
+          }),
+        );
+
+        expect(running).toEqual([]);
+
+        // And every run is free again: the next seek gets one instead of a 503.
+        const next = yield* Effect.promise(() => fetch(`http://127.0.0.1:${port}${url}`)).pipe(
+          Effect.repeat({
+            until: (response) => response.status !== 503,
+            schedule: Schedule.spaced("100 millis"),
+            times: 20,
+          }),
+        );
+
+        expect(next.status).toBe(200);
+        expect((yield* bytes(next)).length).toBeGreaterThan(0);
+        expect(yield* Effect.promise(ffmpeg.running)).toEqual([]);
       }),
     ));
 });
