@@ -26,7 +26,8 @@ const config = Layer.succeed(
     port: 0,
     cacheMaxBytes: 1024 * 1024 * 1024,
     rescanInterval: Duration.hours(1),
-    ffmpegPath: "ffmpeg",
+    // ffmpeg itself, slowed down while the stub's `slow` control is on.
+    ffmpegPath: join(import.meta.dirname, "throttled-ffmpeg.sh"),
     ffprobePath: "ffprobe",
   }),
 );

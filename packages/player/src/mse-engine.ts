@@ -60,6 +60,15 @@ const IDLE_MS = 250;
 /** Fewer seconds than this left in a buffered range means the playhead needs new data. */
 const BUFFERED_MARGIN = 0.05;
 
+/** A playhead this close to a seek target is at it. */
+const TARGET_TOLERANCE = 0.01;
+
+/**
+ * Data that starts at most this far after a seek target holds the target: an append window cuts
+ * whole AAC frames, so a song's first buffered sample can sit a frame after its start.
+ */
+const GAP_SECONDS = 0.5;
+
 /** One song on the timeline and how far its stream has been appended. */
 interface Song {
   readonly source: EngineSource;
@@ -105,6 +114,11 @@ interface Session {
   configuredFor: Song | null;
   /** A removal from this time to the end, which the pump runs before its next append. */
   removeFrom: number | null;
+  /**
+   * Where the last seek put the playhead, on the element's timeline, until it plays from there
+   * (see `#holdTarget`); null otherwise.
+   */
+  target: number | null;
   /** Seconds to buffer ahead; lowered when the browser's buffer quota runs out first. */
   aheadLimit: number;
   cancelled: boolean;
@@ -278,6 +292,10 @@ export class MseEngine implements PlayerEngine {
     );
 
     this.#emit({ type: "time", positionMs: Math.round((target - placement.start) * 1000) });
+    session.target = target;
+    // A queued song lies past the duration its appends have reached so far, and the element cuts
+    // a seek beyond the duration short. When an append runs meanwhile, `#holdTarget` retries.
+    this.#extendDuration(session, placement.end);
 
     if (this.#bufferedAhead(target) > BUFFERED_MARGIN) {
       this.#element.currentTime = target;
@@ -361,6 +379,7 @@ export class MseEngine implements PlayerEngine {
       codec: null,
       configuredFor: null,
       removeFrom: null,
+      target: null,
       aheadLimit: AHEAD_SECONDS,
       cancelled: false,
       wake: () => undefined,
@@ -566,6 +585,8 @@ export class MseEngine implements PlayerEngine {
     const epoch = song?.epoch;
 
     try {
+      this.#holdTarget(session);
+
       if (await this.#runRemoval(session)) return true;
 
       if (await this.#evictBehind(session, BEHIND_SECONDS)) return true;
@@ -950,6 +971,70 @@ export class MseEngine implements PlayerEngine {
       target.appendBuffer(header.init);
     });
     session.configuredFor = song;
+    // Appends only stretch the duration to what is buffered; a seek must reach the whole song.
+    this.#extendDuration(session, placement.end);
+  }
+
+  /** Raises the media source's duration to `end` unless it is longer already or busy. */
+  #extendDuration(session: Session, end: number): void {
+    const { mediaSource, buffer } = session;
+
+    if (mediaSource.readyState !== "open" || buffer?.updating === true) return;
+
+    if (Number.isNaN(mediaSource.duration) || mediaSource.duration < end) {
+      mediaSource.duration = end;
+    }
+  }
+
+  /**
+   * Keeps the playhead at the last seek target until it plays from there, and tells whether it
+   * moved the playhead. Left alone, the element waits silently wherever it sits: short of a
+   * target past the media source's duration, where it cut the seek, or just before data that
+   * starts a little after the target.
+   */
+  #holdTarget(session: Session): boolean {
+    const target = session.target;
+
+    if (target === null || session !== this.#session) return false;
+    const element = this.#element;
+    const time = element.currentTime;
+
+    if (time >= target - TARGET_TOLERANCE) {
+      if (this.#bufferedAhead(time) > BUFFERED_MARGIN || time > target + TARGET_TOLERANCE) {
+        session.target = null;
+
+        return false;
+      }
+
+      // A pending removal clears whatever lies after the target; the refetch then covers it.
+      const next = session.removeFrom === null ? this.#bufferedAfter(time) : null;
+
+      if (next === null || next - time > GAP_SECONDS) return false;
+      session.target = next;
+      element.currentTime = next;
+
+      return true;
+    }
+
+    this.#extendDuration(session, Math.max(target, session.songs[0]?.placement?.end ?? target));
+
+    if (!(session.mediaSource.duration >= target)) return false;
+    element.currentTime = target;
+
+    return true;
+  }
+
+  /** Where the first buffered range after `time` starts, or null when none does. */
+  #bufferedAfter(time: number): number | null {
+    const ranges = this.#session?.buffer?.buffered;
+
+    if (ranges === undefined) return null;
+
+    for (let index = 0; index < ranges.length; index += 1) {
+      if (ranges.start(index) > time) return ranges.start(index);
+    }
+
+    return null;
   }
 
   /**
@@ -1099,6 +1184,7 @@ export class MseEngine implements PlayerEngine {
     const session = this.#session;
 
     if (session === null) return;
+    this.#holdTarget(session);
     const next = session.songs[1];
 
     if (
@@ -1115,10 +1201,13 @@ export class MseEngine implements PlayerEngine {
     session.wake();
   }
 
+  /** The position in the current song: the seek target until the playhead plays from there. */
   #positionMs(): number {
-    const start = this.#session?.songs[0]?.placement?.start ?? 0;
+    const session = this.#session;
+    const start = session?.songs[0]?.placement?.start ?? 0;
+    const time = session?.target ?? this.#element.currentTime;
 
-    return Math.max(0, Math.round((this.#element.currentTime - start) * 1000));
+    return Math.max(0, Math.round((time - start) * 1000));
   }
 
   /** The element reached the end: switch codecs the slow way, or report the end. */
@@ -1126,6 +1215,14 @@ export class MseEngine implements PlayerEngine {
     const session = this.#session;
 
     if (session === null) return;
+
+    // The element ended at a duration that cut a seek short; play from the target instead.
+    if (this.#holdTarget(session)) {
+      void this.play();
+
+      return;
+    }
+
     const next = session.songs[1];
 
     if (next?.needsReset === true) {

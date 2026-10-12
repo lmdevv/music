@@ -347,6 +347,83 @@ test.describe("MseEngine", () => {
     expect(await ofType(page, "error")).toEqual([]);
   });
 
+  for (const delivery of ["cached", "still transcoding"] as const) {
+    test(`seeks near the end of a queued song it advanced into (${delivery})`, async ({
+      page,
+      request,
+    }) => {
+      const [first, second, third] = [
+        "song-1.flac?p=fmp4-flac",
+        "song-2.mp3?p=fmp4-flac",
+        "song-3.opus?p=fmp4-flac",
+      ];
+
+      const live: Array<boolean> = [];
+
+      page.on("response", (response) => {
+        if (response.request().method() === "GET" && response.url().includes("song-2.mp3")) {
+          live.push(response.headers()["x-music-duration-estimated"] === "1");
+        }
+      });
+
+      await coldCache(request);
+
+      if (delivery === "cached") {
+        await warmCache(request, [first, second, third]);
+      } else {
+        // The first song comes from the cache; the second is transcoded slowly enough that the
+        // seek lands far ahead of the encoder.
+        await warmCache(request, [first]);
+        expect((await request.post(`${media}/control/slow`)).ok()).toBe(true);
+      }
+
+      try {
+        // The second song is appended behind the first on one timeline.
+        await page.evaluate(
+          async ([one, two]) => {
+            window.harness?.preload(two);
+            await window.harness?.load(one, 87_000, true);
+          },
+          [first, second] as const,
+        );
+
+        await waitForEvent(page, "advanced");
+        await page.evaluate((three) => {
+          window.harness?.preload(three);
+        }, third);
+        await expect.poll(() => lastPosition(page), { timeout: 10_000 }).toBeGreaterThan(1000);
+
+        // Far past what the look-ahead appended of the second song: the media source's duration
+        // still ends there.
+        const seekedAt = await page.evaluate(() => {
+          window.harness?.engine.seek(85_000);
+
+          return window.harness?.events.length ?? 0;
+        });
+
+        await expect.poll(() => lastPosition(page), { timeout: 30_000 }).toBeGreaterThan(85_200);
+        expect(keysOf(await ofType(page, "advanced"))).toEqual([second]);
+        expect(live.at(-1)).toBe(delivery === "still transcoding");
+
+        // Every position reported for the second song since the seek is at or past the target.
+        await waitForEvent(page, "advanced", 2);
+        const since = (await events(page)).slice(seekedAt);
+        const advance = since.findIndex((event) => event.type === "advanced");
+
+        const positions = since
+          .slice(0, advance)
+          .flatMap((event) => (event.type === "time" ? [event.positionMs] : []));
+
+        expect(Math.min(...positions)).toBeGreaterThanOrEqual(85_000);
+        expect(keysOf(await ofType(page, "advanced"))).toEqual([second, third]);
+        expect(await ofType(page, "ended")).toEqual([]);
+        expect(await ofType(page, "error")).toEqual([]);
+      } finally {
+        expect((await request.post(`${media}/control/fast`)).ok()).toBe(true);
+      }
+    });
+  }
+
   test("keeps playing a hi-res stream larger than the buffer quota", async ({ page }) => {
     await page.evaluate(
       (file) => window.harness?.load(file, 0, true),

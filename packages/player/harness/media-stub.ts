@@ -13,10 +13,12 @@
  *   like a failed transcode, so the player's fallback to HTML audio can be tested.
  * - `POST /control/cold`: forget the transcodes so far, so the next request for each file is a
  *   first play that streams while ffmpeg writes it.
+ * - `POST /control/slow` and `POST /control/fast`: run later transcodes at eight times real time,
+ *   so a test can seek into a song that is still being transcoded, or at full speed again.
  *
  *   node harness/media-stub.ts
  */
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { basename, extname, join } from "node:path";
@@ -80,6 +82,17 @@ const convex = backend === null ? null : new ConvexHttpClient(backend.convexUrl)
 let down = false;
 
 let failFragmented = false;
+
+/** While this file exists, ffmpeg reads its input at the rate in it (see `throttled-ffmpeg.sh`). */
+const readRateFile = join(fixturesDir, ".readrate");
+
+process.env["MUSIC_STUB_READRATE_FILE"] = readRateFile;
+
+/** Makes later transcodes read their source at `rate` times real time, or at full speed. */
+const throttleTranscodes = (rate: number | null): void => {
+  if (rate === null) rmSync(readRateFile, { force: true });
+  else writeFileSync(readRateFile, String(rate));
+};
 
 /** Sends `file` honouring a single `Range: bytes=start-end` request header. */
 const sendFile = (
@@ -217,6 +230,9 @@ const streamTrack = async (url: URL, incoming: IncomingMessage, response: Server
 
 generateFixtures();
 
+// A run that stopped mid-test may have left transcodes slow.
+throttleTranscodes(null);
+
 const server = createServer((request, response) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
   const range = request.headers.range;
@@ -232,6 +248,8 @@ const server = createServer((request, response) => {
 
     if (action === "fail-fmp4" || action === "pass-fmp4") failFragmented = action === "fail-fmp4";
     else if (action === "cold") coldCache();
+    else if (action === "slow") throttleTranscodes(8);
+    else if (action === "fast") throttleTranscodes(null);
     else down = action === "down";
     response.writeHead(200, cors).end(action);
 
