@@ -214,12 +214,24 @@ test("seeks once a media service busy with other seeks has room", async ({ page,
   expect(await ofType(page, "ended")).toEqual([]);
 });
 
+/** A request for the stream from the 60 s seek below. */
+const atSeek = (url: string): boolean => url.includes("start=60000");
+
 test("stops a seek's stream that never starts, and opens it again", async ({ page, request }) => {
   test.setTimeout(90_000);
-  const stopped: Array<string> = [];
+  // In order: the element's load of the seek's stream failing (stopped), and the end of the
+  // engine's own request for that position (the probe that follows a failed reopen).
+  const seen: Array<"stopped" | "probed"> = [];
 
   page.on("requestfailed", (failed) => {
-    if (failed.url().includes("start=60000")) stopped.push(failed.url());
+    if (!atSeek(failed.url())) return;
+
+    if (failed.resourceType() === "media") seen.push("stopped");
+    else if (failed.resourceType() === "fetch") seen.push("probed");
+  });
+
+  page.on("requestfinished", (finished) => {
+    if (atSeek(finished.url()) && finished.resourceType() === "fetch") seen.push("probed");
   });
 
   await coldCache(request);
@@ -233,7 +245,10 @@ test("stops a seek's stream that never starts, and opens it again", async ({ pag
   // Once the reopening gives up on it, the engine drops that load (freeing its encode on the
   // media service) and, since the service has audio there, opens the stream again.
   await expect.poll(() => lastPosition(page), { timeout: 40_000 }).toBeGreaterThan(60_200);
-  expect(stopped.length).toBeGreaterThan(0);
+  // The engine stopped the hung load itself while probing, rather than leaving it for the next
+  // reopen, which follows the probe, to replace (holding its encode on the media service meanwhile).
+  expect(seen.indexOf("stopped")).toBeGreaterThanOrEqual(0);
+  expect(seen.slice(0, seen.indexOf("stopped"))).not.toContain("probed");
   expect(await ofType(page, "error")).toEqual([]);
   expect(await ofType(page, "ended")).toEqual([]);
 });

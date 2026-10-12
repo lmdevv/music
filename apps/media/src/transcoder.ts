@@ -825,8 +825,17 @@ const make = Effect.gen(function* () {
   });
 
   const openAt = Effect.fn("Transcoder.openAt")(function* (input: TranscodeInput, startMs: number) {
-    if (!(yield* Semaphore.takeIfAvailable(offsetRuns, 1))) return yield* new OffsetRunsBusy();
-    yield* Effect.addFinalizer(() => Semaphore.release(offsetRuns, 1));
+    // One step: a client that leaves (which interrupts this) between taking the permit and
+    // registering its release would otherwise lose the permit for good.
+    const admitted = yield* Effect.uninterruptible(
+      Semaphore.takeIfAvailable(offsetRuns, 1).pipe(
+        Effect.tap((taken) =>
+          taken ? Effect.addFinalizer(() => Semaphore.release(offsetRuns, 1)) : Effect.void,
+        ),
+      ),
+    );
+
+    if (!admitted) return yield* new OffsetRunsBusy();
 
     const { sampleRate, aacRate, primingSamples, durationSamples } = yield* offsetTiming(
       input,

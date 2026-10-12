@@ -520,8 +520,9 @@ export class HtmlAudioEngine implements PlayerEngine {
    * The stream at `reopening.positionMs` could not be played (the element failed with `error`, or
    * never got going): asks the media service what it has there. No audio means the song is over
    * (an offset past its real end). A busy service is asked again after its `Retry-After`, and
-   * with `retryAudio`, a stream it has audio for is opened again at once (the element may have
-   * met a busy answer that has cleared since), both up to `MAX_BUSY_RETRIES` times in a row.
+   * with `retryAudio`, a stream it has audio for is opened again at once, once (the element may
+   * have met a busy answer that has cleared since; failing again, the element can't play it).
+   * Busy answers are retried up to `MAX_BUSY_RETRIES` times in a row.
    * Anything else fails the song. The reopening stays on the slot meanwhile, so seeks, `play`,
    * and `pause` still apply, and a load, an unload, or an advance cancels it.
    */
@@ -545,7 +546,8 @@ export class HtmlAudioEngine implements PlayerEngine {
 
     const again =
       slot.retries < MAX_BUSY_RETRIES &&
-      (OffsetProbe.$is("Busy")(probe) || (retryAudio && OffsetProbe.$is("Audio")(probe)));
+      (OffsetProbe.$is("Busy")(probe) ||
+        (retryAudio && OffsetProbe.$is("Audio")(probe) && slot.retries === 0));
 
     if (again) {
       slot.retries += 1;
