@@ -87,9 +87,11 @@ test("Ctrl+N and Ctrl+P move through the command menu", async ({ page }) => {
   await page.keyboard.press("ControlOrMeta+k");
   const menu = page.getByRole("dialog", { name: "Command menu" });
   // With no query, a "Now playing" row can arrive after the first row was selected, and the
-  // selection stays put. A query selects its first result once the search settles.
+  // selection stays put. A query selects its first result once the search settles; wait for that
+  // result, or Ctrl+N can land on the list from before the query.
   await menu.getByRole("combobox").fill("queue");
   const options = menu.getByRole("option");
+  await expect(options.first()).toHaveId("command-open-queue");
   await expect(options.first()).toHaveAttribute("aria-selected", "true");
 
   await page.keyboard.press("Control+n");
