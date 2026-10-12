@@ -526,10 +526,13 @@ test.describe("MseEngine", () => {
         expect(offsets).toEqual([expect.stringContaining(`start=${target}`)]);
         expect(await ofType(page, "error")).toEqual([]);
 
-        // The song ends at its real end, not at the estimate the seek was clamped to.
+        // The song ends at its real end, not at the estimate the seek was clamped to, and once.
         if (!queued) {
           expect(Math.abs((await lastPosition(page)) - TRUNCATED_REAL_MS)).toBeLessThan(1000);
         }
+
+        await page.waitForTimeout(1000);
+        expect(await ofType(page, "ended")).toHaveLength(1);
       });
     }
   }

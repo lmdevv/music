@@ -197,6 +197,8 @@ interface Session {
   /** Seconds to buffer ahead; lowered when the browser's buffer quota runs out first. */
   aheadLimit: number;
   cancelled: boolean;
+  /** The end of the timeline was reported (`ended`) since the last seek or `play`. */
+  endReported: boolean;
   wake: () => void;
 }
 
@@ -326,6 +328,8 @@ export class MseEngine implements PlayerEngine {
   /** Starts output. Emits `autoplay-blocked` when the browser wants a user gesture first. */
   async play(): Promise<void> {
     if (this.#session === null) return;
+    // Playing again after the end (the element starts over) ends again.
+    this.#session.endReported = false;
 
     try {
       await this.#element.play();
@@ -370,6 +374,7 @@ export class MseEngine implements PlayerEngine {
 
     this.#emit({ type: "time", positionMs: Math.round((target - placement.start) * 1000) });
     session.target = target;
+    session.endReported = false;
     // A queued song lies past the duration its appends have reached so far, and the element cuts
     // a seek beyond the duration short. When an append runs meanwhile, `#holdTarget` retries.
     this.#extendDuration(session, placement.end);
@@ -469,6 +474,7 @@ export class MseEngine implements PlayerEngine {
       target: null,
       aheadLimit: AHEAD_SECONDS,
       cancelled: false,
+      endReported: false,
       wake: () => undefined,
     };
 
@@ -910,6 +916,13 @@ export class MseEngine implements PlayerEngine {
     }
 
     session.mediaSource.endOfStream();
+    const target = session.target;
+    const ranges = buffer.buffered;
+    const bufferedEnd = ranges.length === 0 ? 0 : ranges.end(ranges.length - 1);
+
+    // A seek past a song's real end left nothing to play from its target: Chromium ends there,
+    // but Firefox waits at it for good.
+    if (target !== null && bufferedEnd <= target + BUFFERED_MARGIN) this.#reachEnd(session);
   }
 
   /** Advances one song's stream by one step: open, read the header, configure, or append. */
@@ -1610,6 +1623,13 @@ export class MseEngine implements PlayerEngine {
       return;
     }
 
+    this.#reachEnd(session);
+  }
+
+  /** The timeline played out: switch codecs the slow way, or report the end, once. */
+  #reachEnd(session: Session): void {
+    if (session.endReported) return;
+    session.endReported = true;
     const next = session.songs[1];
 
     if (next?.needsReset === true) {
