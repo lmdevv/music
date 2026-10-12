@@ -98,6 +98,9 @@ interface Cut {
 
 let nextCut: Cut | null = null;
 
+/** How long a cut stream sits silent before it is aborted or ended. */
+const CUT_AFTER_MS = 2000;
+
 /** The cut for the response being sent now, if any; each cut applies once. */
 const takeCut = (): Cut | null => {
   const cut = nextCut;
@@ -238,6 +241,9 @@ const pump = async (
     if (cut !== null && sent + next.value.length >= cut.bytes) {
       response.write(next.value.subarray(0, cut.bytes - sent));
       await reader.cancel();
+      // Stalled for a while first, as a proxy sees a client that stopped reading: long enough
+      // for the element to have started on what it got.
+      await new Promise((resolve) => setTimeout(resolve, CUT_AFTER_MS));
 
       if (cut.mode === "abort") response.destroy();
       else if (cut.mode === "end") response.end();

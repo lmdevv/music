@@ -191,9 +191,10 @@ for (const mode of ["abort", "end", "hang"] as const) {
     await expect.poll(() => lastPosition(page), { timeout: 30_000 }).toBeGreaterThan(9000);
     console.log(`${mode}: ${urls.map((url) => new URL(url).search).join(" ")}`);
 
-    // Chromium fetches a hung stream again by itself, with a byte range the finished file
-    // answers; WebKit freezes instead, and the engine reopens the song from an offset.
-    if (mode !== "hang" || browserName === "webkit") {
+    // Browsers fetch a dropped stream again by themselves (and Chromium and Firefox a hung one),
+    // with a byte range the finished file answers. A stream that ends cleanly, and a hung one
+    // in WebKit (which freezes, as Safari does), take the engine reopening it from an offset.
+    if (mode === "end" || (mode === "hang" && browserName === "webkit")) {
       expect(urls.some((url) => url.includes("start="))).toBe(true);
     }
 

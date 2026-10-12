@@ -396,7 +396,8 @@ export class HtmlAudioEngine implements PlayerEngine {
     const { element } = slot;
 
     element.addEventListener("loadedmetadata", () => {
-      slot.live = isLive(element);
+      // A stream from an offset is live even when all of it arrived before its metadata.
+      slot.live = slot.startMs > 0 || isLive(element);
     });
 
     element.addEventListener("playing", () => {
