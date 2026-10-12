@@ -671,3 +671,50 @@ test("devices silent for a day leave Play on, and the daily prune deletes old on
   expect(kept).toContain(closed.deviceId);
   expect(kept).not.toContain(ancient.deviceId);
 });
+
+test("data saver plays through HTML audio, starts a first play at once, and seeks", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto("/settings/playback");
+
+  const dataSaver = page
+    .getByRole("radiogroup", { name: "Streaming quality" })
+    .getByRole("radio", { name: "Data saver" });
+
+  await dataSaver.click();
+  await expect(dataSaver).toHaveAttribute("aria-checked", "true");
+  await openFirstAlbum(page);
+
+  /** Where the playing data saver stream is, in seconds, or -1 while none plays. */
+  const dataSaverAt = (): Promise<number> =>
+    page.evaluate(() =>
+      Math.max(
+        -1,
+        ...[...(window.musicTestMedia ?? [])].flatMap((element) =>
+          !element.paused && element.src.includes("p=aac-128") ? [element.currentTime] : [],
+        ),
+      ),
+    );
+
+  // No song has played at 128 kbps yet, so this one is transcoded as it plays.
+  const tappedAt = Date.now();
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await expect.poll(dataSaverAt, { intervals: [50] }).toBeGreaterThan(0.02);
+  const firstAudioMs = Date.now() - tappedAt;
+
+  console.log(`data saver first play: audio after ${firstAudioMs} ms`);
+  expect(firstAudioMs).toBeLessThan(3000);
+
+  const bar = page.getByRole("region", { name: "Player" });
+  await bar.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect.poll(() => isPlayingAudio(page)).toBe(false);
+  cli(apiKey, ["playback", "seek", "--position-ms", "3000"]);
+  await expect.poll(() => decodeState(cli(apiKey, ["now", "--json"])).positionMs).toBe(3000);
+
+  // Playing on from where it paused would take more than two seconds to get there.
+  const resumedAt = Date.now();
+  await bar.getByRole("button", { name: "Play", exact: true }).click();
+  await expect.poll(dataSaverAt, { intervals: [50] }).toBeGreaterThanOrEqual(3);
+  expect(Date.now() - resumedAt).toBeLessThan(2000);
+});
