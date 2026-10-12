@@ -121,16 +121,29 @@ test("Ctrl+N and Ctrl+P move through the command menu", async ({ page }) => {
   // With no query, a "Now playing" row can arrive after the first row was selected, and the
   // selection stays put. A query selects its first result once the search settles; wait for that
   // result, or Ctrl+N can land on the list from before the query.
-  await menu.getByRole("combobox").fill("queue");
   const options = menu.getByRole("option");
+  const third = await options.nth(2).boundingBox();
+
+  if (third === null) throw new Error("The command menu has fewer than three rows");
+  const rest = { x: third.x + third.width / 2, y: third.y + third.height / 2 };
+  // The mouse rests over the list. Chromium reports rows moving under a resting pointer as a
+  // move to the same spot, which must not take the row the keyboard picked.
+  await page.mouse.move(rest.x, rest.y);
+
+  const press = async (key: string): Promise<void> => {
+    await page.keyboard.press(key);
+    await page.mouse.move(rest.x, rest.y);
+  };
+
+  await menu.getByRole("combobox").fill("queue");
   await expect(options.first()).toHaveId("command-open-queue");
   await expect(options.first()).toHaveAttribute("aria-selected", "true");
 
-  await page.keyboard.press("Control+n");
+  await press("Control+n");
   await expect(options.nth(1)).toHaveAttribute("aria-selected", "true");
-  await page.keyboard.press("Control+n");
+  await press("Control+n");
   await expect(options.nth(2)).toHaveAttribute("aria-selected", "true");
-  await page.keyboard.press("Control+p");
+  await press("Control+p");
   await expect(options.nth(1)).toHaveAttribute("aria-selected", "true");
 });
 
