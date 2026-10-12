@@ -488,8 +488,14 @@ test("album cards and song rows expose their play buttons", async ({ page }) => 
     .filter({ has: page.getByRole("button", { name: /^More actions for / }) })
     .first();
 
-  await row.hover();
-  await expect(row.getByRole("button", { name: /^Play / })).toBeVisible();
+  // No hover: role queries skip display:none, so finding it proves screen readers can, and
+  // focusing it and pressing Enter is how a keyboard plays the song.
+  const play = row.getByRole("button", { name: /^Play / });
+
+  await expect(play).toHaveCount(1);
+  await play.focus();
+  await page.keyboard.press("Enter");
+  await expect(row).toHaveAttribute("aria-current", "true");
 });
 
 test("the last song in the queue stops at its end instead of starting over", async ({ page }) => {
