@@ -49,7 +49,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent, ReactNode } from "react";
+import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { toast } from "sonner";
 
 import { ProgressBar, jobPercent } from "@/components/auth/scan-progress";
@@ -349,6 +349,8 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
   const [detail, setDetail] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
+  /** Where the pointer last was over the list, or null before it first moved there. */
+  const pointer = useRef<{ readonly x: number; readonly y: number } | null>(null);
   const admin = me?.role === "admin";
 
   useEffect(() => {
@@ -661,7 +663,17 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
                 header={
                   index === 0 || items[index - 1]?.section !== item.section ? item.section : null
                 }
-                onHover={() => select(index)}
+                onHover={(event) => {
+                  // Browsers report rows moving under a resting pointer (the list filling in or
+                  // scrolling to the selection) as mouse movement. Only a pointer that moved
+                  // selects, so a resting mouse never takes the row the keyboard chose.
+                  const last = pointer.current;
+                  pointer.current = { x: event.clientX, y: event.clientY };
+
+                  if (last !== null && (last.x !== event.clientX || last.y !== event.clientY)) {
+                    select(index);
+                  }
+                }}
                 onSelect={() => {
                   select(index);
 
@@ -789,7 +801,7 @@ function ItemRow({
   readonly index: number;
   readonly active: boolean;
   readonly header: string | null;
-  readonly onHover: () => void;
+  readonly onHover: (event: MouseEvent<HTMLDivElement>) => void;
   readonly onSelect: () => void;
 }) {
   const player = usePlayer();
