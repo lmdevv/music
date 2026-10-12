@@ -534,6 +534,41 @@ test.describe("MseEngine", () => {
     }
   }
 
+  test("seeks once a media service busy with other seeks has room", async ({ page, request }) => {
+    const song = "song-2.mp3?p=fmp4-aac";
+    const statuses: Array<number> = [];
+
+    page.on("response", (response) => {
+      if (response.url().includes("start=") && response.status() !== 0) {
+        statuses.push(response.status());
+      }
+    });
+
+    await coldCache(request);
+    // The full transcode runs at eight times real time, so the target stays far ahead of it.
+    expect((await request.post(`${media}/control/slow`)).ok()).toBe(true);
+
+    try {
+      await page.evaluate((file) => window.harness?.load(file, 0, true), song);
+      await waitForEvent(page, "playing");
+      await expect.poll(() => lastPosition(page), { timeout: 10_000 }).toBeGreaterThan(500);
+
+      // Every seek transcode is taken for a moment: the seek's stream answers 503, Retry-After: 1.
+      expect((await request.post(`${media}/control/busy?ms=1500`)).ok()).toBe(true);
+      await page.evaluate(() => {
+        window.harness?.engine.seek(80_000);
+      });
+
+      await expect.poll(() => lastPosition(page), { timeout: 20_000 }).toBeGreaterThan(80_200);
+      expect(await lastPosition(page)).toBeLessThan(85_000);
+      expect(statuses[0]).toBe(503);
+      expect(statuses.at(-1)).toBe(200);
+      expect(await ofType(page, "error")).toEqual([]);
+    } finally {
+      expect((await request.post(`${media}/control/fast`)).ok()).toBe(true);
+    }
+  });
+
   for (const mode of ["abort", "end", "hang"] as const) {
     test(`picks up a live stream cut off mid-song (${mode})`, async ({ page, request }) => {
       const song = "song-2.mp3?p=fmp4-aac";

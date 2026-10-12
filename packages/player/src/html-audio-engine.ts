@@ -1,6 +1,7 @@
+import { delay, MAX_BUSY_RETRIES } from "./busy-retry";
 import type { EngineErrorReason, EngineEvent, EngineSource, PlayerEngine } from "./engine";
 import { primeInGesture } from "./prime-audio";
-import { endedEarly, nothingLeftAt, offsetUrl } from "./stream-offset";
+import { endedEarly, OffsetProbe, offsetUrl, probeOffset } from "./stream-offset";
 
 /** How often the engine emits `time` while playing (5 Hz; the contract asks for at least 4). */
 const TIME_INTERVAL_MS = 200;
@@ -62,6 +63,11 @@ interface Slot {
   /** Recoveries since playback last got going again, and where the last one reopened. */
   recoveries: number;
   recoveredAtMs: number;
+  /**
+   * Reopenings in a row that failed while the media service was busy or had audio there, each
+   * opened again (see `#settleFailure`).
+   */
+  retries: number;
 }
 
 /**
@@ -81,17 +87,6 @@ const errorReason = (error: MediaError | null): EngineErrorReason => {
   return "unsupported";
 };
 
-/** Resolves after `ms`, or at once when `signal` aborts. */
-const delay = (ms: number, signal: AbortSignal): Promise<void> =>
-  new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-
-    signal.addEventListener("abort", () => {
-      clearTimeout(timer);
-      resolve();
-    });
-  });
-
 /**
  * A `PlayerEngine` on two `HTMLAudioElement`s. The idle element preloads the next source; when
  * the current one ends, the engine starts the idle one from the `ended` handler and swaps roles.
@@ -107,7 +102,8 @@ const delay = (ms: number, signal: AbortSignal): Promise<void> =>
  * not read from in a while, or ffmpeg dies. The engine notices (an `ended` short of the song's
  * length, an `error`, or time that stops moving while playing, which is all Safari shows) and
  * reopens the song where it stopped. When that keeps failing it asks the service whether any
- * audio is left there: none means the song is over, anything else is reported as an error.
+ * audio is left there: none means the song is over. A service busy with other seeks (`503`) is
+ * asked again after its `Retry-After`, a few times; anything else is reported as an error.
  */
 export class HtmlAudioEngine implements PlayerEngine {
   readonly #slots: readonly [Slot, Slot];
@@ -281,6 +277,7 @@ export class HtmlAudioEngine implements PlayerEngine {
       watch: null,
       recoveries: 0,
       recoveredAtMs: 0,
+      retries: 0,
     };
   }
 
@@ -309,21 +306,31 @@ export class HtmlAudioEngine implements PlayerEngine {
     slot.watch = null;
     slot.recoveries = 0;
     slot.recoveredAtMs = 0;
+    slot.retries = 0;
     slot.element.pause();
     slot.element.removeAttribute("src");
     // Loading an empty source aborts the download and frees the decoder.
     slot.element.load();
   }
 
-  /** Resolves true once `element` can start, or false when it failed or a newer load won. */
-  #whenReady(element: HTMLAudioElement): Promise<boolean> {
+  /**
+   * Resolves true once `element` can start, or false when it failed or a newer load won, and with
+   * `limit`, after `limit.ms` or once `limit.signal` aborts.
+   */
+  #whenReady(
+    element: HTMLAudioElement,
+    limit?: { readonly ms: number; readonly signal: AbortSignal },
+  ): Promise<boolean> {
     if (element.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return Promise.resolve(true);
 
     return new Promise((resolve) => {
       const settle = (ready: boolean): void => {
         element.removeEventListener("canplay", onReady);
         element.removeEventListener("error", onFail);
-        this.#cancelLoad = null;
+        limit?.signal.removeEventListener("abort", onFail);
+        clearTimeout(timer);
+
+        if (this.#cancelLoad === onFail) this.#cancelLoad = null;
         resolve(ready);
       };
 
@@ -335,8 +342,11 @@ export class HtmlAudioEngine implements PlayerEngine {
         settle(false);
       };
 
+      const timer = limit === undefined ? undefined : setTimeout(onFail, limit.ms);
+
       element.addEventListener("canplay", onReady);
       element.addEventListener("error", onFail);
+      limit?.signal.addEventListener("abort", onFail, { once: true });
       this.#cancelLoad = onFail;
     });
   }
@@ -448,13 +458,12 @@ export class HtmlAudioEngine implements PlayerEngine {
       }
 
       this.#stopTicker();
-      this.#fail(slot);
+      this.#fail(element.error);
     });
   }
 
-  #fail(slot: Slot): void {
-    const { error } = slot.element;
-
+  /** Reports the current song as failed with `error`, the element's, when it has one. */
+  #fail(error: MediaError | null): void {
     this.#emit({
       type: "error",
       reason: error === null ? "network" : errorReason(error),
@@ -491,7 +500,13 @@ export class HtmlAudioEngine implements PlayerEngine {
 
     if (slot.recoveries >= MAX_RECOVERIES) {
       this.#stopTicker();
-      await this.#settleFailure(slot, positionMs);
+      // It opened every time but never got going: audio there is no reason to try again.
+      await this.#settleFailure(
+        slot,
+        { positionMs, play, abort: new AbortController() },
+        slot.element.error,
+        false,
+      );
 
       return;
     }
@@ -502,20 +517,56 @@ export class HtmlAudioEngine implements PlayerEngine {
   }
 
   /**
-   * A stream at `positionMs` could not be played: the song is over when the media service has no
-   * audio left there (an offset past its real end), and failed otherwise.
+   * The stream at `reopening.positionMs` could not be played (the element failed with `error`, or
+   * never got going): asks the media service what it has there. No audio means the song is over
+   * (an offset past its real end). A busy service is asked again after its `Retry-After`, and
+   * with `retryAudio`, a stream it has audio for is opened again at once (the element may have
+   * met a busy answer that has cleared since), both up to `MAX_BUSY_RETRIES` times in a row.
+   * Anything else fails the song. The reopening stays on the slot meanwhile, so seeks, `play`,
+   * and `pause` still apply, and a load, an unload, or an advance cancels it.
    */
-  async #settleFailure(slot: Slot, positionMs: number): Promise<void> {
+  async #settleFailure(
+    slot: Slot,
+    reopening: Reopening,
+    error: MediaError | null,
+    retryAudio: boolean,
+  ): Promise<void> {
     const source = slot.source;
 
     if (source === null) return;
-    const abort = new AbortController();
-    const over = await nothingLeftAt(offsetUrl(source.url, positionMs), abort.signal);
+    slot.reopening = reopening;
 
-    if (slot.source !== source || slot.reopening !== null) return;
+    const probe = await probeOffset(
+      offsetUrl(source.url, reopening.positionMs),
+      reopening.abort.signal,
+    );
 
-    if (over && this.#isCurrent(slot)) this.#advance(slot);
-    else if (this.#isCurrent(slot)) this.#fail(slot);
+    if (slot.reopening !== reopening) return;
+
+    const again =
+      slot.retries < MAX_BUSY_RETRIES &&
+      (OffsetProbe.$is("Busy")(probe) || (retryAudio && OffsetProbe.$is("Audio")(probe)));
+
+    if (again) {
+      slot.retries += 1;
+
+      if (OffsetProbe.$is("Busy")(probe)) {
+        await delay(probe.retryAfterMs, reopening.abort.signal);
+
+        if (slot.reopening !== reopening) return;
+      }
+
+      await this.#reopen(slot, reopening);
+
+      return;
+    }
+
+    slot.reopening = null;
+
+    if (!this.#isCurrent(slot)) return;
+
+    if (OffsetProbe.$is("Empty")(probe)) this.#advance(slot);
+    else this.#fail(error);
   }
 
   /**
@@ -541,10 +592,10 @@ export class HtmlAudioEngine implements PlayerEngine {
       fromStart ? 0 : target,
     );
 
-    const ready = await Promise.race([
-      this.#whenReady(slot.element),
-      delay(REOPEN_TIMEOUT_MS, reopening.abort.signal).then(() => false),
-    ]);
+    const ready = await this.#whenReady(slot.element, {
+      ms: REOPEN_TIMEOUT_MS,
+      signal: reopening.abort.signal,
+    });
 
     if (slot.reopening !== reopening) return;
 
@@ -557,19 +608,33 @@ export class HtmlAudioEngine implements PlayerEngine {
       return;
     }
 
-    slot.reopening = null;
-
     if (!ready) {
-      await this.#settleFailure(slot, target);
+      const { error } = slot.element;
+
+      // A load that timed out is still going: stop it, so the media service can end its encode
+      // and the load's late events start nothing.
+      if (error === null) this.#stopLoading(slot);
+      await this.#settleFailure(slot, reopening, error, true);
 
       return;
     }
+
+    slot.reopening = null;
+    slot.retries = 0;
 
     // The song's own URL answered with the finished file, which seeks by itself.
     if (!slot.live) slot.element.currentTime = reopening.positionMs / 1000;
 
     if (reopening.play) await this.#start(slot);
     else this.#emit({ type: "time", positionMs: this.#positionOf(slot) });
+  }
+
+  /** Stops the slot's element loading its stream, which then reports nothing more. */
+  #stopLoading(slot: Slot): void {
+    slot.live = false;
+    slot.watch = null;
+    slot.element.removeAttribute("src");
+    slot.element.load();
   }
 
   /**

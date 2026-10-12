@@ -19,6 +19,9 @@
  *   from an offset) after `n` bytes, as a proxy or a dying ffmpeg would (see `Cut`).
  * - `POST /control/slow` and `POST /control/fast`: run later transcodes at eight times real time,
  *   so a test can seek into a song that is still being transcoded, or at full speed again.
+ * - `POST /control/busy?ms=<n>`: for the next `n` milliseconds, answer every stream from an offset
+ *   (`&start=`) like a media service whose seek transcodes are all taken: `503` with
+ *   `Retry-After: 1`.
  *
  *   node harness/media-stub.ts
  */
@@ -76,6 +79,7 @@ const cors = {
     "Accept-Ranges",
     "Content-Length",
     "ETag",
+    "Retry-After",
     ...Object.values(StreamTimingHeader),
   ].join(", "),
 };
@@ -87,6 +91,17 @@ let down = false;
 let failFragmented = false;
 
 let failAac = false;
+
+/** Until when (`Date.now()`) streams from an offset get a busy answer; see `/control/busy`. */
+let busyUntil = 0;
+
+/** Answers `response` as busy when `url` asks for an offset while `/control/busy` is on. */
+const answeredBusy = (url: URL, response: ServerResponse): boolean => {
+  if (Number(url.searchParams.get("start") ?? "0") <= 0 || Date.now() >= busyUntil) return false;
+  response.writeHead(503, { ...cors, "Retry-After": "1" }).end("Busy");
+
+  return true;
+};
 
 /**
  * How the next streamed transcode stops early, after `bytes`: `abort` drops the connection (a
@@ -314,6 +329,8 @@ const streamTrack = async (url: URL, incoming: IncomingMessage, response: Server
 
   const transcoded = transcodeProfile(profile);
 
+  if (transcoded !== null && answeredBusy(url, response)) return;
+
   if (
     (failFragmented && (transcoded === "fmp4-flac" || transcoded === "fmp4-aac")) ||
     (failAac && (transcoded === "aac-128" || transcoded === "aac-320"))
@@ -354,6 +371,7 @@ const server = createServer((request, response) => {
     } else if (action === "cold") coldCache();
     else if (action === "slow") throttleTranscodes(8);
     else if (action === "fast") throttleTranscodes(null);
+    else if (action === "busy") busyUntil = Date.now() + Number(url.searchParams.get("ms"));
     else down = action === "down";
     response.writeHead(200, cors).end(action);
 
@@ -404,6 +422,8 @@ const server = createServer((request, response) => {
 
       return;
     }
+
+    if (answeredBusy(url, response)) return;
 
     const codec = fixtureCodecs.get(extname(file)) ?? "unknown";
 

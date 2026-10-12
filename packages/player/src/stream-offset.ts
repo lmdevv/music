@@ -3,6 +3,9 @@
  * profile, which encodes from that point at once instead of making a seek wait for the whole
  * transcode. See `StreamTimingHeader.start` for the timeline.
  */
+import { Data } from "effect";
+
+import { retryAfterMs } from "./busy-retry";
 
 /** The query parameter that starts a transcoded stream at an offset, in milliseconds. */
 const START_PARAMETER = "start";
@@ -30,24 +33,60 @@ const EARLY_END_MS = 1500;
 export const endedEarly = (positionMs: number, durationMs: number): boolean =>
   positionMs < durationMs - EARLY_END_MS;
 
-/**
- * Resolves true when the media service has no audio at `url` at all: it answers `200` with an
- * empty body, as it does for an offset past the song's real end. Resolves false when it has
- * audio there, fails, or cannot be reached; a media element that fails on such a stream is then
- * a real failure.
- */
-export const nothingLeftAt = async (url: string, signal: AbortSignal): Promise<boolean> => {
-  try {
-    const response = await fetch(url, { signal });
+/** What the media service has at an offset stream URL (see `probeOffset`). */
+export type OffsetProbe = Data.TaggedEnum<{
+  /** A `200` with an empty body, as for an offset past the song's real end: the song is over. */
+  Empty: {};
+  /** Audio: a stream that failed to play there may play when opened again. */
+  Audio: {};
+  /** Every seek transcode is taken (`503`); asking again after `retryAfterMs` may work. */
+  Busy: { readonly retryAfterMs: number };
+  /** An error status, or no answer within `PROBE_TIMEOUT_MS`. */
+  Failed: {};
+}>;
 
-    if (!response.ok || response.body === null) return false;
+/** Constructors and matchers for `OffsetProbe`. */
+export const OffsetProbe = Data.taggedEnum<OffsetProbe>();
+
+/** How long `probeOffset` waits for the start of an answer. */
+const PROBE_TIMEOUT_MS = 10_000;
+
+/**
+ * Asks the media service what it has at `url`, reading at most its first bytes. Gives up (as
+ * `Failed`) after `PROBE_TIMEOUT_MS`, or at once when `signal` aborts.
+ */
+export const probeOffset = async (url: string, signal: AbortSignal): Promise<OffsetProbe> => {
+  const abort = new AbortController();
+
+  const stop = (): void => {
+    abort.abort();
+  };
+
+  const timer = setTimeout(stop, PROBE_TIMEOUT_MS);
+
+  signal.addEventListener("abort", stop, { once: true });
+
+  try {
+    const response = await fetch(url, { signal: abort.signal });
+    const busy = retryAfterMs(response);
+
+    if (busy !== null) {
+      void response.body?.cancel().catch(() => undefined);
+
+      return OffsetProbe.Busy({ retryAfterMs: busy });
+    }
+
+    if (!response.ok || response.body === null) return OffsetProbe.Failed();
     const reader = response.body.getReader();
     const first = await reader.read();
 
     await reader.cancel();
 
-    return first.done;
+    return first.done ? OffsetProbe.Empty() : OffsetProbe.Audio();
   } catch {
-    return false;
+    return OffsetProbe.Failed();
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", stop);
   }
 };

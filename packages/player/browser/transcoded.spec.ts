@@ -189,6 +189,55 @@ test("seeks ahead of and behind what is transcoded so far, at once", async ({ pa
   expect(await ofType(page, "ended")).toEqual([]);
 });
 
+test("seeks once a media service busy with other seeks has room", async ({ page, request }) => {
+  const statuses: Array<number> = [];
+
+  page.on("response", (response) => {
+    if (response.url().includes("start=") && response.status() !== 0) {
+      statuses.push(response.status());
+    }
+  });
+
+  await coldCache(request);
+  await load(page, `${SONG}?p=aac-128`, 0, true);
+  await waitForEvent(page, "playing");
+
+  // Every seek transcode is taken for a moment: the seek's stream answers 503, Retry-After: 1.
+  await control(request, "busy?ms=1500");
+  await seek(page, 60_000);
+
+  await expect.poll(() => lastPosition(page), { timeout: 20_000 }).toBeGreaterThan(60_200);
+  expect(await lastPosition(page)).toBeLessThan(65_000);
+  expect(statuses[0]).toBe(503);
+  expect(statuses.at(-1)).toBe(200);
+  expect(await ofType(page, "error")).toEqual([]);
+  expect(await ofType(page, "ended")).toEqual([]);
+});
+
+test("stops a seek's stream that never starts, and opens it again", async ({ page, request }) => {
+  test.setTimeout(90_000);
+  const stopped: Array<string> = [];
+
+  page.on("requestfailed", (failed) => {
+    if (failed.url().includes("start=60000")) stopped.push(failed.url());
+  });
+
+  await coldCache(request);
+  await load(page, `${SONG}?p=aac-128`, 0, true);
+  await waitForEvent(page, "playing");
+
+  // The seek's stream sends its headers and then nothing, as a stuck proxy would.
+  await cut(request, 0, "hang");
+  await seek(page, 60_000);
+
+  // Once the reopening gives up on it, the engine drops that load (freeing its encode on the
+  // media service) and, since the service has audio there, opens the stream again.
+  await expect.poll(() => lastPosition(page), { timeout: 40_000 }).toBeGreaterThan(60_200);
+  expect(stopped.length).toBeGreaterThan(0);
+  expect(await ofType(page, "error")).toEqual([]);
+  expect(await ofType(page, "ended")).toEqual([]);
+});
+
 for (const mode of ["abort", "end", "hang"] as const) {
   test(`carries on when a live stream is cut off mid-song (${mode})`, async ({
     browserName,

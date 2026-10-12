@@ -23,11 +23,13 @@
  *
  * A stream cut off before its song's end (dropped, ended early, or silent while the playhead
  * waits) is picked up where its appends stopped, the same way as a seek, up to
- * `MAX_RECOVERIES` times in a row without progress.
+ * `MAX_RECOVERIES` times in a row without progress. A stream the media service is too busy to
+ * start (`503`) is asked for again after its `Retry-After` (see `busy-retry.ts`).
  *
  * A codec change between songs (FLAC to AAC) uses `SourceBuffer.changeType`. Browsers without it
  * finish the current song and reset the `MediaSource` for the next one, with a short gap.
  */
+import { delay, MAX_BUSY_RETRIES, retryAfterMs } from "./busy-retry";
 import type { EngineErrorReason, EngineEvent, EngineSource, PlayerEngine } from "./engine";
 import { codecMimeType, concatBytes, HeaderRead, readHeader } from "./fmp4";
 import type { AudioCodec, StreamHeader } from "./fmp4";
@@ -136,6 +138,8 @@ interface Song {
   lastBytesAt: number;
   /** Pickups of a cut-off stream since the song's last successful append. */
   recoveries: number;
+  /** Busy answers (`503`) in a row from the media service while opening the song's stream. */
+  busyRetries: number;
   /** The media service ignored `&start=` once, so the song is never asked for an offset again. */
   offsetsIgnored: boolean;
   /**
@@ -424,6 +428,7 @@ export class MseEngine implements PlayerEngine {
       appendedTo: startSeconds,
       lastBytesAt: 0,
       recoveries: 0,
+      busyRetries: 0,
       offsetsIgnored: false,
       exact: null,
       exactAbort: new AbortController(),
@@ -967,6 +972,17 @@ export class MseEngine implements PlayerEngine {
       return;
     }
 
+    const busy = retryAfterMs(response);
+
+    if (busy !== null && song.busyRetries < MAX_BUSY_RETRIES) {
+      // Every seek transcode is taken; one frees up shortly. The next step opens it again.
+      void response.body?.cancel().catch(() => undefined);
+      song.busyRetries += 1;
+      await delay(busy, song.abort.signal);
+
+      return;
+    }
+
     if (!response.ok || response.body === null) {
       throw new EngineFailure("unsupported", `The stream answered ${response.status}`);
     }
@@ -990,6 +1006,7 @@ export class MseEngine implements PlayerEngine {
       song.fromSeconds = null;
     }
 
+    song.busyRetries = 0;
     song.streamStart = startSamples === null ? 0 : startSamples / timing.sampleRate;
     song.etag = response.headers.get("ETag");
     song.reader = response.body.getReader();
