@@ -116,6 +116,9 @@ const report = (label: string, analysis: GapAnalysis): void => {
 const supportsChangeType = (page: Page): Promise<boolean> =>
   page.evaluate(() => "SourceBuffer" in window && "changeType" in SourceBuffer.prototype);
 
+/** Longest a seek far ahead of a running transcode may take to play. */
+const SEEK_AHEAD_LIMIT_MS = 1500;
+
 /** Largest boundary offset and total length error, in samples, that still count as gapless. */
 const TOLERANCE_SAMPLES = 2;
 
@@ -359,10 +362,12 @@ test.describe("MseEngine", () => {
       ];
 
       const live: Array<boolean> = [];
+      const urls: Array<string> = [];
 
       page.on("response", (response) => {
         if (response.request().method() === "GET" && response.url().includes("song-2.mp3")) {
           live.push(response.headers()["x-music-duration-estimated"] === "1");
+          urls.push(response.url());
         }
       });
 
@@ -404,6 +409,8 @@ test.describe("MseEngine", () => {
         await expect.poll(() => lastPosition(page), { timeout: 30_000 }).toBeGreaterThan(85_200);
         expect(keysOf(await ofType(page, "advanced"))).toEqual([second]);
         expect(live.at(-1)).toBe(delivery === "still transcoding");
+        // Ahead of the encoder the song streams from the target; a finished file is jumped in.
+        expect(urls.at(-1)?.includes("start=85000")).toBe(delivery === "still transcoding");
 
         // Every position reported for the second song since the seek is at or past the target.
         await waitForEvent(page, "advanced", 2);
@@ -417,6 +424,55 @@ test.describe("MseEngine", () => {
         expect(Math.min(...positions)).toBeGreaterThanOrEqual(85_000);
         expect(keysOf(await ofType(page, "advanced"))).toEqual([second, third]);
         expect(await ofType(page, "ended")).toEqual([]);
+        expect(await ofType(page, "error")).toEqual([]);
+      } finally {
+        expect((await request.post(`${media}/control/fast`)).ok()).toBe(true);
+      }
+    });
+  }
+
+  for (const song of ["song-2.mp3?p=fmp4-aac", "song-1.flac?p=fmp4-flac"]) {
+    test(`seeks far ahead of a transcode at once (${song})`, async ({ page, request }) => {
+      const offsets: Array<string> = [];
+
+      page.on("request", (sent) => {
+        if (sent.url().includes("start=")) offsets.push(sent.url());
+      });
+
+      await coldCache(request);
+      // The full transcode runs at eight times real time, so the target stays far ahead of it.
+      expect((await request.post(`${media}/control/slow`)).ok()).toBe(true);
+
+      try {
+        await page.evaluate((file) => window.harness?.load(file, 0, true), song);
+        await waitForEvent(page, "playing");
+        await expect.poll(() => lastPosition(page), { timeout: 10_000 }).toBeGreaterThan(500);
+
+        const seekedAt = await page.evaluate(() => {
+          window.harness?.engine.seek(80_000);
+
+          return performance.now();
+        });
+
+        // Playing again: the first position reported past the target (an upper bound, by up to one
+        // tick of the position updates).
+        await expect.poll(() => lastPosition(page), { timeout: 10_000 }).toBeGreaterThan(80_000);
+
+        const resumed = (await ofType(page, "time")).find(
+          (event) => event.at > seekedAt && event.type === "time" && event.positionMs > 80_000,
+        );
+
+        const resumeMs = (resumed?.at ?? Number.NaN) - seekedAt;
+
+        console.log(`${song} seek ahead of the transcode: playing after ${resumeMs.toFixed(0)} ms`);
+        test.info().annotations.push({ type: "seek-ahead-ms", description: resumeMs.toFixed(0) });
+        expect(resumeMs).toBeLessThan(SEEK_AHEAD_LIMIT_MS);
+        expect(offsets).toHaveLength(1);
+        expect(offsets[0]).toContain("start=80000");
+
+        // It plays out the rest, cut at the exact end the finished transcode reports.
+        await waitForEvent(page, "ended", 1, 20_000);
+        expect(await lastPosition(page)).toBeGreaterThan(89_000);
         expect(await ofType(page, "error")).toEqual([]);
       } finally {
         expect((await request.post(`${media}/control/fast`)).ok()).toBe(true);
