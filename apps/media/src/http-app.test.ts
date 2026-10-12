@@ -564,10 +564,11 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         );
 
         expect(held.map((response) => response.status)).toEqual(held.map(() => 200));
-        const refused = yield* request(url);
+        const refused = yield* request(url, { headers: { Origin: "http://localhost:3001" } });
 
         expect(refused.status).toBe(503);
         expect(refused.headers.get("Retry-After")).toBe("2");
+        expect(refused.headers.get("Access-Control-Expose-Headers")).toContain("Retry-After");
 
         // Ending one stream frees its run.
         yield* Effect.promise(async () => held[0]?.body?.cancel());

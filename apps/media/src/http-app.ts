@@ -259,6 +259,7 @@ export const makeHttpApp = Effect.gen(function* () {
         "Accept-Ranges",
         "Content-Length",
         "ETag",
+        "Retry-After",
         ...Object.values(StreamTimingHeader),
       ],
       maxAge: 86_400,
