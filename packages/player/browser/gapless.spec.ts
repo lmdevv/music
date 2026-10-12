@@ -14,6 +14,9 @@ import {
   GAPLESS_RATE,
   gaplessFile,
   HIRES_FIXTURE,
+  TRUNCATED_DECLARED_MS,
+  TRUNCATED_FIXTURE,
+  TRUNCATED_REAL_MS,
 } from "../harness/fixtures.ts";
 import type { GaplessSource } from "../harness/fixtures.ts";
 import type { TimedEvent } from "../harness/globals";
@@ -478,6 +481,57 @@ test.describe("MseEngine", () => {
         expect((await request.post(`${media}/control/fast`)).ok()).toBe(true);
       }
     });
+  }
+
+  for (const profile of ["fmp4-flac", "fmp4-aac"] as const) {
+    for (const queued of [false, true]) {
+      test(`ends a song on a seek past its real end, short of its estimate (${profile}${queued ? ", then the next" : ""})`, async ({
+        page,
+        request,
+      }) => {
+        const song = `${TRUNCATED_FIXTURE}?p=${profile}`;
+        const next = `tone-d.mp3?p=${profile}`;
+        const offsets: Array<string> = [];
+
+        page.on("request", (sent) => {
+          if (sent.url().includes("start=")) offsets.push(sent.url());
+        });
+
+        await coldCache(request);
+        await page.evaluate(
+          ([file, duration, then]) => {
+            if (then !== null) window.harness?.preload(then);
+
+            return window.harness?.load(file, 0, true, duration);
+          },
+          [song, TRUNCATED_DECLARED_MS, queued ? next : null] as const,
+        );
+        await waitForEvent(page, "playing");
+        await expect.poll(() => lastPosition(page), { timeout: 10_000 }).toBeGreaterThan(500);
+
+        // Between the real end and the estimate, and past the look-ahead: an offset stream, which
+        // brings an init segment (for AAC, with padding) but none of the song.
+        const target = (TRUNCATED_REAL_MS + TRUNCATED_DECLARED_MS) / 2;
+
+        await page.evaluate((position) => {
+          window.harness?.engine.seek(position);
+        }, target);
+
+        if (queued) {
+          await waitForEvent(page, "advanced", 1, 20_000);
+          expect(keysOf(await ofType(page, "advanced"))).toEqual([next]);
+        }
+
+        await waitForEvent(page, "ended", 1, 20_000);
+        expect(offsets).toEqual([expect.stringContaining(`start=${target}`)]);
+        expect(await ofType(page, "error")).toEqual([]);
+
+        // The song ends at its real end, not at the estimate the seek was clamped to.
+        if (!queued) {
+          expect(Math.abs((await lastPosition(page)) - TRUNCATED_REAL_MS)).toBeLessThan(1000);
+        }
+      });
+    }
   }
 
   for (const mode of ["abort", "end", "hang"] as const) {

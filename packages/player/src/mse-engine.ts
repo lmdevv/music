@@ -1176,6 +1176,14 @@ export class MseEngine implements PlayerEngine {
       session.codec = header.codec;
     }
 
+    // A stream from an offset at or past the song's exact end has nothing to append, and its
+    // append window would be empty, which the buffer refuses.
+    if (song.timing?.estimated === false && this.#startsPastEnd(song)) {
+      this.#endSong(session, song);
+
+      return;
+    }
+
     const buffer = session.buffer;
 
     // A stream stopped mid-fragment leaves the parser inside a segment; start it afresh.
@@ -1316,11 +1324,61 @@ export class MseEngine implements PlayerEngine {
     song.placement = placeTrack(exact, placement.start);
     song.tail = null;
 
+    // An offset past the real end of a song whose estimate was longer: a fragmented stream from
+    // there still brings its init segment (and AAC its padding), but no audio of the song. Its
+    // window would end before it starts, which the buffer refuses.
+    if (this.#startsPastEnd(song)) {
+      this.#endSong(session, song);
+
+      return null;
+    }
+
     if (session.configuredFor === song && session.buffer !== null) {
       session.buffer.appendWindowEnd = song.placement.end;
     }
 
     return releaseAll(tail);
+  }
+
+  /** True when the open stream of `song` starts at or after the song's end. */
+  #startsPastEnd(song: Song): boolean {
+    const { placement } = song;
+
+    return placement !== null && placement.end <= placement.start + song.streamStart;
+  }
+
+  /**
+   * Ends `song` at its placement's end with nothing more appended, and moves a current song's
+   * playhead there, so the next song plays or the queue ends.
+   */
+  #endSong(session: Session, song: Song): void {
+    const placement = song.placement;
+
+    void song.reader?.cancel().catch(() => undefined);
+    song.reader = null;
+    song.pending = null;
+    song.tail = null;
+    song.complete = true;
+
+    if (placement === null || session.songs[0] !== song) return;
+    // A seek may have stretched the duration to the song's estimated end; the element would play
+    // on to it, and report the end there.
+    this.#shrinkDuration(session, placement.end);
+    session.target = placement.end;
+    this.#element.currentTime = placement.end;
+  }
+
+  /** Lowers the media source's duration to `end`, unless audio is buffered past it or it is busy. */
+  #shrinkDuration(session: Session, end: number): void {
+    const { mediaSource, buffer } = session;
+
+    if (mediaSource.readyState !== "open" || buffer?.updating === true) return;
+    const ranges = buffer?.buffered;
+
+    const buffered =
+      ranges === undefined || ranges.length === 0 ? 0 : ranges.end(ranges.length - 1);
+
+    if (buffered <= end && mediaSource.duration > end) mediaSource.duration = end;
   }
 
   /**
@@ -1359,13 +1417,7 @@ export class MseEngine implements PlayerEngine {
     if (exact === "stale" || placement === null) return;
     song.timing = exact;
     song.placement = placeTrack(exact, placement.start);
-    song.reader = null;
-    song.complete = true;
-
-    if (session.songs[0] === song) {
-      session.target = song.placement.end;
-      this.#element.currentTime = song.placement.end;
-    }
+    this.#endSong(session, song);
   }
 
   /** Appends the next chunk of `song`, and marks it complete after its last fragment. */
