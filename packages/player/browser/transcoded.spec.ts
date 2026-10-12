@@ -53,6 +53,23 @@ const control = async (request: APIRequestContext, action: string): Promise<void
   expect((await request.post(`${media}/control/${action}`)).ok()).toBe(true);
 };
 
+/** The longest time, in milliseconds, the reported position did not advance after playing. */
+const longestStill = async (page: Page): Promise<number> => {
+  let longest = 0;
+  let last: { readonly positionMs: number; readonly at: number } | null = null;
+
+  for (const event of await events(page)) {
+    if (event.type !== "time") continue;
+
+    if (last === null || event.positionMs > last.positionMs) {
+      if (last !== null) longest = Math.max(longest, Math.round(event.at - last.at));
+      last = { positionMs: event.positionMs, at: event.at };
+    }
+  }
+
+  return longest;
+};
+
 /** Makes the stub forget its transcodes: the next request for each song is a first play. */
 const coldCache = (request: APIRequestContext): Promise<void> => control(request, "cold");
 
@@ -190,6 +207,7 @@ for (const mode of ["abort", "end", "hang"] as const) {
     // It plays on past the cut from where the stream stopped, without skipping the song.
     await expect.poll(() => lastPosition(page), { timeout: 30_000 }).toBeGreaterThan(9000);
     console.log(`${mode}: ${urls.map((url) => new URL(url).search).join(" ")}`);
+    console.log(`${mode}: position stood still for at most ${String(await longestStill(page))} ms`);
 
     // Browsers fetch a dropped stream again by themselves (and Chromium and Firefox a hung one),
     // with a byte range the finished file answers. A stream that ends cleanly, and a hung one
