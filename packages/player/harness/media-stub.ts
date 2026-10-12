@@ -13,6 +13,10 @@
  *   like a failed transcode, so the player's fallback to HTML audio can be tested.
  * - `POST /control/cold`: forget the transcodes so far, so the next request for each file is a
  *   first play that streams while ffmpeg writes it.
+ * - `POST /control/fail-aac` and `POST /control/pass-aac`: answer 502 to the AAC profiles, like a
+ *   media service that cannot transcode at all.
+ * - `POST /control/cut?bytes=<n>&mode=abort|end|hang`: stop the next streamed transcode (live or
+ *   from an offset) after `n` bytes, as a proxy or a dying ffmpeg would (see `Cut`).
  *
  *   node harness/media-stub.ts
  */
@@ -20,7 +24,6 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { basename, extname, join } from "node:path";
-import { Readable } from "node:stream";
 
 import { StreamTimingHeader } from "@music/commands/models";
 import { verifyResource } from "@music/commands/signed-url";
@@ -80,6 +83,31 @@ const convex = backend === null ? null : new ConvexHttpClient(backend.convexUrl)
 let down = false;
 
 let failFragmented = false;
+
+let failAac = false;
+
+/**
+ * How the next streamed transcode stops early, after `bytes`: `abort` drops the connection (a
+ * proxy timing out, or ffmpeg dying), `end` ends the response cleanly as if the song were over,
+ * and `hang` keeps the connection open with nothing more on it.
+ */
+interface Cut {
+  readonly bytes: number;
+  readonly mode: "abort" | "end" | "hang";
+}
+
+let nextCut: Cut | null = null;
+
+/** The cut for the response being sent now, if any; each cut applies once. */
+const takeCut = (): Cut | null => {
+  const cut = nextCut;
+
+  nextCut = null;
+
+  return cut;
+};
+
+const cutModes = ["abort", "end", "hang"] as const;
 
 /** Sends `file` honouring a single `Range: bytes=start-end` request header. */
 const sendFile = (
@@ -162,10 +190,72 @@ const sendTranscoded = async (
     return;
   }
 
-  // A live transcode that fails midway errors the body; the client sees the connection drop.
-  Readable.from(transcoded.body)
-    .on("error", () => response.destroy())
-    .pipe(response);
+  // Only a streamed response (live or from an offset) is cut; a finished file has a length.
+  const cut = transcoded.headers.has("Content-Length") ? null : takeCut();
+
+  await pump(transcoded.body, response, cut);
+};
+
+/** Resolves once `response` can take more bytes, or `closed` settles. */
+const writable = (response: ServerResponse, closed: Promise<void>): Promise<void> =>
+  Promise.race([
+    new Promise<void>((resolve) => {
+      response.once("drain", () => {
+        resolve();
+      });
+    }),
+    closed,
+  ]);
+
+/**
+ * Sends `body` with backpressure. A body that fails midway (a live transcode whose ffmpeg died)
+ * drops the connection. With `cut`, the response stops after `cut.bytes`: see `Cut`.
+ */
+const pump = async (
+  body: ReadableStream<Uint8Array>,
+  response: ServerResponse,
+  cut: Cut | null,
+): Promise<void> => {
+  const reader = body.getReader();
+
+  const closed = new Promise<void>((resolve) => {
+    response.once("close", () => {
+      void reader.cancel();
+      resolve();
+    });
+  });
+
+  /** Sends the body from `sent` bytes on, one chunk per step. */
+  const step = async (sent: number): Promise<void> => {
+    const next = await reader.read();
+
+    if (next.done) {
+      response.end();
+
+      return;
+    }
+
+    if (cut !== null && sent + next.value.length >= cut.bytes) {
+      response.write(next.value.subarray(0, cut.bytes - sent));
+      await reader.cancel();
+
+      if (cut.mode === "abort") response.destroy();
+      else if (cut.mode === "end") response.end();
+
+      // `hang`: the connection stays open with nothing more on it until the client leaves.
+      return;
+    }
+
+    if (!response.write(next.value)) await writable(response, closed);
+
+    return step(sent + next.value.length);
+  };
+
+  try {
+    await step(0);
+  } catch {
+    response.destroy();
+  }
 };
 
 const streamTrack = async (url: URL, incoming: IncomingMessage, response: ServerResponse) => {
@@ -205,7 +295,10 @@ const streamTrack = async (url: URL, incoming: IncomingMessage, response: Server
 
   const transcoded = transcodeProfile(profile);
 
-  if (failFragmented && (transcoded === "fmp4-flac" || transcoded === "fmp4-aac")) {
+  if (
+    (failFragmented && (transcoded === "fmp4-flac" || transcoded === "fmp4-aac")) ||
+    (failAac && (transcoded === "aac-128" || transcoded === "aac-320"))
+  ) {
     response.writeHead(502, cors).end("Transcode failed");
 
     return;
@@ -230,8 +323,13 @@ const server = createServer((request, response) => {
   if (request.method === "POST" && url.pathname.startsWith("/control/")) {
     const action = url.pathname.slice("/control/".length);
 
+    const mode = cutModes.find((candidate) => candidate === url.searchParams.get("mode"));
+
     if (action === "fail-fmp4" || action === "pass-fmp4") failFragmented = action === "fail-fmp4";
-    else if (action === "cold") coldCache();
+    else if (action === "fail-aac" || action === "pass-aac") failAac = action === "fail-aac";
+    else if (action === "cut" && mode !== undefined) {
+      nextCut = { bytes: Number(url.searchParams.get("bytes")), mode };
+    } else if (action === "cold") coldCache();
     else down = action === "down";
     response.writeHead(200, cors).end(action);
 
@@ -273,6 +371,12 @@ const server = createServer((request, response) => {
 
     if (profile === null) {
       sendFile(file, range, response);
+
+      return;
+    }
+
+    if (failAac && (profile === "aac-128" || profile === "aac-320")) {
+      response.writeHead(502, cors).end("Transcode failed");
 
       return;
     }
