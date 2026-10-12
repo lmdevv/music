@@ -4,7 +4,17 @@ import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { Schema } from "effect";
 
-import { ADMIN, cli, cspViolations, expectAudioPast, isPlayingAudio, signIn } from "./support";
+import {
+  ADMIN,
+  cli,
+  container,
+  convexAdmin,
+  convexImport,
+  cspViolations,
+  expectAudioPast,
+  isPlayingAudio,
+  signIn,
+} from "./support";
 
 test.describe.configure({ mode: "serial" });
 
@@ -15,6 +25,28 @@ const decodeDevices = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Arra
 const decodeState = Schema.decodeUnknownSync(Schema.fromJsonString(PlaybackState));
 
 const decodeJob = Schema.decodeUnknownSync(Schema.fromJsonString(Job));
+
+/** A row of `convex data users --format jsonl`. */
+const decodeUserRow = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({ _id: Schema.String, email: Schema.optionalKey(Schema.String) }),
+  ),
+);
+
+/** A row of `convex data devices --format jsonl`. */
+const decodeDeviceRow = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ deviceId: Schema.String })),
+);
+
+/** The time `days` days ago, in epoch milliseconds. */
+const daysAgo = (days: number): number => Date.now() - days * 24 * 60 * 60 * 1000;
+
+/** The JSON rows of `convex data` output. */
+const rows = <Row>(decode: (line: string) => Row, output: string): ReadonlyArray<Row> =>
+  output
+    .split("\n")
+    .filter((line) => line.startsWith("{"))
+    .map(decode);
 
 const decodeCreated = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.Struct({ libraryId: LibraryId, jobId: JobId })),
@@ -573,4 +605,61 @@ test("phone forms keep their buttons on screen", async ({ browser }) => {
   await phone.goto("/settings/account");
   await expect.poll(() => onScreen("Save")).toBe(true);
   await context.close();
+});
+
+test("devices silent for a day leave Play on, and the daily prune deletes old ones", async ({
+  page,
+}) => {
+  test.skip(container() === "", "needs MUSIC_CONTAINER, which scripts/stack-e2e.sh sets");
+
+  const admin = rows(decodeUserRow, convexAdmin(["data", "users", "--format", "jsonl"])).find(
+    (user) => user.email === ADMIN.email,
+  );
+
+  if (admin === undefined) throw new Error(`No user row for ${ADMIN.email}`);
+
+  const closed = { deviceId: "00000000-0000-4000-9000-000000000001", name: "Closed tab" };
+  const ancient = { deviceId: "00000000-0000-4000-9000-000000000002", name: "Ancient laptop" };
+  const speaker = { deviceId: "00000000-0000-4000-9000-000000000003", name: "Paused speaker" };
+
+  // Heartbeats always record the current time, so the long-silent devices are imported.
+  convexImport("devices", [
+    { ...closed, userId: admin._id, kind: "web", lastSeenAt: daysAgo(2) },
+    { ...ancient, userId: admin._id, kind: "web", lastSeenAt: daysAgo(40) },
+    { ...speaker, userId: admin._id, kind: "web", lastSeenAt: daysAgo(40) },
+  ]);
+
+  // A paused session stays on the speaker, which keeps it listed and kept however old it is.
+  cli(apiKey, ["playback", "pause"]);
+  cli(apiKey, ["playback", "transfer", speaker.deviceId]);
+
+  const names = (args: ReadonlyArray<string> = []): ReadonlyArray<string> =>
+    decodeDevices(cli(apiKey, ["devices", "list", ...args, "--json"])).map((device) => device.name);
+
+  expect(names()).toContain(speaker.name);
+  expect(names()).not.toContain(closed.name);
+  expect(names()).not.toContain(ancient.name);
+  // The device asking is listed however long it was silent.
+  expect(names(["--device-id", closed.deviceId])).toContain(closed.name);
+
+  await signIn(page);
+  await page.getByRole("button", { name: /Play on another device/ }).click();
+
+  const list = page.getByRole("menu", { name: "Play on" });
+
+  await expect(list.getByRole("menuitemradio", { name: /Paused speaker/ })).toBeVisible();
+  await expect(list.getByRole("menuitemradio", { name: /Closed tab|Ancient laptop/ })).toHaveCount(
+    0,
+  );
+
+  convexAdmin(["run", "maintenance:pruneStaleDevices", "{}"]);
+
+  const kept = rows(
+    decodeDeviceRow,
+    convexAdmin(["data", "devices", "--format", "jsonl", "--limit", "1000"]),
+  ).map((device) => device.deviceId);
+
+  expect(kept).toContain(speaker.deviceId);
+  expect(kept).toContain(closed.deviceId);
+  expect(kept).not.toContain(ancient.deviceId);
 });
