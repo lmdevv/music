@@ -51,9 +51,9 @@ export const transcodedStream = (
   const input = { trackId: TrackId.make(key), profile, source, mtimeMs, codec };
   const startMs = Number(new URL(request.url).searchParams.get("start") ?? "0");
 
-  return runtime.runPromise(
-    startMs > 0 ? offsetResponse(input, startMs) : transcodedResponse(request, input),
-  );
+  return startMs > 0
+    ? runtime.runPromise(offsetResponse(input, startMs))
+    : runtime.runPromise(transcodedResponse(request, input));
 };
 
 /**

@@ -67,6 +67,12 @@ import { declaredLength, estimatedLength, measureTiming, SampleTiming } from "./
 
 const MAX_CONCURRENT_TRANSCODES = 2;
 
+/**
+ * Offset runs (`openAt`) skip the cached transcodes' queue so a seek never waits behind other
+ * songs; this caps them on their own. A player needs one at a time per playing device.
+ */
+export const MAX_CONCURRENT_OFFSET_RUNS = 8;
+
 const TRANSCODE_TIMEOUT = Duration.minutes(10);
 
 /**
@@ -159,6 +165,13 @@ export class TranscodeError extends Data.TaggedError("TranscodeError")<{
   }
 }
 
+/** Every offset run is taken; the request fails at once rather than queueing behind streams. */
+export class OffsetRunsBusy extends Data.TaggedError("OffsetRunsBusy")<{}> {
+  override get message(): string {
+    return "Too many offset transcodes are running";
+  }
+}
+
 /** What `open` found: a finished file, or a transcode ffmpeg is still writing. */
 export type Opened = Data.TaggedEnum<{
   Finished: { readonly transcoded: Transcoded };
@@ -227,13 +240,14 @@ export interface Interface {
    * Starts a transcode of `input` from `startMs` into the song, for a listener who seeks ahead of
    * the shared transcode, and returns once ffmpeg has written its first bytes (the stream is
    * empty when the offset is past the end). Not cached, not shared, and outside the limit on
-   * concurrent cached transcodes, so a seek never queues behind other songs. Fails when ffmpeg
-   * fails before its first byte.
+   * concurrent cached transcodes, so a seek never queues behind other songs; offset runs have
+   * their own limit, held until `Scope` closes. Fails when ffmpeg fails before its first byte,
+   * and with `OffsetRunsBusy` when every offset run is taken.
    */
   readonly openAt: (
     input: TranscodeInput,
     startMs: number,
-  ) => Effect.Effect<FromOffset, TranscodeError, Scope.Scope>;
+  ) => Effect.Effect<FromOffset, TranscodeError | OffsetRunsBusy, Scope.Scope>;
   /** True when ffmpeg runs. Cached for a minute. */
   readonly ffmpegAvailable: Effect.Effect<boolean>;
 }
@@ -367,6 +381,7 @@ const make = Effect.gen(function* () {
   const scope = yield* Effect.scope;
   const cacheDir = join(config.dataDir, "cache");
   const permits = yield* Semaphore.make(MAX_CONCURRENT_TRANSCODES);
+  const offsetRuns = yield* Semaphore.make(MAX_CONCURRENT_OFFSET_RUNS);
   const lastUsed = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
   /** Running jobs by output path. Changes, and holds taken on a job, happen under `registry`. */
   const jobs = yield* Ref.make<ReadonlyMap<string, Job>>(new Map());
@@ -810,6 +825,9 @@ const make = Effect.gen(function* () {
   });
 
   const openAt = Effect.fn("Transcoder.openAt")(function* (input: TranscodeInput, startMs: number) {
+    if (!(yield* Semaphore.takeIfAvailable(offsetRuns, 1))) return yield* new OffsetRunsBusy();
+    yield* Effect.addFinalizer(() => Semaphore.release(offsetRuns, 1));
+
     const { sampleRate, aacRate, primingSamples, durationSamples } = yield* offsetTiming(
       input,
     ).pipe(Effect.mapError(failure(input)));

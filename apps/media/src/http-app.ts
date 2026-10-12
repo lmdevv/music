@@ -35,6 +35,14 @@ const decodeTrackId = Schema.decodeUnknownOption(TrackId);
 const text = (status: number, body: string): Response =>
   new Response(body, { status, headers: { "Content-Type": "text/plain; charset=utf-8" } });
 
+/** Every offset run is taken: a brief condition, so the client may retry shortly. */
+const busy = (): Response => {
+  const response = text(503, "Too many seeks are transcoding; retry shortly");
+  response.headers.set("Retry-After", "2");
+
+  return response;
+};
+
 /** Offsets up to about eleven days, in whole milliseconds. */
 const START_MS = /^\d{1,9}$/u;
 
@@ -128,12 +136,19 @@ export const makeHttpApp = Effect.gen(function* () {
 
       // The original cannot start mid-way, so a seek that fails has nothing to fall back to.
       if (startMs.value > 0) {
+        // An offset is a fresh encode that only a reading GET may own: Hono drops a HEAD body
+        // unread, which would leave its ffmpeg run blocked and its permit taken.
+        if (request.method !== "GET") return text(405, "Offsets need GET");
+
         return yield* offsetResponse(input, startMs.value).pipe(
-          Effect.catchTag("TranscodeError", (error) =>
-            Effect.logError("Http.transcode_failed", error).pipe(
-              Effect.as(text(502, "Transcode failed")),
-            ),
-          ),
+          Effect.catchTags({
+            TranscodeError: (error) =>
+              Effect.logError("Http.transcode_failed", error).pipe(
+                Effect.as(text(502, "Transcode failed")),
+              ),
+            OffsetRunsBusy: (error) =>
+              Effect.logWarning("Http.offset_runs_busy", error).pipe(Effect.as(busy())),
+          }),
         );
       }
 

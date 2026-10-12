@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { TrackId } from "@music/commands/ids";
 import { signResource } from "@music/commands/signed-url";
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Ref } from "effect";
+import { Duration, Effect, Layer, Ref } from "effect";
 
 import packageJson from "../package.json" with { type: "json" };
 import * as Files from "./files.ts";
@@ -544,6 +544,44 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
 
         expect(plain.status).toBe(200);
         expect(plain.headers.get("Accept-Ranges")).toBe("bytes");
+      }),
+    ));
+
+  it("starts offsets only for a reading GET, and caps how many run at once", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { trackId, request } = yield* setup;
+        const id = trackId(NEON);
+        const url = `${yield* streamUrl(id, "aac-128")}&start=1000`;
+
+        // A HEAD body is never read, so an offset run started for it would never finish.
+        expect((yield* request(url, { method: "HEAD" })).status).toBe(405);
+
+        // Unread bodies hold their runs; one past the cap is turned away at once.
+        const held = yield* Effect.forEach(
+          Array.from({ length: Transcoder.MAX_CONCURRENT_OFFSET_RUNS }),
+          () => request(url),
+        );
+
+        expect(held.map((response) => response.status)).toEqual(held.map(() => 200));
+        const refused = yield* request(url);
+
+        expect(refused.status).toBe(503);
+        expect(refused.headers.get("Retry-After")).toBe("2");
+
+        // Ending one stream frees its run.
+        yield* Effect.promise(async () => held[0]?.body?.cancel());
+        yield* Effect.sleep(Duration.millis(200));
+        const next = yield* request(url);
+
+        expect(next.status).toBe(200);
+        yield* Effect.promise(async () =>
+          Promise.all(
+            [...held.slice(1), next].map(
+              (response) => response.body?.cancel() ?? Promise.resolve(),
+            ),
+          ),
+        );
       }),
     ));
 
