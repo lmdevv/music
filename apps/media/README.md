@@ -65,7 +65,9 @@ includes every dependency, `music-metadata` too; `dist/` needs nothing else at r
       byte ranges with a known length; ADTS is the self-framing stream it plays from a `200` of
       unknown length, as it does internet radio. Browsers report such a stream's duration as
       infinite and cannot seek in it, so the player shows the song's duration from the catalog
-      and seeks by waiting for the finished file (a `HEAD` waits for it) and opening that.
+      and seeks by opening the stream again from an offset (see Offsets below). A stream that
+      stops before the song does (a proxy closing an unread connection, ffmpeg dying) is
+      reopened the same way where it stopped.
 
     A plain `GET` or a media element's opening range (`bytes=0-`, or Safari's `bytes=0-1`) can
     be answered live. Other ranges, `HEAD`, `If-Range`, and `If-None-Match` wait for the cached
