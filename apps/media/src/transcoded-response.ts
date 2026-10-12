@@ -62,56 +62,90 @@ export const transcodedResponse = Effect.fn("TranscodedResponse.make")(function*
 
   if (!wantsWholeStream(request)) return yield* serveFinished();
 
+  const context = yield* Effect.context();
   // Holds the live transcode for as long as the response body streams it.
   const scope = yield* Scope.make();
-  const context = yield* Effect.context();
 
-  const opened = yield* transcoder.open(input).pipe(
+  // Until the response owns the scope, a failure or an interruption (the client went away)
+  // closes it here.
+  return yield* transcoder.open(input).pipe(
     Scope.provide(scope),
+    Effect.flatMap(
+      Opened.$match({
+        Finished: () => Scope.close(scope, Exit.void).pipe(Effect.andThen(serveFinished())),
+        Live: ({ timing, bytes }) =>
+          streamedResponse(
+            request,
+            input,
+            bytes,
+            scope,
+            context,
+            Option.match(timing, { onNone: () => [], onSome: estimatedTimingHeaders }),
+          ),
+      }),
+    ),
     Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
   );
-
-  return yield* Opened.$match(opened, {
-    Finished: () => Scope.close(scope, Exit.void).pipe(Effect.andThen(serveFinished())),
-    Live: ({ timing, bytes }) =>
-      Effect.succeed(
-        streamedResponse(
-          input,
-          bytes,
-          scope,
-          context,
-          Option.match(timing, { onNone: () => [], onSome: estimatedTimingHeaders }),
-        ),
-      ),
-  });
 });
+
+/**
+ * Closes `scope` once the client behind `signal` goes away. The response body closes it when it
+ * ends or is cancelled, but `@hono/node-server` neither reads nor cancels the body of a client
+ * that left before the body started streaming, so the body alone would hold the scope forever.
+ * Closing an already closed scope does nothing, so the scope still closes exactly once.
+ */
+const closeWhenAborted = (signal: AbortSignal, scope: Scope.Closeable): Effect.Effect<void> => {
+  if (signal.aborted) return Scope.close(scope, Exit.void);
+
+  const abort = () => {
+    Effect.runFork(Scope.close(scope, Exit.void));
+  };
+
+  signal.addEventListener("abort", abort, { once: true });
+
+  return Scope.addFinalizer(
+    scope,
+    Effect.sync(() => {
+      signal.removeEventListener("abort", abort);
+    }),
+  );
+};
 
 /**
  * A `200` that streams `bytes` with `Cache-Control: no-store` and no length, and closes `scope`
  * once the body ends or the client goes away. A failure after the first byte aborts it.
  */
 const streamedResponse = (
+  request: Request,
   input: TranscodeInput,
   bytes: Stream.Stream<Uint8Array, TranscodeError>,
   scope: Scope.Closeable,
   context: Context.Context<never>,
   timing: ReadonlyArray<readonly [string, string]>,
-): Response => {
-  const body = bytes.pipe(
-    Stream.tapError((error) => Effect.logError("TranscodedResponse.live_failed", error)),
-    Stream.ensuring(Scope.close(scope, Exit.void)),
-    Stream.toReadableStreamWith(context),
+): Effect.Effect<Response> =>
+  closeWhenAborted(request.signal, scope).pipe(
+    Effect.map(() => {
+      const body = bytes.pipe(
+        // Once the client has gone, closing the scope may stop ffmpeg under a read: not a failure.
+        Stream.tapError((error) =>
+          request.signal.aborted
+            ? Effect.void
+            : Effect.logError("TranscodedResponse.live_failed", error),
+        ),
+        Stream.ensuring(Scope.close(scope, Exit.void)),
+        Stream.toReadableStreamWith(context),
+      );
+
+      const headers = new Headers({
+        "Content-Type": isFragmentedProfile(input.profile) ? "audio/mp4" : "audio/aac",
+        "Cache-Control": "no-store",
+      });
+
+      for (const [name, value] of timing) headers.set(name, value);
+
+      return new Response(body, { status: 200, headers });
+    }),
   );
-
-  const headers = new Headers({
-    "Content-Type": isFragmentedProfile(input.profile) ? "audio/mp4" : "audio/aac",
-    "Cache-Control": "no-store",
-  });
-
-  for (const [name, value] of timing) headers.set(name, value);
-
-  return new Response(body, { status: 200, headers });
-};
 
 /**
  * Answers a request for the transcode of `input` from `startMs` into the song (`&start=` on a
@@ -124,29 +158,33 @@ const streamedResponse = (
  * @returns The response, or `TranscodeError` when ffmpeg fails before its first byte.
  */
 export const offsetResponse = Effect.fn("TranscodedResponse.offset")(function* (
+  request: Request,
   input: TranscodeInput,
   startMs: number,
 ) {
   const transcoder = yield* Transcoder;
+  const context = yield* Effect.context();
   // Holds the ffmpeg run for as long as the response body streams it.
   const scope = yield* Scope.make();
-  const context = yield* Effect.context();
 
-  const opened = yield* transcoder.openAt(input, startMs).pipe(
+  // Until the response owns the scope, a failure or an interruption (the client went away)
+  // closes it here.
+  return yield* transcoder.openAt(input, startMs).pipe(
     Scope.provide(scope),
+    Effect.flatMap((opened) =>
+      streamedResponse(request, input, opened.bytes, scope, context, [
+        [StreamTimingHeader.start, String(opened.startSamples)],
+        [StreamTimingHeader.priming, String(opened.primingSamples)],
+        [StreamTimingHeader.sampleRate, String(opened.sampleRate)],
+        ...Option.match(opened.durationSamples, {
+          onNone: () => [],
+          onSome: (samples) => [
+            [StreamTimingHeader.duration, String(samples)] as const,
+            [StreamTimingHeader.estimated, "1"] as const,
+          ],
+        }),
+      ]),
+    ),
     Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
   );
-
-  return streamedResponse(input, opened.bytes, scope, context, [
-    [StreamTimingHeader.start, String(opened.startSamples)],
-    [StreamTimingHeader.priming, String(opened.primingSamples)],
-    [StreamTimingHeader.sampleRate, String(opened.sampleRate)],
-    ...Option.match(opened.durationSamples, {
-      onNone: () => [],
-      onSome: (samples) => [
-        [StreamTimingHeader.duration, String(samples)] as const,
-        [StreamTimingHeader.estimated, "1"] as const,
-      ],
-    }),
-  ]);
 });

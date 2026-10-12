@@ -22,6 +22,9 @@ import { isSignedRequestValid } from "./signed-request.ts";
 import { offsetResponse, transcodedResponse } from "./transcoded-response.ts";
 import { Transcoder } from "./transcoder.ts";
 
+/** What request handlers run on. */
+type Services = MediaBackend | MediaConfig | Transcoder;
+
 const ART_CACHE_CONTROL = "public, max-age=31536000, immutable";
 
 const SOURCE_TTL = Duration.seconds(60);
@@ -57,6 +60,24 @@ const parseStart = (raw: string | null): Option.Option<number> => {
   return START_MS.test(raw) ? Option.some(Number(raw)) : Option.none();
 };
 
+/**
+ * Answers once the client behind `signal` has gone away, with a response nobody receives. Raced
+ * against a handler, it interrupts the handler, which then releases what it holds.
+ */
+const clientGone = (signal: AbortSignal): Effect.Effect<Response> =>
+  Effect.callback<Response>((resume) => {
+    const gone = () => {
+      resume(Effect.succeed(text(499, "Client closed request")));
+    };
+
+    if (signal.aborted) return gone();
+    signal.addEventListener("abort", gone, { once: true });
+
+    return Effect.sync(() => {
+      signal.removeEventListener("abort", gone);
+    });
+  });
+
 /** Joins a library-relative path onto its root, refusing paths that escape the root. */
 const resolveInside = (root: string, relative: string): Option.Option<string> => {
   const base = resolve(root);
@@ -73,7 +94,7 @@ const serveOriginal = (request: Request, path: string, source: TrackSource) =>
 
 /** Builds the Hono app; handlers run on the services captured here. */
 export const makeHttpApp = Effect.gen(function* () {
-  const context = yield* Effect.context<MediaBackend | MediaConfig | Transcoder>();
+  const context = yield* Effect.context<Services>();
   const run = Effect.runPromiseWith(context);
   const backend = yield* MediaBackend;
   const config = yield* MediaConfig;
@@ -140,7 +161,7 @@ export const makeHttpApp = Effect.gen(function* () {
         // unread, which would leave its ffmpeg run blocked and its permit taken.
         if (request.method !== "GET") return text(405, "Offsets need GET");
 
-        return yield* offsetResponse(input, startMs.value).pipe(
+        return yield* offsetResponse(request, input, startMs.value).pipe(
           Effect.catchTags({
             TranscodeError: (error) =>
               Effect.logError("Http.transcode_failed", error).pipe(
@@ -246,6 +267,11 @@ export const makeHttpApp = Effect.gen(function* () {
     );
   });
 
+  // A handler runs only while its client is there: `@hono/node-server` neither reads nor cancels
+  // the response of a client that left early, so anything it holds would never be released.
+  const respond = (request: Request, handler: Effect.Effect<Response, never, Services>) =>
+    run(Effect.raceFirst(handler, clientGone(request.signal)));
+
   const app = new Hono().basePath("/media");
 
   app.use(
@@ -289,9 +315,11 @@ export const makeHttpApp = Effect.gen(function* () {
 
   app.get("/health", () => run(health));
   app.get("/stream/:trackId", (c) =>
-    run(streamTrack(c.req.raw, c.req.param("trackId"), new URL(c.req.url))),
+    respond(c.req.raw, streamTrack(c.req.raw, c.req.param("trackId"), new URL(c.req.url))),
   );
-  app.get("/art/:hash", (c) => run(serveArt(c.req.raw, c.req.param("hash"), new URL(c.req.url))));
+  app.get("/art/:hash", (c) =>
+    respond(c.req.raw, serveArt(c.req.raw, c.req.param("hash"), new URL(c.req.url))),
+  );
   app.notFound(() => text(404, "Not found"));
   app.onError(async (error) => {
     await run(Effect.logError("Http.unhandled", error));

@@ -52,7 +52,7 @@ export const transcodedStream = (
   const startMs = Number(new URL(request.url).searchParams.get("start") ?? "0");
 
   return startMs > 0
-    ? runtime.runPromise(offsetResponse(input, startMs))
+    ? runtime.runPromise(offsetResponse(request, input, startMs))
     : runtime.runPromise(transcodedResponse(request, input));
 };
 
