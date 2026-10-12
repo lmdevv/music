@@ -139,6 +139,28 @@ describe("music (in-process)", () => {
     }
   });
 
+  it("doesn't blame a /convex URL when the server behind it answers with an empty error", async () => {
+    // Caddy answers 502 with an empty body while Convex starts or after it crashed.
+    const server = createServer((_request, response) => {
+      response.writeHead(502).end();
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+    const { port } = decodeAddress(server.address());
+    const url = `http://127.0.0.1:${port}/convex`;
+
+    try {
+      const result = await run("login", "--server", url, "--key", "mk_test");
+
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain("may still be starting or be down");
+      expect(result.stderr).not.toContain("Use its Convex URL");
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
   it("lists every registry command with its argument schema", async () => {
     const Catalog = Schema.fromJsonString(
       Schema.Array(
