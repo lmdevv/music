@@ -153,6 +153,11 @@ interface Song {
   epoch: number;
   /** The open response body, or null before the first fetch and after a restart. */
   reader: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>> | null;
+  /**
+   * The open stream has sent everything. Its end may still wait for the exact timing, and a
+   * playhead waiting meanwhile is not a hung stream.
+   */
+  drained: boolean;
   /** File offset of the next byte the reader yields. */
   readOffset: number;
   /** File offset to fetch from when the reader is reopened. */
@@ -428,6 +433,7 @@ export class MseEngine implements PlayerEngine {
       etag: null,
       epoch: 0,
       reader: null,
+      drained: false,
       readOffset: 0,
       resumeFrom: 0,
       pending: null,
@@ -987,6 +993,7 @@ export class MseEngine implements PlayerEngine {
     song.streamStart = startSamples === null ? 0 : startSamples / timing.sampleRate;
     song.etag = response.headers.get("ETag");
     song.reader = response.body.getReader();
+    song.drained = false;
     song.lastBytesAt = performance.now();
     // A 200 answer to a range request starts at byte 0; the extra bytes are skipped on read.
     song.readOffset = response.status === 206 ? song.resumeFrom : 0;
@@ -1013,7 +1020,12 @@ export class MseEngine implements PlayerEngine {
 
     if (song.epoch !== epoch) return "stale";
 
-    if (result.done) return null;
+    if (result.done) {
+      song.drained = true;
+
+      return null;
+    }
+
     song.lastBytesAt = performance.now();
     const bytes = result.value;
     const offset = song.readOffset;
@@ -1493,6 +1505,7 @@ export class MseEngine implements PlayerEngine {
 
     if (
       song?.reader == null ||
+      song.drained ||
       this.#element.paused ||
       this.#bufferedAhead(this.#element.currentTime) > BUFFERED_MARGIN ||
       performance.now() - song.lastBytesAt < HUNG_MS
