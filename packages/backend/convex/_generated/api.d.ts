@@ -32,6 +32,7 @@ import type * as lib_sessions from "../lib/sessions.js";
 import type * as lib_viewer from "../lib/viewer.js";
 import type * as maintenance from "../maintenance.js";
 import type * as media from "../media.js";
+import type * as migrations from "../migrations.js";
 import type * as setup from "../setup.js";
 import type * as users from "../users.js";
 
@@ -66,6 +67,7 @@ declare const fullApi: ApiFromModules<{
   "lib/viewer": typeof lib_viewer;
   maintenance: typeof maintenance;
   media: typeof media;
+  migrations: typeof migrations;
   setup: typeof setup;
   users: typeof users;
 }>;

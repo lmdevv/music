@@ -11,6 +11,7 @@ import { Invite } from "@music/commands/models";
 import type { CommandGroup } from "@music/commands/command";
 import { commands, isCommandName } from "@music/commands/registry";
 import type { CommandName, MutationName } from "@music/commands/registry";
+import { foldSearchText } from "@music/commands/search-text";
 import { usePlayer, usePlayerPosition } from "@music/player/react";
 import { makeMusicClient } from "@music/sdk/client";
 import { useRead, useReadOnce } from "@music/sdk/react";
@@ -533,7 +534,9 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
               tracks: results.tracks,
             })),
             ...(playlists ?? [])
-              .filter((playlist) => playlist.name.toLowerCase().includes(deferred.toLowerCase()))
+              .filter((playlist) =>
+                foldSearchText(playlist.name).includes(foldSearchText(deferred)),
+              )
               .slice(0, 2)
               .map((playlist): Item => ({
                 kind: "playlist",

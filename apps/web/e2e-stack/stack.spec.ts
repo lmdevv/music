@@ -144,6 +144,14 @@ test("search finds songs from the scanned library", async ({ page }) => {
   await expect(page.getByText("Top result")).toBeVisible();
 });
 
+test("search ignores accents and shows the original title", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/search");
+  await page.locator("#search-input").fill("doppelganger");
+  const top = page.locator("section", { has: page.getByRole("heading", { name: "Top result" }) });
+  await expect(top.getByText("Doppelgänger", { exact: true })).toBeVisible();
+});
+
 test("an API key drives the CLI, and the CLI controls the browser's playback", async ({ page }) => {
   await signIn(page);
   await page.goto("/settings/keys");
