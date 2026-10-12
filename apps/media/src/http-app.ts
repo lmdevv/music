@@ -19,7 +19,7 @@ import * as Files from "./files.ts";
 import { MediaBackend, type TrackSource } from "./media-backend.ts";
 import { MediaConfig } from "./media-config.ts";
 import { isSignedRequestValid } from "./signed-request.ts";
-import { transcodedResponse } from "./transcoded-response.ts";
+import { offsetResponse, transcodedResponse } from "./transcoded-response.ts";
 import { Transcoder } from "./transcoder.ts";
 
 const ART_CACHE_CONTROL = "public, max-age=31536000, immutable";
@@ -34,6 +34,20 @@ const decodeTrackId = Schema.decodeUnknownOption(TrackId);
 
 const text = (status: number, body: string): Response =>
   new Response(body, { status, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+
+/** Offsets up to about eleven days, in whole milliseconds. */
+const START_MS = /^\d{1,9}$/u;
+
+/**
+ * The `start` query parameter: milliseconds into the song a transcoded stream begins at, 0 when
+ * absent, and none when malformed. It selects a position, not a resource: the signature covers
+ * the track, profile, and expiry, and none of them depend on it.
+ */
+const parseStart = (raw: string | null): Option.Option<number> => {
+  if (raw === null) return Option.some(0);
+
+  return START_MS.test(raw) ? Option.some(Number(raw)) : Option.none();
+};
 
 /** Joins a library-relative path onto its root, refusing paths that escape the root. */
 const resolveInside = (root: string, relative: string): Option.Option<string> => {
@@ -68,9 +82,13 @@ export const makeHttpApp = Effect.gen(function* () {
     function* (request: Request, rawTrackId: string, url: URL) {
       const trackId = decodeTrackId(rawTrackId);
       const profile = decodeProfile(url.searchParams.get("p") ?? "original");
+      const startMs = parseStart(url.searchParams.get("start"));
 
       if (Option.isNone(trackId) || Option.isNone(profile))
         return text(400, "Unknown track or profile");
+
+      if (Option.isNone(startMs) || (startMs.value > 0 && profile.value === "original"))
+        return text(400, "Invalid start");
 
       const valid = yield* isSignedRequestValid(
         config.signingKey,
@@ -100,13 +118,26 @@ export const makeHttpApp = Effect.gen(function* () {
       if (profile.value === "original") return yield* original;
       const transcodeProfile = profile.value;
 
-      const response = yield* transcodedResponse(request, {
+      const input = {
         trackId: trackId.value,
         profile: transcodeProfile,
         source: absolute.value,
         mtimeMs: source.mtimeMs,
         codec: source.codec,
-      }).pipe(
+      };
+
+      // The original cannot start mid-way, so a seek that fails has nothing to fall back to.
+      if (startMs.value > 0) {
+        return yield* offsetResponse(input, startMs.value).pipe(
+          Effect.catchTag("TranscodeError", (error) =>
+            Effect.logError("Http.transcode_failed", error).pipe(
+              Effect.as(text(502, "Transcode failed")),
+            ),
+          ),
+        );
+      }
+
+      const response = yield* transcodedResponse(request, input).pipe(
         Effect.catchTag("TranscodeError", (error) =>
           // The gapless engine cannot append original bytes, so fragmented profiles never fall
           // back; the player switches to HTML audio on the error instead.

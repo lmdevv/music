@@ -20,7 +20,8 @@ import {
 } from "./testing/fixtures.ts";
 import { layerMemory, MemoryMediaBackendControl } from "./testing/memory-media-backend.ts";
 import { adtsPayload } from "./testing/adts.ts";
-import { mediaData, withoutIndex } from "./testing/mp4-boxes.ts";
+import { ffmpegFailingOnce } from "./testing/failing-ffmpeg.ts";
+import { fragmentDecodeTimes, mediaData, withoutIndex } from "./testing/mp4-boxes.ts";
 import { sineSegment } from "./testing/sine.ts";
 import * as Transcoder from "./transcoder.ts";
 import { runScoped } from "./testing/run.ts";
@@ -52,10 +53,11 @@ const tamper = (url: string): string => `${url.slice(0, -1)}${url.endsWith("A") 
 const bytes = (response: Response): Effect.Effect<Uint8Array> =>
   Effect.promise(async () => new Uint8Array(await response.arrayBuffer()));
 
-const setup = Effect.gen(function* () {
+/** The app on a fresh fixture library, with `ffmpegPath` as its ffmpeg. */
+const setupWith = Effect.fn("Test.setup")(function* (ffmpegPath: string) {
   const { root } = yield* fixtureLibrary;
   const dataDir = yield* temporaryDirectory("data");
-  const config = testConfig(dataDir);
+  const config = testConfig(dataDir, undefined, ffmpegPath);
 
   const services = Layer.mergeAll(
     layerMemory,
@@ -108,6 +110,8 @@ const setup = Effect.gen(function* () {
     request,
   };
 });
+
+const setup = setupWith("ffmpeg");
 
 describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
   it("reports health", () =>
@@ -380,6 +384,166 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const cached = yield* Files.listNames(join(dataDir, "cache", "fmp4-aac"));
 
         expect(cached.filter((name) => name.endsWith(".part"))).toEqual([]);
+      }),
+    ));
+
+  it("keeps transcoding while a client has stopped reading the live stream", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root, dataDir, scan, findTrackId, request } = yield* setup;
+
+        yield* sineSegment(root, "long", "mp3", 0, 48_000 * 120);
+        yield* scan;
+        const url = yield* streamUrl(yield* findTrackId("long.mp3"), "aac-128");
+        const live = yield* request(url);
+
+        expect(live.headers.get("Content-Type")).toBe("audio/aac");
+        const reader: ReadableStreamDefaultReader<Uint8Array> | undefined = live.body?.getReader();
+
+        if (reader === undefined) throw new Error("Expected a body");
+
+        const first = yield* Effect.promise(() => reader.read());
+
+        // Like a paused or fully buffered media element: the client reads nothing more, and
+        // the transcode still finishes into the cache.
+        const cacheDir = join(dataDir, "cache", "aac-128");
+
+        const cached = Files.listNames(cacheDir).pipe(
+          Effect.map((names) => names.filter((name) => name.endsWith(".m4a"))),
+        );
+
+        for (let waited = 0; (yield* cached).length === 0 && waited < 300; waited += 1) {
+          yield* Effect.sleep("100 millis");
+        }
+
+        expect(yield* cached).toHaveLength(1);
+
+        // Then the client reads on and gets the whole stream.
+        const rest: Array<Uint8Array> = [first.value ?? new Uint8Array()];
+
+        for (;;) {
+          const next = yield* Effect.promise(() => reader.read());
+
+          if (next.done) break;
+          rest.push(next.value);
+        }
+
+        const file = yield* bytes(yield* request(url));
+
+        expect(adtsPayload(Buffer.concat(rest))?.equals(mediaData(file))).toBe(true);
+      }),
+    ));
+
+  it("aborts a live stream whose transcode dies, and transcodes again on the next request", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const scratch = yield* temporaryDirectory("ffmpeg");
+        const ffmpeg = yield* Effect.promise(() => ffmpegFailingOnce(scratch, 0.5));
+        const { root, dataDir, scan, findTrackId, request } = yield* setupWith(ffmpeg);
+
+        // Six minutes: ffmpeg is killed long before it finishes.
+        yield* sineSegment(root, "long", "mp3", 0, 48_000 * 360);
+        yield* scan;
+        const url = yield* streamUrl(yield* findTrackId("long.mp3"), "aac-128");
+        const live = yield* request(url);
+
+        expect(live.status).toBe(200);
+        expect(live.headers.get("Content-Type")).toBe("audio/aac");
+
+        // The body fails instead of ending as if the song were over.
+        const read = yield* Effect.promise(() =>
+          live.arrayBuffer().then(
+            () => "ended",
+            () => "aborted",
+          ),
+        );
+
+        expect(read).toBe("aborted");
+        const cacheDir = join(dataDir, "cache", "aac-128");
+
+        expect(yield* Files.listNames(cacheDir)).toEqual([]);
+
+        // Nothing half-done is cached: the next request starts a new transcode and gets it all.
+        const again = yield* request(url);
+
+        expect(again.headers.get("Content-Type")).toBe("audio/aac");
+        const streamed = yield* bytes(again);
+        const file = yield* bytes(yield* request(url));
+
+        expect(adtsPayload(streamed)?.equals(mediaData(file))).toBe(true);
+      }),
+    ));
+
+  it("starts a stream part-way into the song with the offset's timing", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { dataDir, trackId, request } = yield* setup;
+        const id = trackId(NEON);
+        const aac = `${yield* streamUrl(id, "aac-128")}&start=1500`;
+
+        const adts = yield* request(aac, {
+          headers: { Origin: "http://localhost:3001", Range: "bytes=0-" },
+        });
+
+        expect(adts.status).toBe(200);
+        expect(adts.headers.get("Content-Type")).toBe("audio/aac");
+        expect(adts.headers.get("Cache-Control")).toBe("no-store");
+        expect(adts.headers.get("Content-Length")).toBeNull();
+        expect(adts.headers.get("Accept-Ranges")).toBeNull();
+        expect(adts.headers.get("X-Music-Start-Samples")).toBe(String(1.5 * 44_100));
+        expect(adts.headers.get("X-Music-Priming-Samples")).toBe("1024");
+        expect(adts.headers.get("X-Music-Sample-Rate")).toBe("44100");
+        expect(adts.headers.get("Access-Control-Expose-Headers")).toContain(
+          "X-Music-Start-Samples",
+        );
+        expect(adtsPayload(yield* bytes(adts))?.length).toBeGreaterThan(0);
+
+        const fragmented = yield* request(`${yield* streamUrl(id, "fmp4-aac")}&start=1500`);
+
+        expect(fragmented.status).toBe(200);
+        expect(fragmented.headers.get("Content-Type")).toBe("audio/mp4");
+        expect(fragmented.headers.get("X-Music-Duration-Estimated")).toBe("1");
+        const rate = Number(fragmented.headers.get("X-Music-Sample-Rate"));
+        const start = String(1.5 * rate);
+
+        expect(fragmented.headers.get("X-Music-Start-Samples")).toBe(start);
+        expect(fragmentDecodeTimes(yield* bytes(fragmented))[0]).toBe(BigInt(start));
+
+        // Offset streams are never cached.
+        for (const profile of ["aac-128", "fmp4-aac"]) {
+          expect(yield* Files.listNames(join(dataDir, "cache", profile))).toEqual([]);
+        }
+      }),
+    ));
+
+  it("checks offset requests like any other and rejects malformed offsets", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { trackId, request } = yield* setup;
+        const id = trackId(NEON);
+        const valid = yield* streamUrl(id, "aac-128");
+
+        // The offset does not widen what a signature grants: the same track, profile, and expiry.
+        expect((yield* request(`${tamper(valid)}&start=1000`)).status).toBe(403);
+        const expired = yield* streamUrl(id, "aac-128", Date.now() - 1000);
+
+        expect((yield* request(`${expired}&start=1000`)).status).toBe(403);
+        const other = (yield* streamUrl(trackId(DAWN), "aac-128")).replace(trackId(DAWN), id);
+
+        expect((yield* request(`${other}&start=1000`)).status).toBe(403);
+
+        for (const start of ["-1", "1.5", "abc", "", "1e3", "12345678901"]) {
+          expect((yield* request(`${valid}&start=${start}`)).status).toBe(400);
+        }
+
+        // The original cannot start part-way; a zero offset is the plain request.
+        const original = yield* streamUrl(id, "original");
+
+        expect((yield* request(`${original}&start=1000`)).status).toBe(400);
+        const plain = yield* request(`${original}&start=0`);
+
+        expect(plain.status).toBe(200);
+        expect(plain.headers.get("Accept-Ranges")).toBe("bytes");
       }),
     ));
 
