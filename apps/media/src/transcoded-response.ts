@@ -3,12 +3,13 @@
  * streams while ffmpeg writes it: playback starts after the first frames instead of after the
  * whole encode. Everything else is served from the finished file, with byte ranges.
  */
-import { Effect, Exit, Option, Scope, Stream } from "effect";
+import { StreamTimingHeader } from "@music/commands/models";
+import { type Context, Effect, Exit, Option, Scope, Stream } from "effect";
 
 import { isFragmentedProfile } from "./ffmpeg.ts";
 import { fileResponse, STREAM_CACHE_CONTROL } from "./file-response.ts";
 import { estimatedTimingHeaders, timingHeaders } from "./sample-timing.ts";
-import { Opened, Transcoder, type TranscodeInput } from "./transcoder.ts";
+import { Opened, type TranscodeError, Transcoder, type TranscodeInput } from "./transcoder.ts";
 
 /**
  * The ranges a media element opens a source with: `bytes=0-` (Chromium, Firefox) and Safari's
@@ -72,26 +73,80 @@ export const transcodedResponse = Effect.fn("TranscodedResponse.make")(function*
 
   return yield* Opened.$match(opened, {
     Finished: () => Scope.close(scope, Exit.void).pipe(Effect.andThen(serveFinished())),
-    Live: ({ timing, bytes }) => {
-      const body = bytes.pipe(
-        Stream.tapError((error) => Effect.logError("TranscodedResponse.live_failed", error)),
-        Stream.ensuring(Scope.close(scope, Exit.void)),
-        Stream.toReadableStreamWith(context),
-      );
-
-      const headers = new Headers({
-        "Content-Type": isFragmentedProfile(input.profile) ? "audio/mp4" : "audio/aac",
-        "Cache-Control": "no-store",
-      });
-
-      for (const [name, value] of Option.match(timing, {
-        onNone: () => [],
-        onSome: estimatedTimingHeaders,
-      })) {
-        headers.set(name, value);
-      }
-
-      return Effect.succeed(new Response(body, { status: 200, headers }));
-    },
+    Live: ({ timing, bytes }) =>
+      Effect.succeed(
+        streamedResponse(
+          input,
+          bytes,
+          scope,
+          context,
+          Option.match(timing, { onNone: () => [], onSome: estimatedTimingHeaders }),
+        ),
+      ),
   });
+});
+
+/**
+ * A `200` that streams `bytes` with `Cache-Control: no-store` and no length, and closes `scope`
+ * once the body ends or the client goes away. A failure after the first byte aborts it.
+ */
+const streamedResponse = (
+  input: TranscodeInput,
+  bytes: Stream.Stream<Uint8Array, TranscodeError>,
+  scope: Scope.Closeable,
+  context: Context.Context<never>,
+  timing: ReadonlyArray<readonly [string, string]>,
+): Response => {
+  const body = bytes.pipe(
+    Stream.tapError((error) => Effect.logError("TranscodedResponse.live_failed", error)),
+    Stream.ensuring(Scope.close(scope, Exit.void)),
+    Stream.toReadableStreamWith(context),
+  );
+
+  const headers = new Headers({
+    "Content-Type": isFragmentedProfile(input.profile) ? "audio/mp4" : "audio/aac",
+    "Cache-Control": "no-store",
+  });
+
+  for (const [name, value] of timing) headers.set(name, value);
+
+  return new Response(body, { status: 200, headers });
+};
+
+/**
+ * Answers a request for the transcode of `input` from `startMs` into the song (`&start=` on a
+ * transcoded profile) with a fresh encode from that point, whatever the cache holds: a `200`
+ * streamed like a live transcode (see `transcodedResponse`), with `X-Music-Start-Samples`,
+ * `X-Music-Priming-Samples`, and `X-Music-Sample-Rate`, plus an estimated
+ * `X-Music-Duration-Samples` for the fragmented profiles (see `FromOffset` for the timeline).
+ * Ranges and validators do not apply. ffmpeg stops when the client goes away.
+ *
+ * @returns The response, or `TranscodeError` when ffmpeg fails before its first byte.
+ */
+export const offsetResponse = Effect.fn("TranscodedResponse.offset")(function* (
+  input: TranscodeInput,
+  startMs: number,
+) {
+  const transcoder = yield* Transcoder;
+  // Holds the ffmpeg run for as long as the response body streams it.
+  const scope = yield* Scope.make();
+  const context = yield* Effect.context();
+
+  const opened = yield* transcoder.openAt(input, startMs).pipe(
+    Scope.provide(scope),
+    Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
+  );
+
+  return streamedResponse(input, opened.bytes, scope, context, [
+    [StreamTimingHeader.start, String(opened.startSamples)],
+    [StreamTimingHeader.priming, String(opened.primingSamples)],
+    [StreamTimingHeader.sampleRate, String(opened.sampleRate)],
+    ...Option.match(opened.durationSamples, {
+      onNone: () => [],
+      onSome: (samples) => [
+        [StreamTimingHeader.duration, String(samples)] as const,
+        [StreamTimingHeader.estimated, "1"] as const,
+      ],
+    }),
+  ]);
 });

@@ -7,7 +7,7 @@ import { join } from "node:path";
 
 import { TrackId } from "@music/commands/ids";
 import { MediaConfig } from "@music/media/media-config";
-import { transcodedResponse } from "@music/media/transcoded-response";
+import { offsetResponse, transcodedResponse } from "@music/media/transcoded-response";
 import * as Transcoder from "@music/media/transcoder";
 import { Duration, Layer, ManagedRuntime, Redacted } from "effect";
 
@@ -36,8 +36,8 @@ const runtime = ManagedRuntime.make(Transcoder.layer.pipe(Layer.provide(config))
 
 /**
  * Answers `request` with `source` (identified by `key`) transcoded to `profile`, exactly as the
- * media service does: from the cache, or live while a fragmented transcode is being written.
- * Rejects when the transcode fails before its first byte.
+ * media service does: from the cache, live while a transcode is being written, or from the
+ * request's `start` offset. Rejects when the transcode fails before its first byte.
  */
 export const transcodedStream = (
   request: Request,
@@ -46,11 +46,15 @@ export const transcodedStream = (
   profile: "aac-320" | "aac-128" | "fmp4-flac" | "fmp4-aac",
   codec: string,
   mtimeMs: number,
-): Promise<Response> =>
-  runtime.runPromise(
-    // The transcoder only uses the ID in cache file names and logs.
-    transcodedResponse(request, { trackId: TrackId.make(key), profile, source, mtimeMs, codec }),
+): Promise<Response> => {
+  // The transcoder only uses the ID in cache file names and logs.
+  const input = { trackId: TrackId.make(key), profile, source, mtimeMs, codec };
+  const startMs = Number(new URL(request.url).searchParams.get("start") ?? "0");
+
+  return runtime.runPromise(
+    startMs > 0 ? offsetResponse(input, startMs) : transcodedResponse(request, input),
   );
+};
 
 /**
  * Added to every source's modification time in cache keys. `POST /control/cold` moves it to a
