@@ -26,6 +26,9 @@ export const offsetUrl = (url: string, startMs: number): string => {
  */
 const EARLY_END_MS = 1500;
 
+/** How long `nothingLeftAt` waits for the media service's first answer before giving up. */
+const PROBE_TIMEOUT_MS = 10_000;
+
 /** True when a stream that ended at `positionMs` stopped short of a song `durationMs` long. */
 export const endedEarly = (positionMs: number, durationMs: number): boolean =>
   positionMs < durationMs - EARLY_END_MS;
@@ -33,12 +36,19 @@ export const endedEarly = (positionMs: number, durationMs: number): boolean =>
 /**
  * Resolves true when the media service has no audio at `url` at all: it answers `200` with an
  * empty body, as it does for an offset past the song's real end. Resolves false when it has
- * audio there, fails, or cannot be reached; a media element that fails on such a stream is then
- * a real failure.
+ * audio there, fails, cannot be reached, or sends nothing within `PROBE_TIMEOUT_MS`; a media
+ * element that fails on such a stream is then a real failure, reported instead of left silent.
  */
 export const nothingLeftAt = async (url: string, signal: AbortSignal): Promise<boolean> => {
+  // A controller rather than `AbortSignal.any`, which Safari before 17.4 lacks.
+  const limited = new AbortController();
+  const abort = (): void => limited.abort();
+  const timer = setTimeout(abort, PROBE_TIMEOUT_MS);
+
+  signal.addEventListener("abort", abort, { once: true });
+
   try {
-    const response = await fetch(url, { signal });
+    const response = await fetch(url, { signal: limited.signal });
 
     if (!response.ok || response.body === null) return false;
     const reader = response.body.getReader();
@@ -49,5 +59,8 @@ export const nothingLeftAt = async (url: string, signal: AbortSignal): Promise<b
     return first.done;
   } catch {
     return false;
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", abort);
   }
 };
