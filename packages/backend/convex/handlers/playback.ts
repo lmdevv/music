@@ -1,5 +1,6 @@
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
+import { listedDevices } from "../lib/devices";
 import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
 import { MAX_QUEUE, ensureSession, findSession, livePosition, shuffled } from "../lib/playback";
@@ -111,15 +112,22 @@ export const playbackQueries = {
     };
   },
 
-  "devices.list": async (ctx, viewer) => {
+  "devices.list": async (ctx, viewer, args) => {
     const devices = await ctx.db
       .query("devices")
       .withIndex("by_user_device", (q) => q.eq("userId", viewer.id))
       .collect();
 
+    const session = await findSession(ctx, viewer.id);
     const now = Date.now();
 
-    return devices
+    // Long-silent devices drop out, but never the one playing the session or the one asking: a
+    // browser waking after a day lists itself before its first heartbeat lands.
+    const keep = new Set(
+      [session?.activeDeviceId, args.deviceId].filter((id): id is string => id !== undefined),
+    );
+
+    return listedDevices(devices, now, keep)
       .toSorted((left, right) => right.lastSeenAt - left.lastSeenAt)
       .map((device) => presentDevice(device, now));
   },

@@ -171,7 +171,9 @@ export default defineSchema({
     name: v.string(),
     kind: deviceKind,
     lastSeenAt: v.number(),
-  }).index("by_user_device", ["userId", "deviceId"]),
+  })
+    .index("by_user_device", ["userId", "deviceId"])
+    .index("by_last_seen", ["lastSeenAt"]),
 
   playbackSessions: defineTable({
     userId: v.id("users"),
