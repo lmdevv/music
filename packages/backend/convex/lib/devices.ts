@@ -14,6 +14,9 @@ export const DEVICE_LISTED_MS = 24 * HOUR_MS;
  */
 export const DEVICE_RETAINED_MS = 30 * 24 * HOUR_MS;
 
+/** At most this many recently seen devices are read for the list; the kept ones come on top. */
+export const DEVICE_LIST_LIMIT = 50;
+
 /** What the listing policy reads from a device row. */
 interface Seen {
   readonly deviceId: string;
