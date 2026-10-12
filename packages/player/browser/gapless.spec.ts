@@ -480,6 +480,31 @@ test.describe("MseEngine", () => {
     });
   }
 
+  for (const mode of ["abort", "end", "hang"] as const) {
+    test(`picks up a live stream cut off mid-song (${mode})`, async ({ page, request }) => {
+      const song = "song-2.mp3?p=fmp4-aac";
+      const offsets: Array<string> = [];
+
+      page.on("request", (sent) => {
+        if (sent.url().includes("start=")) offsets.push(sent.url());
+      });
+
+      await coldCache(request);
+      // About eight seconds of AAC at 256 kbps, then the stream stops short of the 90 s song.
+      const cut = await request.post(`${media}/control/cut?bytes=256000&mode=${mode}`);
+
+      expect(cut.ok()).toBe(true);
+      await page.evaluate((file) => window.harness?.load(file, 0, true), song);
+      await waitForEvent(page, "playing");
+
+      // It plays on past the cut from where the appends stopped, without skipping the song.
+      await expect.poll(() => lastPosition(page), { timeout: 30_000 }).toBeGreaterThan(15_000);
+      expect(offsets.length).toBeGreaterThan(0);
+      expect(await ofType(page, "ended")).toEqual([]);
+      expect(await ofType(page, "error")).toEqual([]);
+    });
+  }
+
   test("keeps playing a hi-res stream larger than the buffer quota", async ({ page }) => {
     await page.evaluate(
       (file) => window.harness?.load(file, 0, true),
