@@ -1,7 +1,7 @@
 /**
- * The HTTP response for a transcoded stream profile. A fragmented profile that is not in the
- * cache yet streams while ffmpeg writes it: playback starts after the first fragment instead of
- * after the whole encode. Everything else is served from the finished file, with byte ranges.
+ * The HTTP response for a transcoded stream profile. A profile that is not in the cache yet
+ * streams while ffmpeg writes it: playback starts after the first frames instead of after the
+ * whole encode. Everything else is served from the finished file, with byte ranges.
  */
 import { Effect, Exit, Option, Scope, Stream } from "effect";
 
@@ -11,19 +11,34 @@ import { estimatedTimingHeaders, timingHeaders } from "./sample-timing.ts";
 import { Opened, Transcoder, type TranscodeInput } from "./transcoder.ts";
 
 /**
- * True for a request a live transcode can answer: a plain `GET` from the start. Ranges and
- * validators refer to the finished file, whose bytes differ (it has a `sidx` index), and `HEAD`
- * asks for the exact timing, so those wait for the transcode to finish.
+ * The ranges a media element opens a source with: `bytes=0-` (Chromium, Firefox) and Safari's
+ * probe `bytes=0-1`. Other ranges want the finished file's bytes at those offsets.
  */
-const wantsWholeStream = (request: Request): boolean =>
-  request.method === "GET" &&
-  ["Range", "If-Range", "If-None-Match"].every((name) => !request.headers.has(name));
+const OPENING_RANGE = /^bytes=0-1?$/u;
 
 /**
- * Answers `request` with the transcode of `input`. A plain `GET` for a fragmented profile that
- * is still being transcoded gets a `200` streamed as ffmpeg writes it, with estimated timing
- * headers (see `StreamTimingHeader.estimated`), no `ETag`, and `Cache-Control: no-store`; a
- * failure after the first byte aborts the response. Other requests wait for the finished file.
+ * True for a request a live transcode can answer: a `GET` without validators, for the whole
+ * stream or with a media element's opening range. The element takes the `200` without
+ * `Accept-Ranges` as a stream it cannot seek in by bytes. Other ranges and validators refer to
+ * the finished file, whose bytes differ, and `HEAD` asks for the finished file's headers (the
+ * exact timing), so those wait for the transcode to finish.
+ */
+const wantsWholeStream = (request: Request): boolean => {
+  const range = request.headers.get("Range");
+
+  return (
+    request.method === "GET" &&
+    (range === null || OPENING_RANGE.test(range.trim())) &&
+    ["If-Range", "If-None-Match"].every((name) => !request.headers.has(name))
+  );
+};
+
+/**
+ * Answers `request` with the transcode of `input`. A `GET` for the whole stream while it is
+ * still being transcoded gets a `200` streamed as ffmpeg writes it, with no `Content-Length`, no
+ * `ETag`, and `Cache-Control: no-store`: fragmented profiles as `audio/mp4` with estimated timing
+ * headers (see `StreamTimingHeader.estimated`), AAC profiles as ADTS (`audio/aac`). A failure
+ * after the first byte aborts the response. Other requests wait for the finished file.
  *
  * @returns The response, or `TranscodeError` when the transcode fails before its first byte, or
  *   `FileError` when the finished file cannot be read.
@@ -44,9 +59,7 @@ export const transcodedResponse = Effect.fn("TranscodedResponse.make")(function*
     });
   });
 
-  if (!isFragmentedProfile(input.profile) || !wantsWholeStream(request)) {
-    return yield* serveFinished();
-  }
+  if (!wantsWholeStream(request)) return yield* serveFinished();
 
   // Holds the live transcode for as long as the response body streams it.
   const scope = yield* Scope.make();
@@ -66,9 +79,17 @@ export const transcodedResponse = Effect.fn("TranscodedResponse.make")(function*
         Stream.toReadableStreamWith(context),
       );
 
-      const headers = new Headers({ "Content-Type": "audio/mp4", "Cache-Control": "no-store" });
+      const headers = new Headers({
+        "Content-Type": isFragmentedProfile(input.profile) ? "audio/mp4" : "audio/aac",
+        "Cache-Control": "no-store",
+      });
 
-      for (const [name, value] of estimatedTimingHeaders(timing)) headers.set(name, value);
+      for (const [name, value] of Option.match(timing, {
+        onNone: () => [],
+        onSome: estimatedTimingHeaders,
+      })) {
+        headers.set(name, value);
+      }
 
       return Effect.succeed(new Response(body, { status: 200, headers }));
     },

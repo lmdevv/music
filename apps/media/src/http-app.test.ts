@@ -19,7 +19,8 @@ import {
   testConfig,
 } from "./testing/fixtures.ts";
 import { layerMemory, MemoryMediaBackendControl } from "./testing/memory-media-backend.ts";
-import { withoutIndex } from "./testing/mp4-boxes.ts";
+import { adtsPayload } from "./testing/adts.ts";
+import { mediaData, withoutIndex } from "./testing/mp4-boxes.ts";
 import { sineSegment } from "./testing/sine.ts";
 import * as Transcoder from "./transcoder.ts";
 import { runScoped } from "./testing/run.ts";
@@ -204,11 +205,16 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       }),
     ));
 
-  it("transcodes to playable AAC and shares one transcode between concurrent requests", () =>
+  it("serves finished AAC as a fast-start MP4 with validators and byte ranges", () =>
     runScoped(
       Effect.gen(function* () {
         const { dataDir, trackId, request } = yield* setup;
         const url = yield* streamUrl(trackId(DAWN), "aac-320");
+        // HEAD waits for the finished file.
+        const head = yield* request(url, { method: "HEAD" });
+
+        expect(head.status).toBe(200);
+        expect(head.headers.get("Content-Type")).toBe("audio/mp4");
         const response = yield* request(url);
 
         expect(response.status).toBe(200);
@@ -226,23 +232,72 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         // Serving again marks the cache entry used without changing its validators, so a player
         // that seeks with If-Range keeps getting partial content.
         const etag = response.headers.get("ETag") ?? "";
+
+        expect(head.headers.get("ETag")).toBe(etag);
         const ranged = yield* request(url, { headers: { Range: "bytes=0-99", "If-Range": etag } });
 
         expect(ranged.status).toBe(206);
         expect(ranged.headers.get("ETag")).toBe(etag);
 
-        const lowUrl = yield* streamUrl(trackId(NEON), "aac-128");
+        // A media element's opening ranges get the finished file's bytes too.
+        const opening = yield* request(url, { headers: { Range: "bytes=0-1" } });
 
-        const [first, second] = yield* Effect.all([request(lowUrl), request(lowUrl)], {
-          concurrency: 2,
-        });
+        expect(opening.status).toBe(206);
+        expect(opening.headers.get("Content-Range")).toBe(
+          `bytes 0-1/${head.headers.get("Content-Length") ?? ""}`,
+        );
+      }),
+    ));
 
-        expect(first.status).toBe(200);
-        expect(yield* bytes(first)).toEqual(yield* bytes(second));
+  it("streams an AAC transcode as ADTS while it is written and shares it between requests", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root, dataDir, scan, findTrackId, request } = yield* setup;
+
+        // Two minutes of tone: ffmpeg is still encoding when the responses start.
+        yield* sineSegment(root, "long", "mp3", 0, 48_000 * 120);
+        yield* scan;
+        const id = yield* findTrackId("long.mp3");
+        const url = yield* streamUrl(id, "aac-128");
+
+        // Chromium and Firefox open a source with `bytes=0-`, Safari with `bytes=0-1`.
+        const [plain, safari] = yield* Effect.all(
+          [
+            request(url, { headers: { Range: "bytes=0-" } }),
+            request(url, { headers: { Range: "bytes=0-1" } }),
+          ],
+          { concurrency: 2 },
+        );
+
+        for (const live of [plain, safari]) {
+          expect(live.status).toBe(200);
+          expect(live.headers.get("Content-Type")).toBe("audio/aac");
+          expect(live.headers.get("Cache-Control")).toBe("no-store");
+          expect(live.headers.get("ETag")).toBeNull();
+          expect(live.headers.get("Content-Length")).toBeNull();
+          expect(live.headers.get("Accept-Ranges")).toBeNull();
+          expect(live.headers.get("X-Music-Duration-Samples")).toBeNull();
+        }
+
+        const [one, two] = yield* Effect.all([bytes(plain), bytes(safari)], { concurrency: 2 });
+
+        expect(Buffer.from(one).equals(two)).toBe(true);
+
+        // Once the bodies end, the finished file answers, and it holds the same frames.
+        const finished = yield* request(url);
+
+        expect(finished.status).toBe(200);
+        expect(finished.headers.get("Content-Type")).toBe("audio/mp4");
+        expect(finished.headers.get("ETag")).not.toBeNull();
+        const file = yield* bytes(finished);
+
+        expect(finished.headers.get("Content-Length")).toBe(String(file.length));
+        expect(adtsPayload(one)?.equals(mediaData(file))).toBe(true);
+
         const cached = yield* Files.listNames(join(dataDir, "cache", "aac-128"));
 
         expect(cached).toHaveLength(1);
-        expect(cached[0]).toMatch(new RegExp(`^${trackId(NEON)}-\\d+\\.m4a$`));
+        expect(cached[0]).toMatch(new RegExp(`^${id}-\\d+\\.m4a$`));
       }),
     ));
 
