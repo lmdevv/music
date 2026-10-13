@@ -14,8 +14,9 @@ included; the repo and packages use `music`.
   ideas and edge cases. Never copy, port, or translate their code into this repo. Effect, OpenCode,
   and Pi are MIT and safe to reference.
 - **Load the `coding-standards` skill** before writing, reviewing, or refactoring TypeScript. It is
-  in `.agents/skills/coding-standards/`, from `dmmulroy/skills`. Where any skill conflicts with this
-  file, this file wins: no lint suppressions or disabled rules, even where a skill shows them.
+  in `.agents/skills/coding-standards/`, copied from `dmmulroy/.dotfiles` at `574e1f2`; Dillon has
+  since removed it, so don't `skills update` it. Where any skill conflicts with this file, this file
+  wins: no lint suppressions or disabled rules, even where a skill shows them.
 - **No MCP server.** Agents use the CLI and `skills/music/SKILL.md`.
 - **Never commit secret values.** `.env.example` lists configuration names only.
 - **Never weaken a lint rule, add a cast, or add a suppression to pass checks.** Fix the code or
