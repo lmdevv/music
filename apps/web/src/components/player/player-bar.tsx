@@ -11,6 +11,7 @@ import { Artwork } from "@/components/library/artwork";
 import { LikeButton } from "@/components/library/like-button";
 import { useUi } from "@/components/shell/ui-state";
 import { formatQuality } from "@/lib/format";
+import { useIsDesktop } from "@/lib/use-media";
 
 import {
   PlayPauseButton,
@@ -161,13 +162,17 @@ export function PlayerBar() {
   );
 }
 
-/** The speaker button that opens the "Play on" popover. */
+/**
+ * The speaker button that opens the "Play on" popover. Below the desktop width the player bar is
+ * hidden and `DeviceSheet` shows the same open state, so the popover closes there (ADS-106).
+ */
 function DevicePickerButton() {
   const { devicesOpen, setDevicesOpen } = useUi();
   const { onlineCount } = useDevices();
+  const desktop = useIsDesktop();
 
   return (
-    <Popover open={devicesOpen} onOpenChange={setDevicesOpen}>
+    <Popover open={devicesOpen && desktop} onOpenChange={setDevicesOpen}>
       <Tooltip label="Play on another device" shortcut="D">
         <PopoverTrigger
           aria-label="Play on another device"

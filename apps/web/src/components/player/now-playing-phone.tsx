@@ -14,6 +14,7 @@ import { PhonePauseGlyph, PhonePlayGlyph, PhoneSkipGlyph } from "@/components/sh
 import type { NowPlayingView } from "@/components/shell/ui-state";
 import { formatQuality } from "@/lib/format";
 import { useArtColors } from "@/lib/use-art-colors";
+import { useIsDesktop } from "@/lib/use-media";
 
 import { NEXT_REPEAT, Progress, Volume, perform, useIsRemote } from "./controls";
 import { DeviceList } from "./devices";
@@ -38,6 +39,8 @@ export function PhoneNowPlaying({ track, view, onView }: PhoneNowPlayingProps) {
   const colors = useArtColors(track.artUrl, track.albumId);
   const background = nowPlayingBackground(colors, "linear");
   const [sheet, setSheet] = useState(false);
+  // This view stays mounted (CSS-hidden) at desktop width, so its sheet must not outlive a resize.
+  const desktop = useIsDesktop();
   const queue = view === "queue";
   const playing = player.status === "playing";
 
@@ -197,7 +200,7 @@ export function PhoneNowPlaying({ track, view, onView }: PhoneNowPlayingProps) {
       </div>
       <span className="sr-only">{playing ? "Playing" : "Paused"}</span>
 
-      <Sheet open={sheet} onOpenChange={setSheet}>
+      <Sheet open={sheet && !desktop} onOpenChange={setSheet}>
         <SheetContent title="Play on" description={`${track.title} · ${track.artist}`}>
           <DeviceList touch />
         </SheetContent>
