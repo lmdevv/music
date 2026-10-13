@@ -4,6 +4,7 @@
  */
 import { v } from "convex/values";
 
+import { internal } from "./_generated/api";
 import { mutation, query } from "./_generated/server";
 import { enqueueScan } from "./handlers/admin";
 import { markTrackMissing, upsertScannedTrack } from "./lib/catalog";
@@ -77,6 +78,7 @@ export const claimJob = mutation({
       leaseUntil: now + LEASE_MS,
       startedAt: job.startedAt ?? now,
       done: 0,
+      attempts: (job.attempts ?? 0) + 1,
     });
 
     return {
@@ -135,7 +137,13 @@ export const finishJob = mutation({
       leaseUntil: undefined,
     });
 
-    if (status === "done") await ctx.db.patch(job.libraryId, { lastScanAt: now });
+    if (status === "done") {
+      await ctx.db.patch(job.libraryId, { lastScanAt: now });
+      // Files that moved to other albums or artists can leave empty ones behind.
+      await ctx.scheduler.runAfter(0, internal.maintenance.pruneEmptyCatalog, {
+        libraryId: job.libraryId,
+      });
+    }
 
     return null;
   },

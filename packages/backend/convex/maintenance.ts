@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { Match } from "effect";
 
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -17,6 +18,15 @@ const PURGE_BUDGET = 256;
 const PURGE_QUEUES = 4;
 
 const PRUNE_BATCH = 200;
+
+/** A scan claimed this many times without finishing fails instead of retrying again. */
+export const MAX_SCAN_ATTEMPTS = 3;
+
+/** Finished jobs, used invites, and revoked keys are kept this long, then deleted. */
+export const RECORD_RETAINED_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Albums or artists one `pruneEmptyCatalog` run checks. */
+const CATALOG_BATCH = 100;
 
 const purgePhase = v.union(
   v.literal("tracks"),
@@ -207,7 +217,11 @@ export const purgeLibrary = internalMutation({
   },
 });
 
-/** Returns running jobs whose worker stopped renewing the lease to the pending queue. */
+/**
+ * Returns running jobs whose worker stopped renewing the lease to the pending queue, or fails one
+ * that has been claimed `MAX_SCAN_ATTEMPTS` times: a file that crashes the scanner would otherwise
+ * crash it again on every retry, forever.
+ */
 export const releaseExpiredLeases = internalMutation({
   args: {},
   handler: async (ctx) => {
@@ -222,12 +236,21 @@ export const releaseExpiredLeases = internalMutation({
 
     await Promise.all(
       expired.map((job) =>
-        ctx.db.patch(job._id, {
-          status: "pending",
-          workerId: undefined,
-          leaseUntil: undefined,
-          message: "Worker stopped responding; retrying",
-        }),
+        // A job claimed before attempts were counted has had at least this one.
+        (job.attempts ?? 1) >= MAX_SCAN_ATTEMPTS
+          ? ctx.db.patch(job._id, {
+              status: "failed",
+              workerId: undefined,
+              leaseUntil: undefined,
+              finishedAt: now,
+              error: `The scan stopped responding ${MAX_SCAN_ATTEMPTS} times, so it was stopped. Check the media service log for the file it was reading, then scan again.`,
+            })
+          : ctx.db.patch(job._id, {
+              status: "pending",
+              workerId: undefined,
+              leaseUntil: undefined,
+              message: "Worker stopped responding; retrying",
+            }),
       ),
     );
   },
@@ -241,8 +264,11 @@ export const pauseOrphanedSessions = internalMutation({
   args: {},
   handler: async (ctx) => {
     const now = Date.now();
-    const sessions = await ctx.db.query("playbackSessions").collect();
-    const playing = sessions.filter((session) => session.playing);
+
+    const playing = await ctx.db
+      .query("playbackSessions")
+      .withIndex("by_playing", (q) => q.eq("playing", true))
+      .collect();
 
     const lastSeen = await Promise.all(
       playing.map(async (session) => {
@@ -313,6 +339,163 @@ export const pruneStaleDevices = internalMutation({
       await ctx.scheduler.runAfter(0, internal.maintenance.pruneStaleDevices, {
         cutoff,
         cursor: batch.continueCursor,
+      });
+    }
+  },
+});
+
+const recordKind = v.union(
+  v.literal("jobs"),
+  v.literal("expiredInvites"),
+  v.literal("acceptedInvites"),
+  v.literal("revokedKeys"),
+);
+
+type RecordKind = typeof recordKind.type;
+
+const NEXT_KIND: Readonly<Record<RecordKind, RecordKind | null>> = {
+  jobs: "expiredInvites",
+  expiredInvites: "acceptedInvites",
+  acceptedInvites: "revokedKeys",
+  revokedKeys: null,
+};
+
+/** Deletes up to `PRUNE_BATCH` records of `kind` older than `cutoff`; returns how many. */
+const pruneRecords = async (
+  ctx: MutationCtx,
+  kind: RecordKind,
+  cutoff: number,
+): Promise<number> => {
+  const rows = await Match.value(kind).pipe(
+    Match.when("jobs", async () => {
+      const finished = await Promise.all(
+        (["done", "failed", "cancelled"] as const).map((status) =>
+          ctx.db
+            .query("jobs")
+            .withIndex("by_status_finished", (q) =>
+              q.eq("status", status).gte("finishedAt", 0).lt("finishedAt", cutoff),
+            )
+            .take(PRUNE_BATCH),
+        ),
+      );
+
+      return finished.flat().slice(0, PRUNE_BATCH);
+    }),
+    Match.when("expiredInvites", () =>
+      ctx.db
+        .query("invites")
+        .withIndex("by_expires", (q) => q.lt("expiresAt", cutoff))
+        .take(PRUNE_BATCH),
+    ),
+    Match.when("acceptedInvites", () =>
+      ctx.db
+        .query("invites")
+        .withIndex("by_accepted", (q) => q.gte("acceptedAt", 0).lt("acceptedAt", cutoff))
+        .take(PRUNE_BATCH),
+    ),
+    Match.when("revokedKeys", () =>
+      ctx.db
+        .query("apiKeys")
+        .withIndex("by_revoked", (q) => q.gte("revokedAt", 0).lt("revokedAt", cutoff))
+        .take(PRUNE_BATCH),
+    ),
+    Match.exhaustive,
+  );
+
+  await Promise.all(rows.map((row) => ctx.db.delete(row._id)));
+
+  return rows.length;
+};
+
+/**
+ * Deletes jobs that finished, failed, or were cancelled, invites that expired or were accepted,
+ * and API keys that were revoked, all more than `RECORD_RETAINED_MS` ago, a batch per run. Play
+ * history is the user's own record and is kept.
+ */
+export const pruneOldRecords = internalMutation({
+  args: { kind: v.optional(recordKind), cutoff: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const kind = args.kind ?? "jobs";
+    // Continuations reuse the first run's cutoff, so the range they finish is the one it started.
+    const cutoff = args.cutoff ?? Date.now() - RECORD_RETAINED_MS;
+    const deleted = await pruneRecords(ctx, kind, cutoff);
+    const next = deleted === PRUNE_BATCH ? kind : NEXT_KIND[kind];
+
+    if (next !== null) {
+      await ctx.scheduler.runAfter(0, internal.maintenance.pruneOldRecords, { kind: next, cutoff });
+    }
+  },
+});
+
+/**
+ * Deletes a library's albums and artists that no song points at any more, after a scan moved
+ * files to other albums or artists. An album whose songs are only missing keeps its row, so the
+ * songs find it again when their files come back.
+ */
+export const pruneEmptyCatalog = internalMutation({
+  args: {
+    libraryId: v.id("libraries"),
+    phase: v.optional(v.union(v.literal("albums"), v.literal("artists"))),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, { libraryId, phase = "albums", cursor = null }) => {
+    if (phase === "albums") {
+      const page = await ctx.db
+        .query("albums")
+        .withIndex("by_library_artist_key", (q) => q.eq("libraryId", libraryId))
+        .paginate({ cursor, numItems: CATALOG_BATCH });
+
+      await Promise.all(
+        page.page.map(async (album) => {
+          if (album.trackCount > 0) return;
+
+          const song = await ctx.db
+            .query("tracks")
+            .withIndex("by_album", (q) => q.eq("albumId", album._id))
+            .first();
+
+          if (song === null) await ctx.db.delete(album._id);
+        }),
+      );
+
+      await ctx.scheduler.runAfter(0, internal.maintenance.pruneEmptyCatalog, {
+        libraryId,
+        phase: page.isDone ? "artists" : "albums",
+        cursor: page.isDone ? null : page.continueCursor,
+      });
+
+      return;
+    }
+
+    const page = await ctx.db
+      .query("artists")
+      .withIndex("by_library_key", (q) => q.eq("libraryId", libraryId))
+      .paginate({ cursor, numItems: CATALOG_BATCH });
+
+    await Promise.all(
+      page.page.map(async (artist) => {
+        if (artist.albumCount > 0) return;
+
+        const [album, song] = await Promise.all([
+          ctx.db
+            .query("albums")
+            .withIndex("by_artist", (q) => q.eq("artistId", artist._id))
+            .first(),
+          ctx.db
+            .query("tracks")
+            .withIndex("by_artist", (q) => q.eq("artistId", artist._id))
+            .first(),
+        ]);
+
+        if (album === null && song === null) await ctx.db.delete(artist._id);
+      }),
+    );
+
+    if (!page.isDone) {
+      await ctx.scheduler.runAfter(0, internal.maintenance.pruneEmptyCatalog, {
+        libraryId,
+        phase: "artists",
+        cursor: page.continueCursor,
       });
     }
   },

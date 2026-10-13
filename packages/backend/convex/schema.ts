@@ -43,7 +43,10 @@ export default defineSchema({
     acceptedBy: v.optional(v.id("users")),
     acceptedAt: v.optional(v.number()),
     revoked: v.boolean(),
-  }).index("by_code", ["code"]),
+  })
+    .index("by_code", ["code"])
+    .index("by_expires", ["expiresAt"])
+    .index("by_accepted", ["acceptedAt"]),
 
   apiKeys: defineTable({
     userId: v.id("users"),
@@ -57,7 +60,8 @@ export default defineSchema({
     sessionId: v.optional(v.id("authSessions")),
   })
     .index("by_hash", ["hash"])
-    .index("by_user", ["userId"]),
+    .index("by_user", ["userId"])
+    .index("by_revoked", ["revokedAt"]),
 
   libraries: defineTable({
     name: v.string(),
@@ -109,7 +113,6 @@ export default defineSchema({
     .index("by_artist", ["artistId"])
     .index("by_added", ["addedAt"])
     .index("by_library_added", ["libraryId", "addedAt"])
-    .index("by_key", ["key"])
     .searchIndex("search_text", { searchField: "searchText", filterFields: ["libraryId"] }),
 
   tracks: defineTable({
@@ -243,8 +246,11 @@ export default defineSchema({
     leaseUntil: v.optional(v.number()),
     startedAt: v.optional(v.number()),
     finishedAt: v.optional(v.number()),
+    /** How many times a worker claimed it; a scan that keeps crashing fails after a few. */
+    attempts: v.optional(v.number()),
   })
     .index("by_status", ["status"])
+    .index("by_status_finished", ["status", "finishedAt"])
     .index("by_library_status", ["libraryId", "status"]),
 
   /** Progress of each data migration in `migrations.ts`, so an interrupted one resumes. */

@@ -13,7 +13,7 @@ import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import schema from "../convex/schema";
 
-const MEDIA_SECRET = "test-media-secret";
+export const MEDIA_SECRET = "test-media-secret";
 
 process.env["MEDIA_SERVICE_SECRET"] = MEDIA_SECRET;
 
@@ -80,7 +80,7 @@ export const signUp = async (
 };
 
 /** The cover every seeded file carries unless it names its own. */
-export const DEFAULT_ART = "0".repeat(64);
+const DEFAULT_ART = "0".repeat(64);
 
 /** One file as the media service reports it; tags not given get defaults. */
 export interface SeedFile {

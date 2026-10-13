@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 const PAGE_SIZE = 200;
 
 /** Most liked songs the page keeps live at once. */
-export const LIKED_LIMIT = 5000;
+const LIKED_LIMIT = 5000;
 
 const decodePage = resultDecoder("likes.list");
 
