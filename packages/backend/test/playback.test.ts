@@ -6,10 +6,11 @@ import { DeviceId } from "@music/commands/ids";
 import type { TrackId } from "@music/commands/ids";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { internal } from "../convex/_generated/api";
 import { playbackMutations, playbackQueries } from "../convex/handlers/playback";
 import { loadViewer } from "../convex/lib/viewer";
 import { failureCode } from "./harness";
-import { allTracks, makeBackend, seedLibrary, signUp, trackIds } from "./backend";
+import { allTracks, drainScheduled, makeBackend, seedLibrary, signUp, trackIds } from "./backend";
 import type { Backend, User } from "./backend";
 
 const DEVICE = DeviceId.make("test-device");
@@ -85,6 +86,41 @@ const documentsRead = async (
 
   return (await measure(run)) - viewerOnly;
 };
+
+/** A session with the queue on the session row, as versions before `playbackQueues` saved it. */
+const legacy = async () => {
+  const fixture = await setup();
+  const { backend, admin, rock } = fixture;
+
+  await backend.run(async (ctx) => {
+    const ids = rock.flatMap((id) => {
+      const normalised = ctx.db.normalizeId("tracks", id);
+
+      return normalised === null ? [] : [normalised];
+    });
+
+    await ctx.db.insert("playbackSessions", {
+      userId: admin.id,
+      activeDeviceId: DEVICE,
+      queue: ids,
+      index: 2,
+      positionMs: 30_000,
+      playing: false,
+      updatedAt: START,
+      shuffle: false,
+      repeat: "all",
+      volume: 0.5,
+    });
+  });
+
+  return fixture;
+};
+
+const rows = (backend: Backend) =>
+  backend.run(async (ctx) => ({
+    sessions: await ctx.db.query("playbackSessions").collect(),
+    queues: await ctx.db.query("playbackQueues").collect(),
+  }));
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -418,5 +454,43 @@ describe("what a position report costs", () => {
     });
 
     expect(written).toBe(1);
+  });
+});
+
+describe("a session saved by an older version", () => {
+  it("reads the queue from the session until something writes it", async () => {
+    const { admin, rock } = await legacy();
+    const state = await admin.music.read("playback.state", {});
+
+    expect(state.queue.map((track) => track.id)).toEqual(rock);
+    expect([state.index, state.positionMs, state.repeat, state.volume]).toEqual([
+      2,
+      30_000,
+      "all",
+      0.5,
+    ]);
+  });
+
+  it("moves the queue to its own row on the next queue write", async () => {
+    const { backend, admin, rock } = await legacy();
+
+    await admin.music.run("playback.next", {});
+    const { sessions, queues } = await rows(backend);
+
+    expect(await current(admin)).toBe(at(3, rock));
+    expect(sessions[0]?.queue).toBeUndefined();
+    expect(queues.map((row) => [row.queue.length, row.index, row.repeat])).toEqual([[5, 3, "all"]]);
+  });
+
+  it("is moved by the splitPlaybackQueues migration", async () => {
+    const { backend, admin, rock } = await legacy();
+
+    await backend.mutation(internal.migrations.run, {});
+    await drainScheduled(backend);
+    const { sessions, queues } = await rows(backend);
+
+    expect(sessions.map((session) => session.queue)).toEqual([undefined]);
+    expect(queues.map((row) => row.index)).toEqual([2]);
+    expect((await admin.music.read("queue.list", {})).queue.map((track) => track.id)).toEqual(rock);
   });
 });
