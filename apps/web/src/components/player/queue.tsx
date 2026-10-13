@@ -66,7 +66,7 @@ export function QueueRow({
       className={cn(
         "group/queue relative flex shrink-0 items-center gap-3 rounded-sm px-2",
         glass ? "gap-3.5 rounded-md px-3 py-2 hover:bg-text/8" : "hover:bg-surface",
-        !glass && (current ? "h-row-touch bg-surface" : "h-[52px]"),
+        !glass && (current ? "h-row-touch bg-surface" : "h-13"),
         glass && current && "bg-text/8",
       )}
     >
@@ -80,7 +80,7 @@ export function QueueRow({
       <Artwork
         url={track.artUrl}
         seed={track.albumId}
-        className={cn(glass ? "size-11 rounded-sm" : "size-row rounded-[4px]")}
+        className={cn(glass ? "size-11 rounded-sm" : "size-row rounded-xs")}
       />
       <div className="pointer-events-none flex min-w-0 grow flex-col gap-px">
         <span
@@ -155,7 +155,7 @@ export function QueuePanel() {
   return (
     <aside
       aria-label="Queue"
-      className="hidden w-[340px] shrink-0 flex-col gap-5 overflow-y-auto border-l border-border bg-bg px-4 py-6 lg:flex dark:rounded-md dark:border-transparent"
+      className="hidden w-85 shrink-0 flex-col gap-5 overflow-y-auto border-l border-border bg-bg px-4 py-6 lg:flex dark:rounded-md dark:border-transparent"
     >
       <div className="flex items-center justify-between px-2">
         <h2 className="font-sans text-lg/md font-semibold tracking-tight text-text">Queue</h2>

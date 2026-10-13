@@ -50,7 +50,7 @@ export function PlayerBar() {
       >
         <div
           className={cn(
-            "flex w-[320px] shrink-0 items-center gap-3",
+            "flex w-80 shrink-0 items-center gap-3",
             offline && "opacity-(--opacity-disabled)",
           )}
         >
@@ -116,11 +116,11 @@ export function PlayerBar() {
               <SkipButton direction="next" />
               <RepeatButton />
             </div>
-            <Progress className="max-w-[520px]" />
+            <Progress className="max-w-130" />
           </div>
         )}
 
-        <div className="flex w-[320px] shrink-0 items-center justify-end gap-4">
+        <div className="flex w-80 shrink-0 items-center justify-end gap-4">
           {failed ? (
             <span className="truncate font-mono text-xs/xs tracking-mono text-text-muted">
               {player.error}
@@ -176,7 +176,7 @@ function DevicePickerButton() {
           <SpeakerIcon className="size-5" />
         </PopoverTrigger>
       </Tooltip>
-      <PopoverContent className="w-[380px] gap-0.5 p-2">
+      <PopoverContent className="w-95 gap-0.5 p-2">
         <div className="flex items-center justify-between px-3 pt-2.5 pb-2">
           <span className="font-sans text-md/base font-semibold text-text">Play on</span>
           <span className="font-mono text-xs/xs tracking-mono text-text-muted">
