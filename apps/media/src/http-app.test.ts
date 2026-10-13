@@ -23,6 +23,7 @@ import {
   testConfig,
 } from "./testing/fixtures.ts";
 import { layerMemory, MemoryMediaBackendControl } from "./testing/memory-media-backend.ts";
+import { canCountOpenFiles, openDescriptors } from "./testing/open-files.ts";
 import { adtsPayload } from "./testing/adts.ts";
 import { ffmpegFailingOnce } from "./testing/failing-ffmpeg.ts";
 import { ffmpegRecordingRuns } from "./testing/recording-ffmpeg.ts";
@@ -836,6 +837,54 @@ describe("media HTTP server", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(remaining).toEqual([]);
       }),
     ));
+
+  it.skipIf(!canCountOpenFiles())(
+    "closes original and finished files whose clients go away before or while they stream",
+    () =>
+      runScoped(
+        Effect.gen(function* () {
+          const { app, root, dataDir, scan, findTrackId } = yield* setup;
+
+          // Two minutes of tone: more than a socket buffers, so a client that leaves mid-way
+          // leaves the rest of the file unread.
+          yield* sineSegment(root, "long", "flac", 0, 48_000 * 120);
+          yield* scan;
+          const id = yield* findTrackId("long.flac");
+          const original = yield* streamUrl(id, "original");
+          const finished = yield* streamUrl(id, "aac-320");
+          const port = yield* listen(app);
+
+          // HEAD waits for the finished transcode, which a GET then serves as a file.
+          yield* Effect.promise(() =>
+            fetch(`http://127.0.0.1:${port}${finished}`, { method: "HEAD" }),
+          );
+          const [cached] = yield* Files.listNames(join(dataDir, "cache", "aac-320"));
+
+          if (cached === undefined) expect.unreachable("the transcode was not cached");
+          const files = [join(root, "long.flac"), join(dataDir, "cache", "aac-320", cached)];
+
+          yield* Effect.forEach(
+            [original, finished].flatMap((url) =>
+              [0, 1, 2, 5, 10, 50].map((afterMs) => ({ url, afterMs })),
+            ),
+            ({ url, afterMs }) => abandonedGet(port, url, afterMs),
+            { concurrency: "unbounded" },
+          );
+
+          const open = yield* Effect.forEach(files, (path) =>
+            Effect.promise(() => openDescriptors(path)).pipe(
+              Effect.repeat({
+                until: (count) => count === 0,
+                schedule: Schedule.spaced("50 millis"),
+                times: 60,
+              }),
+            ),
+          );
+
+          expect(open).toEqual([0, 0]);
+        }),
+      ),
+  );
 
   it("frees the run of every seek whose client goes away before it streams", () =>
     runScoped(
