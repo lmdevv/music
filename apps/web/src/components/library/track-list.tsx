@@ -194,13 +194,6 @@ function TrackRow({
       onDoubleClick={onPlay}
       className={rowClassName(variant)}
     >
-      {/* Phones tap anywhere on the row to play. */}
-      <button
-        type="button"
-        aria-label={`Play ${track.title}`}
-        onClick={onPlay}
-        className="absolute inset-0 lg:hidden"
-      />
       {variant === "album" ? (
         <span
           role="cell"
@@ -241,6 +234,14 @@ function TrackRow({
           variant === "album" ? "grow" : "grow lg:grow-2 lg:basis-0",
         )}
       >
+        {/* Phones tap anywhere on the row to play. The cell isn't positioned, so the button covers
+            the row while staying inside a cell, as the table role requires. */}
+        <button
+          type="button"
+          aria-label={`Play ${track.title}`}
+          onClick={onPlay}
+          className="absolute inset-0 lg:hidden"
+        />
         <span
           className={cn(
             "truncate font-sans text-text",
