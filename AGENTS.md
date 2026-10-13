@@ -76,8 +76,7 @@ worktree. Commit the regenerated `convex/_generated/`.
 - Repeat runs: `pnpm --filter web exec playwright test --repeat-each=20`, `pnpm test --repeats=20`.
 - `main` requires the `check` and `stack-e2e` CI jobs. Never merge with admin bypass.
 - Every PR gets CodeRabbit (`.coderabbit.yaml`), Codex automatic review, and Claude's
-  `/code-review`. The project `code-review` skill is CodeRabbit's CLI review; it is not
-  `/code-review`.
+  `/code-review`. Don't add a project skill named `code-review`; it shadows Claude's.
 - Cloud environments: none yet. Pin the Claude one in `.claude/settings.json`
   (`remote.defaultEnvironmentId`) and write the Codex ID here for `codex cloud exec --env`. Docker
   suites run in Claude cloud only.
