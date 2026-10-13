@@ -4,7 +4,7 @@ import { internalMutation } from "./_generated/server";
 import { fail } from "./lib/errors";
 
 /**
- * Creates the account for a password sign-up. The first account becomes the admin; every later
+ * Creates the account for a password sign-up. The first account becomes the owner; every later
  * one needs an open invite.
  */
 export const createFromSignUp = internalMutation({
@@ -17,7 +17,7 @@ export const createFromSignUp = internalMutation({
     const anyUser = await ctx.db.query("users").first();
 
     if (anyUser === null) {
-      return ctx.db.insert("users", { email, name: name ?? email.split("@")[0], role: "admin" });
+      return ctx.db.insert("users", { email, name: name ?? email.split("@")[0], role: "owner" });
     }
 
     if (inviteCode === undefined) {

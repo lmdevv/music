@@ -161,12 +161,17 @@ export const presentJob = (
 /** A library folder as clients see it. */
 export const presentLibrary = (
   doc: Doc<"libraries">,
+  owner: Doc<"users"> | null,
+  readable: boolean,
   scanning: boolean,
 ): (typeof Library)["Encoded"] => ({
   id: doc._id,
   name: doc.name,
   path: doc.path,
   visibility: doc.visibility,
+  ownerId: doc.ownerId,
+  ownerName: owner?.name ?? owner?.email ?? null,
+  readable,
   trackCount: doc.trackCount,
   lastScanAt: doc.lastScanAt ?? null,
   scanning,

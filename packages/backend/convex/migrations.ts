@@ -92,6 +92,30 @@ const MIGRATIONS = {
 
     return page;
   },
+  /**
+   * Servers from before owners have admins only; the earliest-created admin becomes the owner.
+   * One batch: the `by_role` index finds both rows directly.
+   */
+  promoteOwner: async (ctx) => {
+    const done = { continueCursor: "", isDone: true };
+
+    const owner = await ctx.db
+      .query("users")
+      .withIndex("by_role", (q) => q.eq("role", "owner"))
+      .first();
+
+    if (owner !== null) return done;
+
+    // Within one role the index orders by creation time, so this is the first admin.
+    const admin = await ctx.db
+      .query("users")
+      .withIndex("by_role", (q) => q.eq("role", "admin"))
+      .first();
+
+    if (admin !== null) await ctx.db.patch(admin._id, { role: "owner", suspendedAt: undefined });
+
+    return done;
+  },
 } satisfies Record<string, Migration>;
 
 type MigrationName = keyof typeof MIGRATIONS;
@@ -101,6 +125,7 @@ const migrationName = v.union(
   v.literal("foldAlbumSearchText"),
   v.literal("foldArtistSearchText"),
   v.literal("splitPlaybackQueues"),
+  v.literal("promoteOwner"),
 );
 
 const NAMES: ReadonlyArray<MigrationName> = [
@@ -108,6 +133,7 @@ const NAMES: ReadonlyArray<MigrationName> = [
   "foldAlbumSearchText",
   "foldArtistSearchText",
   "splitPlaybackQueues",
+  "promoteOwner",
 ];
 
 /**

@@ -2,9 +2,18 @@ import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
-export const role = v.union(v.literal("admin"), v.literal("member"));
+/** See `Role` in `@music/commands/models` and `permissions.ts`. */
+const role = v.union(
+  v.literal("owner"),
+  v.literal("admin"),
+  v.literal("member"),
+  v.literal("guest"),
+);
 
-export const visibility = v.union(v.literal("shared"), v.literal("private"));
+/** Ownership only moves by transfer, so no invite gives it. */
+const inviteRole = v.union(v.literal("admin"), v.literal("member"), v.literal("guest"));
+
+const visibility = v.union(v.literal("shared"), v.literal("restricted"), v.literal("private"));
 
 export const jobStatus = v.union(
   v.literal("pending"),
@@ -29,15 +38,20 @@ export default defineSchema({
     phone: v.optional(v.string()),
     phoneVerificationTime: v.optional(v.number()),
     isAnonymous: v.optional(v.boolean()),
+    /** Missing on accounts from before roles were stored; they read as `member`. */
     role: v.optional(role),
+    /** Set while the account is suspended: it cannot sign in, and its keys stop working. */
+    suspendedAt: v.optional(v.number()),
     /** Carried from the sign-up form to `createOrUpdateUser`; never stored on a created user. */
     inviteCode: v.optional(v.string()),
-  }).index("email", ["email"]),
+  })
+    .index("email", ["email"])
+    .index("by_role", ["role"]),
 
   invites: defineTable({
     code: v.string(),
     email: v.optional(v.string()),
-    role,
+    role: inviteRole,
     createdBy: v.id("users"),
     expiresAt: v.number(),
     acceptedBy: v.optional(v.id("users")),
@@ -46,7 +60,20 @@ export default defineSchema({
   })
     .index("by_code", ["code"])
     .index("by_expires", ["expiresAt"])
-    .index("by_accepted", ["acceptedAt"]),
+    .index("by_accepted", ["acceptedAt"])
+    .index("by_creator", ["createdBy"]),
+
+  /** One-time password reset links an admin made. Only the token's hash is stored. */
+  passwordResets: defineTable({
+    userId: v.id("users"),
+    /** SHA-256 of the token, hex. */
+    hash: v.string(),
+    createdBy: v.optional(v.id("users")),
+    expiresAt: v.number(),
+    usedAt: v.optional(v.number()),
+  })
+    .index("by_hash", ["hash"])
+    .index("by_user", ["userId"]),
 
   apiKeys: defineTable({
     userId: v.id("users"),
@@ -73,7 +100,21 @@ export default defineSchema({
     albumCount: v.number(),
     artistCount: v.number(),
     durationMs: v.number(),
-  }).index("by_path", ["path"]),
+  })
+    .index("by_path", ["path"])
+    .index("by_owner", ["ownerId"]),
+
+  /**
+   * People added to a library. They can listen to it while it is `restricted`, or, for guests,
+   * `shared`; a `private` library ignores the list but keeps it for when it opens again.
+   */
+  libraryAccess: defineTable({
+    libraryId: v.id("libraries"),
+    userId: v.id("users"),
+    grantedBy: v.id("users"),
+  })
+    .index("by_user", ["userId", "libraryId"])
+    .index("by_library", ["libraryId", "userId"]),
 
   artists: defineTable({
     libraryId: v.id("libraries"),

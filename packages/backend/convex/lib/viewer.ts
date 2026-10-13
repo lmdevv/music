@@ -1,4 +1,6 @@
 import { getAuthSessionId, getAuthUserId } from "@convex-dev/auth/server";
+import type { Role } from "@music/commands/models";
+import { can } from "@music/commands/permissions";
 
 import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx } from "../_generated/server";
@@ -10,10 +12,34 @@ export type ReadCtx = Pick<QueryCtx, "db" | "auth">;
 export interface Viewer {
   readonly id: Id<"users">;
   readonly user: Doc<"users">;
-  readonly role: "admin" | "member";
+  readonly role: Role;
   readonly libraries: ReadonlyArray<Doc<"libraries">>;
   readonly libraryIds: ReadonlySet<Id<"libraries">>;
 }
+
+/** A stored user's role; accounts from before roles were stored are members. */
+export const roleOf = (user: Doc<"users">): Role => user.role ?? "member";
+
+/**
+ * Whether someone can listen to a library: its owner always; others by its visibility, where
+ * `shared` lets in everyone but guests and the access list (`granted`) adds people to `shared`
+ * and `restricted` libraries.
+ */
+export const canListen = (
+  library: Doc<"libraries">,
+  userId: Id<"users">,
+  role: Role,
+  granted: boolean,
+): boolean => {
+  if (library.ownerId === userId) return true;
+
+  if (library.visibility === "private") return false;
+
+  return granted || (library.visibility === "shared" && role !== "guest");
+};
+
+/** The suspended-account message sign-in, API keys, and open sessions all show. */
+export const SUSPENDED_MESSAGE = "This account is suspended. Ask an admin on this server.";
 
 /** Loads the viewer or fails with `unauthenticated`. */
 export const loadViewer = async (ctx: ReadCtx): Promise<Viewer> => {
@@ -32,16 +58,31 @@ export const loadViewer = async (ctx: ReadCtx): Promise<Viewer> => {
   const user = await ctx.db.get(userId);
 
   if (user === null) return fail("unauthenticated", "This account no longer exists");
-  const all = await ctx.db.query("libraries").collect();
 
-  const libraries = all.filter(
-    (library) => library.visibility === "shared" || library.ownerId === userId,
+  // Suspending ends every session, so this only catches a sign-in racing the suspension.
+  if (user.suspendedAt !== undefined) return fail("unauthenticated", SUSPENDED_MESSAGE);
+
+  const role = roleOf(user);
+
+  // A server has a handful of libraries, and a person is on a handful of access lists.
+  const [all, grants] = await Promise.all([
+    ctx.db.query("libraries").collect(),
+    ctx.db
+      .query("libraryAccess")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect(),
+  ]);
+
+  const granted = new Set(grants.map((grant) => grant.libraryId));
+
+  const libraries = all.filter((library) =>
+    canListen(library, userId, role, granted.has(library._id)),
   );
 
   return {
     id: userId,
     user,
-    role: user.role ?? "member",
+    role,
     libraries,
     libraryIds: new Set(libraries.map((library) => library._id)),
   };
@@ -50,3 +91,10 @@ export const loadViewer = async (ctx: ReadCtx): Promise<Viewer> => {
 /** Checks that the viewer can read a library-owned document. */
 export const canRead = (viewer: Viewer, libraryId: Id<"libraries">): boolean =>
   viewer.libraryIds.has(libraryId);
+
+/**
+ * Checks that the viewer can manage a library: admins manage every shared and restricted library,
+ * listening or not, but a private library stays its owner's alone.
+ */
+export const canManage = (viewer: Viewer, library: Doc<"libraries">): boolean =>
+  can(viewer.role, "admin") && (library.visibility !== "private" || library.ownerId === viewer.id);

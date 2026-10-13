@@ -1,3 +1,4 @@
+import { assignableRoles, can } from "@music/commands/permissions";
 import { Match } from "effect";
 
 import { internal } from "../_generated/api";
@@ -9,7 +10,7 @@ import { tableId } from "../lib/ids";
 import { normaliseLibraryPath, overlapOf } from "../lib/paths";
 import { presentJob, presentLibrary } from "../lib/present";
 import { endSession } from "../lib/sessions";
-import { canRead } from "../lib/viewer";
+import { canManage, canRead, roleOf } from "../lib/viewer";
 import type { Viewer } from "../lib/viewer";
 import type { MutationHandlers, QueryHandlers } from "./types";
 import { ok } from "./types";
@@ -30,14 +31,15 @@ const presentUser = (doc: Doc<"users">) => ({
   id: doc._id,
   email: doc.email ?? "",
   name: doc.name ?? null,
-  role: doc.role ?? "member",
+  role: roleOf(doc),
 });
 
-const presentInvite = (doc: Doc<"invites">) => ({
+const presentInvite = (doc: Doc<"invites">, now: number) => ({
   id: doc._id,
   code: doc.code,
   email: doc.email ?? null,
   role: doc.role,
+  status: doc.expiresAt < now ? ("expired" as const) : ("open" as const),
   createdAt: doc._creationTime,
   expiresAt: doc.expiresAt,
   acceptedAt: doc.acceptedAt ?? null,
@@ -53,19 +55,25 @@ const activeJob = async (ctx: QueryCtx, libraryId: Id<"libraries">): Promise<Doc
     .withIndex("by_library_status", (q) => q.eq("libraryId", libraryId).eq("status", "pending"))
     .first());
 
+/** Whether the viewer may see a library at all: to listen to it, or to manage it. */
+const canSee = (viewer: Viewer, library: Doc<"libraries">): boolean =>
+  canRead(viewer, library._id) || canManage(viewer, library);
+
 /**
- * A library the viewer can see. Admin rights cover shared libraries and the admin's own private
- * ones; another user's private library stays invisible, so it is `not_found` like any other ID.
+ * A library the viewer manages. Admin rights cover shared and restricted libraries and the
+ * admin's own private ones; another person's private library stays invisible, so it is
+ * `not_found` like any other ID.
  */
-const visibleLibrary = async (
+const managedLibrary = async (
   ctx: QueryCtx,
   viewer: Viewer,
   id: string,
 ): Promise<Doc<"libraries">> => {
   const library = await ctx.db.get(tableId(ctx, "libraries", id));
 
-  if (library === null || !canRead(viewer, library._id))
+  if (library === null || !canManage(viewer, library)) {
     return fail("not_found", "Library not found");
+  }
 
   return library;
 };
@@ -73,8 +81,11 @@ const visibleLibrary = async (
 /** A job on a library the viewer can see. */
 const visibleJob = async (ctx: QueryCtx, viewer: Viewer, id: string): Promise<Doc<"jobs">> => {
   const job = await ctx.db.get(tableId(ctx, "jobs", id));
+  const library = job === null ? null : await ctx.db.get(job.libraryId);
 
-  if (job === null || !canRead(viewer, job.libraryId)) return fail("not_found", "Job not found");
+  if (job === null || library === null || !canSee(viewer, library)) {
+    return fail("not_found", "Job not found");
+  }
 
   return job;
 };
@@ -105,6 +116,20 @@ const checkNoOverlap = async (ctx: QueryCtx, viewer: Viewer, path: string): Prom
   }
 };
 
+/** A person on the server, by wire ID. */
+const existingUser = async (ctx: QueryCtx, id: string): Promise<Doc<"users">> =>
+  (await ctx.db.get(tableId(ctx, "users", id))) ?? fail("not_found", "Person not found");
+
+const grantOf = (
+  ctx: QueryCtx,
+  libraryId: Id<"libraries">,
+  userId: Id<"users">,
+): Promise<Doc<"libraryAccess"> | null> =>
+  ctx.db
+    .query("libraryAccess")
+    .withIndex("by_library", (q) => q.eq("libraryId", libraryId).eq("userId", userId))
+    .unique();
+
 /** Enqueues a scan unless the library already has a pending or running job, which it returns. */
 export const enqueueScan = async (
   ctx: MutationCtx,
@@ -119,19 +144,46 @@ export const enqueueScan = async (
 };
 
 export const adminQueries = {
-  "libraries.list": async (ctx, viewer) =>
-    Promise.all(
-      viewer.libraries.map(async (library) =>
-        presentLibrary(library, (await activeJob(ctx, library._id)) !== null),
+  "libraries.list": async (ctx, viewer) => {
+    // Members see what they can hear; admins also see what they manage but cannot hear.
+    const listed = can(viewer.role, "admin")
+      ? (await ctx.db.query("libraries").collect()).filter((library) => canSee(viewer, library))
+      : viewer.libraries;
+
+    return Promise.all(
+      listed.map(async (library) =>
+        presentLibrary(
+          library,
+          await ctx.db.get(library.ownerId),
+          canRead(viewer, library._id),
+          (await activeJob(ctx, library._id)) !== null,
+        ),
       ),
-    ),
+    );
+  },
+
+  "libraries.people": async (ctx, viewer, args) => {
+    const library = await managedLibrary(ctx, viewer, args.libraryId);
+
+    const grants = await ctx.db
+      .query("libraryAccess")
+      .withIndex("by_library", (q) => q.eq("libraryId", library._id))
+      .collect();
+
+    const users = await Promise.all(grants.map((grant) => ctx.db.get(grant.userId)));
+
+    return users.flatMap((user) => (user === null ? [] : [presentUser(user)]));
+  },
 
   "jobs.list": async (ctx, viewer) => {
     const jobs = await ctx.db.query("jobs").order("desc").take(RECENT_JOBS);
-    const visible = jobs.filter((job) => canRead(viewer, job.libraryId));
 
-    return Promise.all(
-      visible.map(async (job) => presentJob(job, await ctx.db.get(job.libraryId))),
+    const withLibraries = await Promise.all(
+      jobs.map(async (job) => ({ job, library: await ctx.db.get(job.libraryId) })),
+    );
+
+    return withLibraries.flatMap(({ job, library }) =>
+      library === null || !canSee(viewer, library) ? [] : [presentJob(job, library)],
     );
   },
 
@@ -152,22 +204,15 @@ export const adminQueries = {
     return keys.filter((key) => key.revokedAt === undefined).map(presentApiKey);
   },
 
-  "people.list": async (ctx) => {
-    const users = await ctx.db.query("users").collect();
-
-    return users.map(presentUser);
-  },
-
   "invites.list": async (ctx) => {
     const invites = await ctx.db.query("invites").order("desc").take(100);
     const now = Date.now();
 
-    // Open invites only: an expired one can no longer be used, so it is not listed as open.
+    // Unused invites, open and expired: an expired one can't be used, but stays listed (as
+    // `expired`) until an admin removes it or the cleanup cron deletes it.
     return invites
-      .filter(
-        (invite) => !invite.revoked && invite.acceptedBy === undefined && invite.expiresAt > now,
-      )
-      .map(presentInvite);
+      .filter((invite) => !invite.revoked && invite.acceptedBy === undefined)
+      .map((invite) => presentInvite(invite, now));
   },
 } satisfies Partial<QueryHandlers>;
 
@@ -196,31 +241,83 @@ export const adminMutations = {
   },
 
   "libraries.scan": async (ctx, viewer, args) => {
-    const library = await visibleLibrary(ctx, viewer, args.libraryId);
+    const library = await managedLibrary(ctx, viewer, args.libraryId);
 
     return { jobId: await enqueueScan(ctx, library._id, viewer.id) };
   },
 
+  "libraries.update": async (ctx, viewer, args) => {
+    const library = await managedLibrary(ctx, viewer, args.libraryId);
+
+    if (args.name !== undefined) await ctx.db.patch(library._id, { name: args.name });
+
+    if (args.visibility !== undefined) {
+      await ctx.db.patch(library._id, { visibility: args.visibility });
+    }
+
+    return ok;
+  },
+
+  "libraries.grant": async (ctx, viewer, args) => {
+    const library = await managedLibrary(ctx, viewer, args.libraryId);
+    const user = await existingUser(ctx, args.userId);
+
+    if (library.visibility === "private") {
+      return fail(
+        "invalid_args",
+        "A private library is only for its owner; make it restricted to add people",
+      );
+    }
+
+    if (user._id === library.ownerId || (await grantOf(ctx, library._id, user._id)) !== null) {
+      return ok;
+    }
+
+    await ctx.db.insert("libraryAccess", {
+      libraryId: library._id,
+      userId: user._id,
+      grantedBy: viewer.id,
+    });
+
+    return ok;
+  },
+
+  "libraries.revoke": async (ctx, viewer, args) => {
+    const library = await managedLibrary(ctx, viewer, args.libraryId);
+    const grant = await grantOf(ctx, library._id, tableId(ctx, "users", args.userId));
+
+    if (grant !== null) await ctx.db.delete(grant._id);
+
+    return ok;
+  },
+
   "libraries.delete": async (ctx, viewer, args) => {
-    const library = await visibleLibrary(ctx, viewer, args.libraryId);
+    const library = await managedLibrary(ctx, viewer, args.libraryId);
     await ctx.db.delete(library._id);
 
-    const open = await Promise.all(
-      (["pending", "running"] as const).map((status) =>
-        ctx.db
-          .query("jobs")
-          .withIndex("by_library_status", (q) =>
-            q.eq("libraryId", library._id).eq("status", status),
-          )
-          .collect(),
+    const [open, grants] = await Promise.all([
+      Promise.all(
+        (["pending", "running"] as const).map((status) =>
+          ctx.db
+            .query("jobs")
+            .withIndex("by_library_status", (q) =>
+              q.eq("libraryId", library._id).eq("status", status),
+            )
+            .collect(),
+        ),
       ),
-    );
+      ctx.db
+        .query("libraryAccess")
+        .withIndex("by_library", (q) => q.eq("libraryId", library._id))
+        .collect(),
+    ]);
 
-    await Promise.all(
-      open
+    await Promise.all([
+      ...open
         .flat()
         .map((job) => ctx.db.patch(job._id, { status: "cancelled", finishedAt: Date.now() })),
-    );
+      ...grants.map((grant) => ctx.db.delete(grant._id)),
+    ]);
 
     await ctx.scheduler.runAfter(0, internal.maintenance.purgeLibrary, {
       libraryId: library._id,
@@ -274,10 +371,16 @@ export const adminMutations = {
   },
 
   "invites.create": async (ctx, viewer, args) => {
+    const role = args.role ?? "member";
+
+    if (!assignableRoles(viewer.role).includes(role)) {
+      return fail("forbidden", `You can't invite someone as ${role}`);
+    }
+
     const id = await ctx.db.insert("invites", {
       code: randomToken(10),
       email: args.email?.toLowerCase(),
-      role: args.role ?? "member",
+      role,
       createdBy: viewer.id,
       expiresAt: Date.now() + INVITE_TTL_MS,
       revoked: false,
@@ -287,7 +390,7 @@ export const adminMutations = {
 
     if (invite === null) return fail("internal", "The invite was not saved");
 
-    return presentInvite(invite);
+    return presentInvite(invite, Date.now());
   },
 
   "invites.revoke": async (ctx, _viewer, args) => {

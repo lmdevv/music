@@ -1,7 +1,10 @@
+import { can, forbiddenMessage } from "@music/commands/permissions";
 import { v } from "convex/values";
 
 import { internalMutation } from "./_generated/server";
+import { fail } from "./lib/errors";
 import { endSession } from "./lib/sessions";
+import { roleOf, SUSPENDED_MESSAGE } from "./lib/viewer";
 
 /** Matches Convex Auth's default session lifetime, which `auth.ts` does not change. */
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -20,6 +23,14 @@ export const redeem = internalMutation({
       .unique();
 
     if (key === null || key.revokedAt !== undefined) return null;
+    const user = await ctx.db.get(key.userId);
+
+    if (user === null) return null;
+
+    if (user.suspendedAt !== undefined) return fail("forbidden", SUSPENDED_MESSAGE);
+
+    if (!can(roleOf(user), "keys")) return fail("forbidden", forbiddenMessage("keys"));
+
     const now = Date.now();
     const current = key.sessionId === undefined ? null : await ctx.db.get(key.sessionId);
 

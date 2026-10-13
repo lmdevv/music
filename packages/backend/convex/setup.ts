@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 
 import { query } from "./_generated/server";
+import { sha256Hex } from "./lib/crypto";
 
 /** First-run state for the welcome screen. Public: it reveals only whether setup is done. */
 export const status = query({
@@ -36,6 +37,38 @@ export const invite = query({
     };
 
     if (found.acceptedBy !== undefined) return { state: "used" as const, ...details };
+
+    if (found.expiresAt < Date.now()) return { state: "expired" as const, ...details };
+
+    return { state: "open" as const, ...details };
+  },
+});
+
+/**
+ * What the reset-password screen shows for a token. Public like `invite`: only someone holding
+ * the secret token learns whose account it resets.
+ */
+export const passwordReset = query({
+  args: { token: v.string() },
+  handler: async (ctx, { token }) => {
+    const hash = await sha256Hex(token);
+
+    const found = await ctx.db
+      .query("passwordResets")
+      .withIndex("by_hash", (q) => q.eq("hash", hash))
+      .unique();
+
+    const user = found === null ? null : await ctx.db.get(found.userId);
+
+    if (found === null || user === null) return { state: "invalid" as const };
+
+    const details = {
+      email: user.email ?? "",
+      name: user.name ?? null,
+      expiresAt: found.expiresAt,
+    };
+
+    if (found.usedAt !== undefined) return { state: "used" as const, ...details };
 
     if (found.expiresAt < Date.now()) return { state: "expired" as const, ...details };
 

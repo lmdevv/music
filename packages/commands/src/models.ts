@@ -62,9 +62,18 @@ export const StreamTimingHeader = {
   start: "X-Music-Start-Samples",
 } as const;
 
-export const Role = Schema.Literals(["admin", "member"]);
+/**
+ * What a person may do on the server (see `permissions.ts`). `owner` is the first account and
+ * exactly one person; `guest` only hears the libraries shared with them.
+ */
+export const Role = Schema.Literals(["owner", "admin", "member", "guest"]);
 
 export type Role = typeof Role.Type;
+
+/** A role an invite or a role change can give. Ownership only moves by transfer. */
+export const AssignableRole = Schema.Literals(["admin", "member", "guest"]);
+
+export type AssignableRole = typeof AssignableRole.Type;
 
 export const Track = Schema.Struct({
   id: TrackId,
@@ -297,13 +306,27 @@ export const Job = Schema.Struct({
 
 export interface Job extends Schema.Schema.Type<typeof Job> {}
 
-export const LibraryVisibility = Schema.Literals(["shared", "private"]);
+/**
+ * Who can listen to a library besides its owner: `shared` is everyone but guests (guests need to
+ * be added), `restricted` is only the people added, and `private` is nobody else.
+ */
+export const LibraryVisibility = Schema.Literals(["shared", "restricted", "private"]);
+
+export type LibraryVisibility = typeof LibraryVisibility.Type;
 
 export const Library = Schema.Struct({
   id: LibraryId,
   name: Schema.String,
   path: Schema.String,
   visibility: LibraryVisibility,
+  ownerId: UserId,
+  /** Null when the owner's account is gone or has no name. */
+  ownerName: Schema.NullOr(Schema.String),
+  /**
+   * Whether you can listen to it. Admins also see the shared and restricted libraries they
+   * manage but were not added to; those are `false`.
+   */
+  readable: Schema.Boolean,
   trackCount: Count,
   lastScanAt: Schema.NullOr(Timestamp),
   scanning: Schema.Boolean,
@@ -330,17 +353,58 @@ export const User = Schema.Struct({
 
 export interface User extends Schema.Schema.Type<typeof User> {}
 
+/** Someone on the server, as admins see them. */
+export const Person = Schema.Struct({
+  id: UserId,
+  email: Schema.String,
+  name: Schema.NullOr(Schema.String),
+  role: Role,
+  /** A suspended person cannot sign in, and their sessions and API keys stop working. */
+  suspended: Schema.Boolean,
+  createdAt: Timestamp,
+  /** The latest sign-in, player heartbeat, playback change, or API key use; null if none. */
+  lastActiveAt: Schema.NullOr(Timestamp),
+});
+
+export interface Person extends Schema.Schema.Type<typeof Person> {}
+
+/** Someone added to a library's access list. */
+export const LibraryMember = Schema.Struct({
+  id: UserId,
+  email: Schema.String,
+  name: Schema.NullOr(Schema.String),
+  role: Role,
+});
+
+export interface LibraryMember extends Schema.Schema.Type<typeof LibraryMember> {}
+
+/** `open` can still be used; `expired` invites stay listed so admins can see and revoke them. */
+export const InviteStatus = Schema.Literals(["open", "expired"]);
+
 export const Invite = Schema.Struct({
   id: InviteId,
   code: Schema.String,
   email: Schema.NullOr(Schema.String),
-  role: Role,
+  role: AssignableRole,
+  status: InviteStatus,
   createdAt: Timestamp,
   expiresAt: Timestamp,
   acceptedAt: Schema.NullOr(Timestamp),
 });
 
 export interface Invite extends Schema.Schema.Type<typeof Invite> {}
+
+/**
+ * A one-time password reset. The token goes in the reset link (`/reset/<token>`); it is shown
+ * once, works until `expiresAt`, and only its hash is stored.
+ */
+export const PasswordReset = Schema.Struct({
+  userId: UserId,
+  token: Schema.String,
+  expiresAt: Timestamp,
+});
+
+export interface PasswordReset extends Schema.Schema.Type<typeof PasswordReset> {}
 
 export const StreamUrl = Schema.Struct({
   trackId: TrackId,

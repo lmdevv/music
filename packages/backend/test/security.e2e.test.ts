@@ -8,7 +8,7 @@
  *   pnpm vitest run packages/backend
  *
  * Without them the suite is skipped. On an empty server the first test races two sign-ups for
- * the admin account; later runs sign in as whichever of them won and skip that test.
+ * the owner account; later runs sign in as whichever of them won and skip that test.
  */
 import { createHash } from "node:crypto";
 
@@ -17,14 +17,19 @@ import {
   ApiKeyId,
   ArtistId,
   DeviceId,
+  InviteId,
   JobId,
   LibraryId,
   PlaylistId,
   PlaylistItemId,
   TrackId,
+  UserId,
 } from "@music/commands/ids";
+import type { AssignableRole, Role } from "@music/commands/models";
+import { can } from "@music/commands/permissions";
+import { commands, isCommandName } from "@music/commands/registry";
 import type { CommandResult } from "@music/commands/registry";
-import { setupStatus, inviteLookup } from "@music/sdk/functions";
+import { inviteLookup, passwordResetLookup, setupStatus } from "@music/sdk/functions";
 import { makeFunctionReference } from "convex/server";
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -32,8 +37,10 @@ import {
   anonymous,
   expectReadFailure,
   expectRunFailure,
+  failure,
   failureCode,
   passwordSignIn,
+  resetPassword,
   runId,
   signIn,
   signOut,
@@ -149,11 +156,13 @@ interface Fixture {
   /** Outcome of the two concurrent first sign-ups, when the server started empty. */
   readonly race: { readonly fulfilled: number; readonly codes: ReadonlyArray<string> } | null;
   readonly usersAfterRace: number;
-  /** Owns the shared library and the private library `alpha`. */
+  /** The owner: the first account. Owns the shared library and the private library `alpha`. */
   readonly adminA: Session;
   /** A second admin who owns the private library `beta`. */
   readonly adminB: Session;
   readonly member: Session;
+  /** Added to no library to begin with. */
+  readonly guest: Session;
   readonly shared: { readonly libraryId: LibraryId; readonly track: Track };
   readonly alpha: { readonly libraryId: LibraryId; readonly jobId: JobId; readonly track: Track };
   readonly beta: { readonly libraryId: LibraryId; readonly jobId: JobId; readonly track: Track };
@@ -168,9 +177,9 @@ const findTrack = async (session: Session, title: string): Promise<Track> => {
   return track;
 };
 
-/** The names that carry an accent or ß, such as the accented catalog one test adds. */
+/** This run's names that carry an accent or ß; earlier runs on the same server match too. */
 const accentedOnly = (names: ReadonlyArray<string>): ReadonlyArray<string> =>
-  names.filter((name) => /[äöüß]/u.test(name));
+  names.filter((name) => /[äöüß]/u.test(name) && name.endsWith(TOKEN));
 
 /** Every page of a paginated list command, flattened. */
 const allPages = async <Item>(
@@ -230,11 +239,7 @@ const signUpAdmin = async (): Promise<Pick<Fixture, "race" | "usersAfterRace" | 
   };
 };
 
-const invite = async (
-  admin: Session,
-  email: string,
-  role: "admin" | "member",
-): Promise<Session> => {
+const invite = async (admin: Session, email: string, role: AssignableRole): Promise<Session> => {
   const created = await admin.music.run("invites.create", { email, role });
 
   return signUp(server, { email, password: PASSWORD, inviteCode: created.code });
@@ -244,6 +249,7 @@ const setup = async (): Promise<Fixture> => {
   const { race, usersAfterRace, adminA } = await signUpAdmin();
   const adminB = await invite(adminA, `admin-b-${id}@music.test`, "admin");
   const member = await invite(adminA, `member-${id}@music.test`, "member");
+  const guest = await invite(adminA, `guest-${id}@music.test`, "guest");
 
   const shared = await adminA.music.run("libraries.create", {
     name: `Shared ${id}`,
@@ -283,6 +289,7 @@ const setup = async (): Promise<Fixture> => {
     adminA,
     adminB,
     member,
+    guest,
     shared: {
       libraryId: shared.libraryId,
       track: await findTrack(adminA, `Open Song ${TOKEN}`),
@@ -377,7 +384,7 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     fixture = await setup();
   }, 120_000);
 
-  it("creates exactly one admin when two people sign up on an empty server at once", (context) => {
+  it("creates exactly one owner when two people sign up on an empty server at once", (context) => {
     const { race, usersAfterRace } = fixture;
 
     if (race === null) {
@@ -896,5 +903,416 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
 
     await signOut(server, session.tokens);
     await expectReadFailure(session, "account.me", {}, "unauthenticated");
+  });
+
+  it("makes the first account the owner and invited people the role they were invited as", async () => {
+    const { adminA, adminB, member, guest } = fixture;
+
+    expect((await adminA.music.read("account.me", {})).role).toBe("owner");
+    expect((await adminB.music.read("account.me", {})).role).toBe("admin");
+    expect((await member.music.read("account.me", {})).role).toBe("member");
+    expect((await guest.music.read("account.me", {})).role).toBe("guest");
+
+    const owners = (await adminA.music.read("people.list", {})).filter(
+      (person) => person.role === "owner",
+    );
+
+    expect(owners).toHaveLength(1);
+  });
+
+  it("gives each role exactly the commands its capabilities allow", async () => {
+    const { adminA, adminB, member, guest, shared } = fixture;
+    // IDs of the wrong table: allowed callers get `not_found` and change nothing.
+    const nobody = UserId.make(shared.libraryId);
+    const noLibrary = LibraryId.make(shared.track.id);
+
+    /** Each gated command, called so that it changes nothing; resolves the failure code. */
+    const calls = {
+      "libraries.create": ({ music }) =>
+        failureCode(
+          music.run("libraries.create", { name: "Again", path: `/security-${id}/shared` }),
+        ),
+      "libraries.scan": ({ music }) =>
+        failureCode(music.run("libraries.scan", { libraryId: noLibrary })),
+      "libraries.delete": ({ music }) =>
+        failureCode(music.run("libraries.delete", { libraryId: noLibrary })),
+      "libraries.update": ({ music }) =>
+        failureCode(music.run("libraries.update", { libraryId: noLibrary, name: "Renamed" })),
+      "libraries.people": ({ music }) =>
+        failureCode(music.read("libraries.people", { libraryId: noLibrary })),
+      "libraries.grant": ({ music }) =>
+        failureCode(music.run("libraries.grant", { libraryId: noLibrary, userId: nobody })),
+      "libraries.revoke": ({ music }) =>
+        failureCode(music.run("libraries.revoke", { libraryId: noLibrary, userId: nobody })),
+      "jobs.cancel": ({ music }) =>
+        failureCode(music.run("jobs.cancel", { jobId: JobId.make(shared.libraryId) })),
+      "keys.list": ({ music }) => failureCode(music.read("keys.list", {})),
+      "keys.create": ({ music }) => failureCode(music.run("keys.create", { name: `Matrix ${id}` })),
+      "keys.revoke": ({ music }) =>
+        failureCode(music.run("keys.revoke", { apiKeyId: ApiKeyId.make(shared.libraryId) })),
+      "people.list": ({ music }) => failureCode(music.read("people.list", {})),
+      "people.role": ({ music }) =>
+        failureCode(music.run("people.role", { userId: nobody, role: "member" })),
+      "people.suspend": ({ music }) => failureCode(music.run("people.suspend", { userId: nobody })),
+      "people.unsuspend": ({ music }) =>
+        failureCode(music.run("people.unsuspend", { userId: nobody })),
+      "people.reset": ({ music }) => failureCode(music.run("people.reset", { userId: nobody })),
+      "people.remove": ({ music }) => failureCode(music.run("people.remove", { userId: nobody })),
+      "people.transfer": ({ music }) =>
+        failureCode(music.run("people.transfer", { userId: nobody })),
+      "invites.list": ({ music }) => failureCode(music.read("invites.list", {})),
+      "invites.create": ({ music }) => failureCode(music.run("invites.create", { role: "guest" })),
+      "invites.revoke": ({ music }) =>
+        failureCode(music.run("invites.revoke", { inviteId: InviteId.make(shared.libraryId) })),
+    } satisfies Record<string, (session: Session) => Promise<string>>;
+
+    const attempts = new Map(Object.entries(calls));
+
+    // Every command that needs more than a signed-in user is in the matrix.
+    const gated = Object.keys(commands)
+      .filter(isCommandName)
+      .filter((name) => commands[name].access !== "user");
+
+    expect([...attempts.keys()].toSorted()).toEqual(gated.toSorted());
+
+    const roles: ReadonlyArray<readonly [Role, Session]> = [
+      ["owner", adminA],
+      ["admin", adminB],
+      ["member", member],
+      ["guest", guest],
+    ];
+
+    const outcomes = await Promise.all(
+      gated.flatMap((name) =>
+        roles.map(async ([role, session]) => {
+          const attempt = attempts.get(name);
+          const code = attempt === undefined ? "missing" : await attempt(session);
+
+          return { name, role, code, allowed: can(role, commands[name].access) };
+        }),
+      ),
+    );
+
+    for (const { name, role, code, allowed } of outcomes) {
+      expect(
+        allowed ? ["succeeded", "not_found", "conflict"] : ["forbidden"],
+        `${role} running ${name} got ${code}`,
+      ).toContain(code);
+    }
+  });
+
+  it("keeps guests to the libraries they are added to", async () => {
+    const { adminA, guest, shared } = fixture;
+    const { id: guestId } = await guest.music.read("account.me", {});
+
+    const expectShut = async () => {
+      const libraries = await guest.music.read("libraries.list", {});
+      const search = await guest.music.read("search", { query: TOKEN, limit: 50 });
+
+      expect(libraries.map((library) => library.id)).not.toContain(shared.libraryId);
+      expect(search.tracks.map((found) => found.id)).not.toContain(shared.track.id);
+      await expectReadFailure(guest, "albums.get", { albumId: shared.track.albumId }, "not_found");
+      await expectReadFailure(
+        guest,
+        "stream.url",
+        { trackId: shared.track.id, profile: "original" },
+        "not_found",
+      );
+    };
+
+    await expectShut();
+
+    await adminA.music.run("libraries.grant", { libraryId: shared.libraryId, userId: guestId });
+
+    const libraries = await guest.music.read("libraries.list", {});
+    const search = await guest.music.read("search", { query: TOKEN, limit: 50 });
+
+    expect(libraries.map((library) => library.id)).toEqual([shared.libraryId]);
+    expect(search.tracks.map((found) => found.id)).toContain(shared.track.id);
+    expect(search.tracks.map((found) => found.id)).not.toContain(fixture.alpha.track.id);
+
+    const stream = await guest.music.read("stream.url", {
+      trackId: shared.track.id,
+      profile: "original",
+    });
+
+    expect(stream.url).toContain("/stream/");
+
+    const people = await adminA.music.read("libraries.people", { libraryId: shared.libraryId });
+
+    expect(people.map((person) => person.id)).toEqual([guestId]);
+
+    await adminA.music.run("libraries.revoke", { libraryId: shared.libraryId, userId: guestId });
+    await expectShut();
+  });
+
+  it("lets only the people added listen to a restricted library", async () => {
+    const { adminA, adminB, member, shared } = fixture;
+
+    const gamma = await adminA.music.run("libraries.create", {
+      name: `Gamma ${id}`,
+      path: `/security-${id}/gamma`,
+      visibility: "restricted",
+    });
+
+    await upsertTracks(server, mediaSecret, gamma.libraryId, [
+      {
+        path: "Gamma/song.flac",
+        title: `Gamma Song ${TOKEN}`,
+        artist: `Gamma Artist ${TOKEN}`,
+        album: `Gamma Album ${TOKEN}`,
+        artHash: "5".repeat(64),
+      },
+    ]);
+
+    const hidden = { ...gamma, track: await findTrack(adminA, `Gamma Song ${TOKEN}`) };
+    const { id: memberId } = await member.music.read("account.me", {});
+
+    await expectInvisible(member, hidden, shared);
+
+    // Another admin manages it without hearing it.
+    const managed = (await adminB.music.read("libraries.list", {})).find(
+      (library) => library.id === gamma.libraryId,
+    );
+
+    expect(managed).toMatchObject({ visibility: "restricted", readable: false });
+    await expectReadFailure(
+      adminB,
+      "stream.url",
+      { trackId: hidden.track.id, profile: "original" },
+      "not_found",
+    );
+
+    await adminB.music.run("libraries.grant", { libraryId: gamma.libraryId, userId: memberId });
+    expect(
+      (await adminB.music.read("libraries.people", { libraryId: gamma.libraryId })).map(
+        (person) => person.id,
+      ),
+    ).toEqual([memberId]);
+
+    const search = await member.music.read("search", { query: `Gamma ${TOKEN}`, limit: 50 });
+
+    expect(search.tracks.map((found) => found.id)).toContain(hidden.track.id);
+    expect(
+      (await member.music.read("stream.url", { trackId: hidden.track.id, profile: "original" }))
+        .trackId,
+    ).toBe(hidden.track.id);
+
+    await adminB.music.run("libraries.revoke", { libraryId: gamma.libraryId, userId: memberId });
+    await expectInvisible(member, hidden, shared);
+
+    await adminB.music.run("libraries.update", {
+      libraryId: gamma.libraryId,
+      name: `Gamma for all ${id}`,
+      visibility: "shared",
+    });
+
+    expect(
+      (await member.music.read("libraries.list", {})).find(
+        (library) => library.id === gamma.libraryId,
+      ),
+    ).toMatchObject({ name: `Gamma for all ${id}`, readable: true });
+
+    // Private puts it back with its owner alone, out of other admins' reach.
+    await adminA.music.run("libraries.update", {
+      libraryId: gamma.libraryId,
+      visibility: "private",
+    });
+    expect(
+      (await adminB.music.read("libraries.list", {})).map((library) => library.id),
+    ).not.toContain(gamma.libraryId);
+    await expectRunFailure(
+      adminB,
+      "libraries.update",
+      { libraryId: gamma.libraryId, visibility: "shared" },
+      "not_found",
+    );
+    await expectRunFailure(
+      adminA,
+      "libraries.grant",
+      { libraryId: gamma.libraryId, userId: memberId },
+      "invalid_args",
+    );
+  });
+
+  it("locks a suspended person out at once: sessions, API keys, and sign-in", async () => {
+    const { adminB } = fixture;
+    const email = `suspended-${id}@music.test`;
+    const person = await invite(fixture.adminA, email, "member");
+    const { id: userId } = await person.music.read("account.me", {});
+    const { key } = await person.music.run("keys.create", { name: `CLI ${id}` });
+    const keyTokens = await signIn(server, { provider: "apikey", params: { key } });
+
+    if (keyTokens === null) throw new Error("A fresh API key did not sign in");
+
+    const cli = withTokens(server, keyTokens);
+
+    await adminB.music.run("people.suspend", { userId });
+
+    await expectReadFailure(person, "account.me", {}, "unauthenticated");
+    await expectReadFailure(cli, "account.me", {}, "unauthenticated");
+    expect(await failureCode(signIn(server, { provider: "apikey", params: { key } }))).toBe(
+      "forbidden",
+    );
+    expect(await failure(passwordSignIn(server, email, PASSWORD))).toEqual({
+      code: "forbidden",
+      message: "This account is suspended. Ask an admin on this server.",
+    });
+    expect(
+      (await adminB.music.read("people.list", {})).find((found) => found.id === userId),
+    ).toMatchObject({ suspended: true });
+
+    await adminB.music.run("people.unsuspend", { userId });
+
+    const back = await passwordSignIn(server, email, PASSWORD);
+
+    expect((await back.music.read("account.me", {})).id).toBe(userId);
+    expect(await signIn(server, { provider: "apikey", params: { key } })).not.toBeNull();
+  });
+
+  it("protects the owner, and nobody changes their own account", async () => {
+    const { adminA, adminB, member } = fixture;
+    const owner = await adminA.music.read("account.me", {});
+    const admin = await adminB.music.read("account.me", {});
+    const { id: memberId } = await member.music.read("account.me", {});
+
+    // Nobody reaches the owner, and the owner cannot leave the server without one.
+    await Promise.all(
+      [adminB, adminA].flatMap((session) => [
+        expectRunFailure(session, "people.role", { userId: owner.id, role: "member" }, "forbidden"),
+        expectRunFailure(session, "people.suspend", { userId: owner.id }, "forbidden"),
+        expectRunFailure(session, "people.reset", { userId: owner.id }, "forbidden"),
+        expectRunFailure(session, "people.remove", { userId: owner.id }, "forbidden"),
+      ]),
+    );
+
+    // The last admin besides the owner cannot step down or lock themselves out either.
+    await expectRunFailure(
+      adminB,
+      "people.role",
+      { userId: admin.id, role: "member" },
+      "forbidden",
+    );
+    await expectRunFailure(adminB, "people.suspend", { userId: admin.id }, "forbidden");
+    await expectRunFailure(adminB, "people.remove", { userId: admin.id }, "forbidden");
+
+    await expectRunFailure(adminA, "people.transfer", { userId: memberId }, "invalid_args");
+    await expectRunFailure(adminA, "people.transfer", { userId: owner.id }, "invalid_args");
+
+    await adminA.music.run("people.transfer", { userId: admin.id });
+
+    expect((await adminB.music.read("account.me", {})).role).toBe("owner");
+    expect((await adminA.music.read("account.me", {})).role).toBe("admin");
+    await expectRunFailure(adminA, "people.suspend", { userId: admin.id }, "forbidden");
+
+    const owners = (await adminA.music.read("people.list", {})).filter(
+      (person) => person.role === "owner",
+    );
+
+    expect(owners.map((person) => person.id)).toEqual([admin.id]);
+
+    await adminB.music.run("people.transfer", { userId: owner.id });
+    expect((await adminA.music.read("account.me", {})).role).toBe("owner");
+  });
+
+  it("changes roles up to the changer's own, and takes API keys from new guests", async () => {
+    const { adminB } = fixture;
+    const person = await invite(fixture.adminA, `promoted-${id}@music.test`, "member");
+    const { id: userId } = await person.music.read("account.me", {});
+    const { key } = await person.music.run("keys.create", { name: `CLI ${id}` });
+
+    await adminB.music.run("people.role", { userId, role: "guest" });
+
+    expect((await person.music.read("account.me", {})).role).toBe("guest");
+    await expectReadFailure(person, "keys.list", {}, "forbidden");
+    expect(await signIn(server, { provider: "apikey", params: { key } })).toBeNull();
+
+    await adminB.music.run("people.role", { userId, role: "admin" });
+    expect((await person.music.read("people.list", {})).map((found) => found.id)).toContain(userId);
+
+    await adminB.music.run("people.role", { userId, role: "member" });
+    await expectReadFailure(person, "people.list", {}, "forbidden");
+  });
+
+  it("removes a person with their sessions, keys, and data, and gives their libraries to the owner", async () => {
+    const { adminA, adminB, shared } = fixture;
+    const email = `leaver-${id}@music.test`;
+    const leaver = await invite(adminA, email, "admin");
+    const { id: leaverId } = await leaver.music.read("account.me", {});
+    const { id: ownerId } = await adminA.music.read("account.me", {});
+    const { key } = await leaver.music.run("keys.create", { name: `CLI ${id}` });
+
+    await leaver.music.run("playlists.create", { name: "Mine", trackIds: [shared.track.id] });
+    await leaver.music.run("likes.set", { trackId: shared.track.id, liked: true });
+    await leaver.music.run("devices.heartbeat", {
+      deviceId: DeviceId.make(`leaver-${id}`),
+      name: "Leaver's laptop",
+      kind: "web",
+    });
+
+    const delta = await leaver.music.run("libraries.create", {
+      name: `Delta ${id}`,
+      path: `/security-${id}/delta`,
+      visibility: "private",
+    });
+
+    const before = (await adminA.music.read("people.list", {})).find(
+      (person) => person.id === leaverId,
+    );
+
+    expect(before?.lastActiveAt).toEqual(expect.any(Number));
+
+    await adminB.music.run("people.remove", { userId: leaverId });
+
+    await expectReadFailure(leaver, "account.me", {}, "unauthenticated");
+    expect(await signIn(server, { provider: "apikey", params: { key } })).toBeNull();
+    expect(await failureCode(passwordSignIn(server, email, PASSWORD))).not.toBe("succeeded");
+    expect((await adminA.music.read("people.list", {})).map((person) => person.id)).not.toContain(
+      leaverId,
+    );
+
+    const inherited = (await adminA.music.read("libraries.list", {})).find(
+      (library) => library.id === delta.libraryId,
+    );
+
+    expect(inherited).toMatchObject({ ownerId, visibility: "private", readable: true });
+    expect(
+      (await adminB.music.read("libraries.list", {})).map((library) => library.id),
+    ).not.toContain(delta.libraryId);
+
+    // The email can join again, as someone new with nothing of the old account.
+    const again = await invite(adminA, email, "member");
+
+    expect((await again.music.read("account.me", {})).id).not.toBe(leaverId);
+    expect(await again.music.read("playlists.list", {})).toEqual([]);
+    expect(await again.music.read("likes.list", {})).toEqual([]);
+  });
+
+  it("resets a password with a one-time link and ends the old sessions", async () => {
+    const { adminB } = fixture;
+    const email = `forgetful-${id}@music.test`;
+    const person = await invite(fixture.adminA, email, "member");
+    const { id: userId } = await person.music.read("account.me", {});
+    const reset = await adminB.music.run("people.reset", { userId });
+
+    const lookup = (token: string) =>
+      anonymous(server).convex.query(passwordResetLookup, { token });
+
+    expect(await lookup(reset.token)).toMatchObject({ state: "open", email });
+    expect(await lookup("not-a-token")).toEqual({ state: "invalid" });
+    expect(await failureCode(resetPassword(server, reset.token, "short"))).toBe("invalid_args");
+
+    const fresh = await resetPassword(server, reset.token, "a-new-password");
+
+    expect((await fresh.music.read("account.me", {})).id).toBe(userId);
+    await expectReadFailure(person, "account.me", {}, "unauthenticated");
+    expect(await failureCode(passwordSignIn(server, email, PASSWORD))).not.toBe("succeeded");
+    expect((await passwordSignIn(server, email, "a-new-password")).tokens).not.toBeNull();
+
+    expect(await failure(resetPassword(server, reset.token, "another-password"))).toEqual({
+      code: "invalid_args",
+      message: "This reset link was already used",
+    });
+    expect(await lookup(reset.token)).toMatchObject({ state: "used" });
   });
 });

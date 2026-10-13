@@ -1,4 +1,4 @@
-import type { Invite, Role } from "@music/commands/models";
+import type { AssignableRole, Invite } from "@music/commands/models";
 import { useRead, useRun } from "@music/sdk/react";
 import { Button } from "@music/ui/components/button";
 import { Chip } from "@music/ui/components/chip";
@@ -165,7 +165,7 @@ function InviteDialog({
 }) {
   const create = useRun("invites.create");
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<Role>("member");
+  const [role, setRole] = useState<AssignableRole>("member");
   const [created, setCreated] = useState<Invite | null>(null);
   const [copied, setCopied] = useState(false);
 

@@ -4,7 +4,7 @@
  */
 import type { CommandArgs, MutationName, QueryName } from "@music/commands/registry";
 import { makeMusicClient, type MusicClient } from "@music/sdk/client";
-import { commandFailure } from "@music/sdk/errors";
+import { commandFailure, type CommandFailure } from "@music/sdk/errors";
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 import { expect } from "vitest";
@@ -124,6 +124,22 @@ export const passwordSignIn = async (
   return withTokens(url, tokens);
 };
 
+/** Redeems a password reset token with a new password; resolves the new session. */
+export const resetPassword = async (
+  url: string,
+  token: string,
+  newPassword: string,
+): Promise<Session> => {
+  const tokens = await signIn(url, {
+    provider: "password",
+    params: { flow: "reset", token, newPassword },
+  });
+
+  if (tokens === null) throw new Error("The password reset returned no tokens");
+
+  return withTokens(url, tokens);
+};
+
 /** Upserts tracks into a library as the media service does. */
 export const upsertTracks = async (
   url: string,
@@ -155,6 +171,19 @@ export const failureCode = async (call: Promise<unknown>): Promise<string> => {
     if (!(error instanceof Error)) return "threw a non-error";
 
     return commandFailure(error)?.code ?? `failed without a code: ${error.message}`;
+  }
+};
+
+/** The expected failure a rejected call carried, or a description of what happened instead. */
+export const failure = async (call: Promise<unknown>): Promise<CommandFailure | string> => {
+  try {
+    await call;
+
+    return "succeeded";
+  } catch (error) {
+    if (!(error instanceof Error)) return "threw a non-error";
+
+    return commandFailure(error) ?? `failed without a code: ${error.message}`;
   }
 };
 
