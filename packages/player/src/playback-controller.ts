@@ -625,7 +625,12 @@ export class PlaybackController {
     const profile = this.#profileFor(track);
 
     try {
-      const stream = await this.#client.read("stream.url", { trackId: track.id, profile });
+      // A new `requestedAt` gets a newly signed URL rather than an earlier one from Convex's cache.
+      const stream = await this.#client.read("stream.url", {
+        trackId: track.id,
+        profile,
+        requestedAt: this.#env.now(),
+      });
 
       return {
         profile,

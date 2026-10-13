@@ -105,7 +105,9 @@ const instantEngine = (
 
 const ListeningAddress = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Int }));
 
-const decodeStreamArgs = Schema.decodeUnknownSync(Schema.Struct({ profile: StreamProfile }));
+const decodeStreamArgs = Schema.decodeUnknownSync(
+  Schema.Struct({ profile: StreamProfile, requestedAt: Schema.optionalKey(Schema.Finite) }),
+);
 
 const decodeProfile = Schema.decodeUnknownSync(StreamProfile);
 
@@ -136,27 +138,31 @@ const fakeMediaService = async () => {
 };
 
 /**
- * A Convex transport that records every mutation and answers like the server: each
- * `stream.url` is a newly signed URL on `base`, valid for six hours from `now()`.
+ * A Convex transport that records every mutation and answers like the server: a `stream.url`
+ * is a URL on `base` signed for six hours from `now()`, and the same arguments again get the
+ * same answer, as Convex's query cache gives them.
  */
 const recordingTransport = (
   mutations: Array<Mutation>,
   base: string,
   now: () => number,
 ): CommandTransport => {
-  let signed = 0;
+  const cached = new Map<string, { url: string; profile: StreamProfile; expiresAt: number }>();
 
   return {
     query: async (_reference, { args }) => {
-      signed += 1;
-      const { profile } = decodeStreamArgs(args);
+      const { profile, requestedAt } = decodeStreamArgs(args);
+      const key = `${profile}:${requestedAt ?? "none"}`;
 
-      return {
-        trackId: song.id,
-        url: `${base}/stream/song?p=${profile}&n=${signed}`,
+      const signed = cached.get(key) ?? {
+        url: `${base}/stream/song?p=${profile}&n=${cached.size + 1}`,
         profile,
         expiresAt: now() + SIX_HOURS,
       };
+
+      cached.set(key, signed);
+
+      return { trackId: song.id, ...signed };
     },
     mutation: async (_reference, { name, args }) => {
       mutations.push({ name, args });
@@ -306,10 +312,11 @@ describe("PlaybackController", () => {
   });
 
   it("signs a refused gapless stream again and stays on the gapless engine", async () => {
-    const { controller, engine, record, stop } = await setup({ gapless: true });
+    const { controller, engine, clock, record, stop } = await setup({ gapless: true });
     controller.sync(session(true, 1));
     await vi.waitFor(() => expect(record.loads).toHaveLength(1));
 
+    clock.now += 60_000;
     engine().emit({ type: "error", reason: "expired", message: "The URL expired" });
 
     await vi.waitFor(() => expect(record.loads).toHaveLength(2));
@@ -320,7 +327,7 @@ describe("PlaybackController", () => {
   });
 
   it("signs a refused original stream again instead of transcoding it", async () => {
-    const { controller, engine, media, record, stop } = await setup({
+    const { controller, engine, media, clock, record, stop } = await setup({
       gapless: false,
       quality: "lossless",
     });
@@ -331,6 +338,7 @@ describe("PlaybackController", () => {
 
     // The HTML engine only sees an unplayable source; the media service says why.
     media.state.streamStatus = 403;
+    clock.now += 60_000;
     engine().emit({ type: "error", reason: "unsupported", message: "Format error" });
 
     await vi.waitFor(() => expect(record.loads).toHaveLength(2));
