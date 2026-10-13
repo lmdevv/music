@@ -77,9 +77,9 @@ worktree. Commit the regenerated `convex/_generated/`.
 - Project skills in `.agents/skills/`, pinned in `skills-lock.json`: `create-verification-skill`
   writes a `verify-<app>` skill when the repo has none, and `maintain-verification-skill` keeps it
   current. `playwright-best-practices` covers flaky tests, `before-and-after` attaches UI captures
-  to a PR (needs the `agent-browser` CLI), plus `react-doctor`, `react-best-practices`, and
-  `diagnosing-bugs`. They're all model-invoked; after `skills update`, delete any
-  `disable-model-invocation` line it brings back.
+  to a PR (needs Vercel's `agent-browser` CLI: `npm i -g agent-browser && agent-browser install`),
+  plus `react-doctor`, `react-best-practices`, and `diagnosing-bugs`. They're all model-invoked;
+  after `skills update`, delete any `disable-model-invocation` line it brings back.
 - `main` requires the `check` and `stack-e2e` CI jobs. PRs matching the `paths` in
   `.github/workflows/image.yml` also run the `Image` workflow; check it too. Never merge with admin
   bypass.
