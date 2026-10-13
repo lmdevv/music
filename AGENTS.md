@@ -13,8 +13,8 @@ included; the repo and packages use `music`.
 - **GPL and AGPL code is read-only.** Navidrome (GPL-3.0) and Immich (AGPL-3.0) may be read for
   ideas and edge cases. Never copy, port, or translate their code into this repo. Effect, OpenCode,
   and Pi are MIT and safe to reference.
-- **Load the `coding-standards` skill** before writing, reviewing, or refactoring TypeScript. It is
-  in `.agents/skills/coding-standards/`.
+- **Follow the `coding-standards` skill** when writing, reviewing, or refactoring TypeScript. It is
+  in `.agents/skills/coding-standards/`, from `dmmulroy/skills`.
 - **No MCP server.** Agents use the CLI and `skills/music/SKILL.md`.
 - **Never commit secret values.** `.env.example` lists configuration names only.
 - **Never weaken a lint rule, add a cast, or add a suppression to pass checks.** Fix the code or
@@ -63,6 +63,24 @@ four must pass before every commit.
 
 Use `scripts/dev-backend.sh` for a local self-hosted Convex; pick a different name and port per
 worktree. Commit the regenerated `convex/_generated/`.
+
+## Verify and review
+
+- Ports: web dev on 3001, Playwright on `E2E_PORT` (3002), Convex on 3210 and 3211, media service
+  on 4100, stack image on `PORT` (8090). `scripts/dev-backend.sh <name> <port>` moves a worktree's
+  backend off the defaults.
+- `pnpm test:e2e` needs a backend first: `WEB_PORT=3002 scripts/dev-backend.sh web 3510`. See
+  `apps/web/e2e/README.md`.
+- `scripts/stack-e2e.sh` needs Docker. `MUSIC_VIDEO=1` records video; results land in
+  `apps/web/test-results/stack`. On NixOS, set `CHROMIUM_PATH=$(which chromium)`.
+- Repeat runs: `pnpm --filter web exec playwright test --repeat-each=20`, `pnpm test --repeats=20`.
+- `main` requires the `check` and `stack-e2e` CI jobs. Never merge with admin bypass.
+- Every PR gets CodeRabbit (`.coderabbit.yaml`), Codex automatic review, and Claude's
+  `/code-review`. The project `code-review` skill is CodeRabbit's CLI review; it is not
+  `/code-review`.
+- Cloud environments: none yet. Pin the Claude one in `.claude/settings.json`
+  (`remote.defaultEnvironmentId`) and write the Codex ID here for `codex cloud exec --env`. Docker
+  suites run in Claude cloud only.
 
 ## Design
 
