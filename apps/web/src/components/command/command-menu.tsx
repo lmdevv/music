@@ -325,7 +325,7 @@ export function CommandMenu() {
         <DialogBackdrop />
         <DialogPopup
           aria-label="Command menu"
-          className="fixed inset-x-2 top-2 z-50 flex max-h-[calc(100dvh-16px)] flex-col overflow-hidden rounded-lg border border-border bg-surface-raised text-text shadow-[0_1px_2px_rgb(0_0_0/4%),0_24px_64px_rgb(0_0_0/16%)] outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 lg:inset-x-auto lg:top-[110px] lg:left-1/2 lg:w-[780px] lg:-translate-x-1/2"
+          className="fixed inset-x-2 top-2 z-50 flex max-h-dvh-inset-sm flex-col overflow-hidden rounded-lg border border-border bg-surface-raised text-text shadow-command outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 lg:inset-x-auto lg:top-27.5 lg:left-1/2 lg:w-195 lg:-translate-x-1/2"
         >
           {commandOpen ? <Menu onClose={() => setCommandOpen(false)} /> : null}
         </DialogPopup>
@@ -613,7 +613,7 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
 
   return (
     <>
-      <div className="flex h-[60px] shrink-0 items-center gap-3 border-b border-border px-5">
+      <div className="flex h-15 shrink-0 items-center gap-3 border-b border-border px-5">
         {searching ? (
           <Spinner className="size-5 text-text-muted" label="Searching" />
         ) : (
@@ -638,26 +638,26 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
       </div>
 
       {empty ? (
-        <div className="flex h-[280px] flex-col items-center justify-center gap-2.5 p-6 text-center">
+        <div className="flex h-70 flex-col items-center justify-center gap-2.5 p-6 text-center">
           <span className="flex size-12 items-center justify-center rounded-full bg-surface">
-            <SearchIcon aria-hidden className="size-[22px] text-text-muted" />
+            <SearchIcon aria-hidden className="size-5.5 text-text-muted" />
           </span>
           <span className="font-sans text-md/base font-semibold text-text">
             Nothing matches “{deferred}”
           </span>
-          <span className="max-w-[380px] font-sans text-sm/xs text-text-muted">
+          <span className="max-w-95 font-sans text-sm/xs text-text-muted">
             It isn't in your library or the command list. Try fewer words.
           </span>
         </div>
       ) : (
-        <div className="flex min-h-0 grow lg:h-[440px] lg:grow-0">
+        <div className="flex min-h-0 grow lg:h-110 lg:grow-0">
           <div
             ref={list}
             id="command-list"
             role="listbox"
             aria-label="Results and commands"
             className={cn(
-              "flex w-full shrink-0 flex-col gap-px overflow-y-auto p-2 lg:w-[360px] lg:border-r lg:border-border",
+              "flex w-full shrink-0 flex-col gap-px overflow-y-auto p-2 lg:w-90 lg:border-r lg:border-border",
               detail && "max-lg:hidden",
             )}
           >
@@ -755,16 +755,10 @@ function Thumb({ item }: { readonly item: Item }) {
     case "now":
     case "track":
       return (
-        <Artwork
-          url={item.track.artUrl}
-          seed={item.track.albumId}
-          className="size-8 rounded-[4px]"
-        />
+        <Artwork url={item.track.artUrl} seed={item.track.albumId} className="size-8 rounded-xs" />
       );
     case "album":
-      return (
-        <Artwork url={item.album.artUrl} seed={item.album.id} className="size-8 rounded-[4px]" />
-      );
+      return <Artwork url={item.album.artUrl} seed={item.album.id} className="size-8 rounded-xs" />;
     case "artist":
       return <Artwork url={item.artist.artUrl} seed={item.artist.id} round className="size-8" />;
     case "playlist":
@@ -772,7 +766,7 @@ function Thumb({ item }: { readonly item: Item }) {
         <Artwork
           url={item.playlist.artUrls[0] ?? null}
           seed={item.playlist.id}
-          className="size-8 rounded-[4px]"
+          className="size-8 rounded-xs"
         />
       );
     case "command": {
@@ -876,18 +870,18 @@ function ItemRow({
           )}
         </span>
         {item.kind === "action" && item.shortcut !== undefined ? (
-          <span className="shrink-0 font-mono text-[11px] leading-[14px] text-text-muted">
+          <span className="shrink-0 font-mono text-2xs leading-3.5 text-text-muted">
             {item.shortcut}
           </span>
         ) : active ? (
-          <span className="shrink-0 font-mono text-[11px] leading-[14px] text-text-muted">↵</span>
+          <span className="shrink-0 font-mono text-2xs leading-3.5 text-text-muted">↵</span>
         ) : null}
       </div>
     </>
   );
 }
 
-const previewArt = "size-[148px] rounded-md shadow-[0_12px_32px_rgb(0_0_0/22%)]";
+const previewArt = "size-37 rounded-md shadow-art-preview";
 
 function PreviewFrame({
   children,
@@ -1140,10 +1134,7 @@ function AlbumPreview({
       {detail === undefined ? null : (
         <div className="flex flex-col">
           {detail.tracks.slice(0, 3).map((track, index) => (
-            <div
-              key={track.id}
-              className="flex h-[30px] items-center gap-2.5 border-t border-border"
-            >
+            <div key={track.id} className="flex h-7.5 items-center gap-2.5 border-t border-border">
               <span className="w-4 shrink-0 font-mono text-xs/xs text-text-muted">
                 {track.trackNumber ?? index + 1}
               </span>
@@ -1192,7 +1183,7 @@ function ArtistPreview({
 
   return (
     <PreviewFrame onBack={onBack}>
-      <Artwork url={artist.artUrl} seed={artist.id} round className="size-[148px]" />
+      <Artwork url={artist.artUrl} seed={artist.id} round className="size-37" />
       <PreviewTitle title={artist.name} meta={`Artist · ${plural(artist.albumCount, "album")}`} />
       <div className="flex gap-2">
         <Button
