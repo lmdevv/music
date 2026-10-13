@@ -28,19 +28,34 @@ const findDevice = (ctx: ReadCtx, userId: Id<"users">, deviceId: string) =>
     .withIndex("by_user_device", (q) => q.eq("userId", userId).eq("deviceId", deviceId))
     .unique();
 
-/** Parses track IDs the viewer may play, keeping their order. */
+/**
+ * Parses track IDs the viewer may read, keeping their order, and leaves out songs whose file is
+ * gone (a playlist can still list them). `index` moves to the same song, or to the next one kept.
+ * Fails when nothing is left to play.
+ */
 const playableTracks = async (
   ctx: MutationCtx,
   viewer: Viewer,
   ids: ReadonlyArray<string>,
-): Promise<Array<Id<"tracks">>> => {
+  index = 0,
+): Promise<{ readonly ids: Array<Id<"tracks">>; readonly index: number }> => {
   const tracks = await Promise.all(ids.map((id) => ctx.db.get(tableId(ctx, "tracks", id))));
 
-  return tracks.map((track, index) =>
+  const readable = tracks.map((track, position) =>
     track === null || !canRead(viewer, track.libraryId)
-      ? fail("not_found", `Track ${ids[index] ?? ""} not found`)
-      : track._id,
+      ? fail("not_found", `Track ${ids[position] ?? ""} not found`)
+      : track,
   );
+
+  const kept = readable.flatMap((track) => (track.missing ? [] : [track._id]));
+
+  if (kept.length === 0) {
+    return fail("not_found", "None of those songs can play: their files are missing");
+  }
+
+  const before = readable.slice(0, index).filter((track) => !track.missing).length;
+
+  return { ids: kept, index: Math.min(before, kept.length - 1) };
 };
 
 /** Picks the device that should play when the caller did not name one. */
@@ -165,8 +180,9 @@ export const playbackMutations = {
 
     const session = await ensureSession(ctx, viewer.id);
     const stored = await storedQueue(ctx, viewer.id);
-    let queue = await playableTracks(ctx, viewer, args.trackIds);
-    let index = Math.min(args.index ?? 0, queue.length - 1);
+    const playable = await playableTracks(ctx, viewer, args.trackIds, args.index);
+    let queue = playable.ids;
+    let { index } = playable;
 
     if (queue.length > MAX_QUEUE) {
       queue = queue.slice(index, index + MAX_QUEUE);
@@ -401,7 +417,7 @@ export const playbackMutations = {
   "queue.add": async (ctx, viewer, args) => {
     const session = await ensureSession(ctx, viewer.id);
     const queue = await loadQueue(ctx, viewer);
-    const added = await playableTracks(ctx, viewer, args.trackIds);
+    const added = (await playableTracks(ctx, viewer, args.trackIds)).ids;
 
     if (queue.tracks.length === 0) {
       const ids = added.slice(0, MAX_QUEUE);

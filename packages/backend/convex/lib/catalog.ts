@@ -1,5 +1,6 @@
 import { foldSearchText } from "@music/commands/search-text";
 
+import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 
@@ -92,6 +93,12 @@ export const adjustAlbum = async (
   const vanished = album.trackCount > 0 && trackCount === 0;
 
   if (!appeared && !vanished) return;
+
+  // A retag can move an album's last song elsewhere; check it once this write commits.
+  if (vanished) {
+    await ctx.scheduler.runAfter(0, internal.maintenance.pruneEmptyAlbum, { albumId });
+  }
+
   const step = appeared ? 1 : -1;
   const artist = await ctx.db.get(album.artistId);
 

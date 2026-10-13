@@ -10,7 +10,15 @@ import { internal } from "../convex/_generated/api";
 import { playbackMutations, playbackQueries } from "../convex/handlers/playback";
 import { loadViewer } from "../convex/lib/viewer";
 import { failureCode } from "./harness";
-import { allTracks, drainScheduled, makeBackend, seedLibrary, signUp, trackIds } from "./backend";
+import {
+  allTracks,
+  drainScheduled,
+  makeBackend,
+  markMissing,
+  seedLibrary,
+  signUp,
+  trackIds,
+} from "./backend";
 import type { Backend, User } from "./backend";
 
 const DEVICE = DeviceId.make("test-device");
@@ -308,6 +316,34 @@ describe("shuffle", () => {
     await admin.music.run("playback.shuffle", { on: false });
     expect(await queueIds(admin)).toEqual(rock);
     expect(await current(admin)).toBe(at(1, rock));
+  });
+});
+
+describe("songs whose file is gone", () => {
+  it("are left out when playing a list, keeping the chosen song", async () => {
+    const { backend, admin, rock } = await setup();
+    const [library] = await admin.music.read("libraries.list", {});
+
+    await markMissing(backend, library?.id ?? "", ["Rock/0001.flac", "Rock/0003.flac"]);
+
+    await admin.music.run("playback.play", { trackIds: [...rock], index: 3, deviceId: DEVICE });
+
+    expect(await queueIds(admin)).toEqual([at(1, rock), at(3, rock), at(4, rock)]);
+    expect(await current(admin)).toBe(at(3, rock));
+    expect(await failureCode(admin.music.run("queue.add", { trackIds: [at(0, rock)] }))).toBe(
+      "not_found",
+    );
+  });
+
+  it("drop out of the queue when their file goes missing", async () => {
+    const { backend, admin, rock } = await setup();
+    const [library] = await admin.music.read("libraries.list", {});
+
+    await admin.music.run("playback.play", { trackIds: [...rock], index: 2, deviceId: DEVICE });
+    await markMissing(backend, library?.id ?? "", ["Rock/0002.flac"]);
+
+    expect(await queueIds(admin)).toEqual(rock.filter((id) => id !== at(1, rock)));
+    expect(await current(admin)).toBe(at(2, rock));
   });
 });
 

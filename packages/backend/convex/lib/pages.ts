@@ -82,6 +82,30 @@ const decodeCursor = (cursor: string | null | undefined): Bound | null => {
   });
 };
 
+/**
+ * Orders text by code point, as Convex orders index keys, rather than by UTF-16 unit as `<` does:
+ * the two disagree when one string has a character beyond U+FFFF (an emoji) where the other has
+ * one from U+E000 to U+FFFF, and the merge must agree with each index it merges.
+ */
+export const compareText = (left: string, right: string): number => {
+  const leftPoints = Array.from(left, (character) => character.codePointAt(0) ?? 0);
+  const rightPoints = Array.from(right, (character) => character.codePointAt(0) ?? 0);
+  const length = Math.min(leftPoints.length, rightPoints.length);
+
+  for (let position = 0; position < length; position += 1) {
+    const difference = (leftPoints[position] ?? 0) - (rightPoints[position] ?? 0);
+
+    if (difference !== 0) return difference;
+  }
+
+  return leftPoints.length - rightPoints.length;
+};
+
+const compareKeys = (left: string | number, right: string | number): number =>
+  Predicate.isString(left) && Predicate.isString(right)
+    ? compareText(left, right)
+    : Number(left) - Number(right);
+
 /** Orders rows by key, then creation time, ascending or descending. */
 const comparing =
   <Row extends { readonly _creationTime: number }>(
@@ -92,8 +116,7 @@ const comparing =
     const leftKey = keyOf(left);
     const rightKey = keyOf(right);
 
-    const byKey =
-      leftKey === rightKey ? left._creationTime - right._creationTime : leftKey < rightKey ? -1 : 1;
+    const byKey = compareKeys(leftKey, rightKey) || left._creationTime - right._creationTime;
 
     return direction === "asc" ? byKey : -byKey;
   };

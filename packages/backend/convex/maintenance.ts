@@ -25,9 +25,6 @@ export const MAX_SCAN_ATTEMPTS = 3;
 /** Finished jobs, used invites, and revoked keys are kept this long, then deleted. */
 export const RECORD_RETAINED_MS = 30 * 24 * 60 * 60 * 1000;
 
-/** Albums or artists one `pruneEmptyCatalog` run checks. */
-const CATALOG_BATCH = 100;
-
 const purgePhase = v.union(
   v.literal("tracks"),
   v.literal("albums"),
@@ -428,75 +425,41 @@ export const pruneOldRecords = internalMutation({
 });
 
 /**
- * Deletes a library's albums and artists that no song points at any more, after a scan moved
- * files to other albums or artists. An album whose songs are only missing keeps its row, so the
+ * Deletes an album that lost its last playable song (`adjustAlbum` schedules this) once no song
+ * points at it any more, as after a retag moved its songs to another album, and then its artist
+ * if nothing points at that either. An album whose songs are only missing keeps its row, so the
  * songs find it again when their files come back.
  */
-export const pruneEmptyCatalog = internalMutation({
-  args: {
-    libraryId: v.id("libraries"),
-    phase: v.optional(v.union(v.literal("albums"), v.literal("artists"))),
-    cursor: v.optional(v.union(v.string(), v.null())),
-  },
-  handler: async (ctx, { libraryId, phase = "albums", cursor = null }) => {
-    if (phase === "albums") {
-      const page = await ctx.db
+export const pruneEmptyAlbum = internalMutation({
+  args: { albumId: v.id("albums") },
+  handler: async (ctx, { albumId }) => {
+    const album = await ctx.db.get(albumId);
+
+    if (album === null || album.trackCount > 0) return;
+
+    const song = await ctx.db
+      .query("tracks")
+      .withIndex("by_album", (q) => q.eq("albumId", album._id))
+      .first();
+
+    if (song !== null) return;
+    await ctx.db.delete(album._id);
+
+    const artist = await ctx.db.get(album.artistId);
+
+    if (artist === null || artist.albumCount > 0) return;
+
+    const [otherAlbum, otherSong] = await Promise.all([
+      ctx.db
         .query("albums")
-        .withIndex("by_library_artist_key", (q) => q.eq("libraryId", libraryId))
-        .paginate({ cursor, numItems: CATALOG_BATCH });
+        .withIndex("by_artist", (q) => q.eq("artistId", artist._id))
+        .first(),
+      ctx.db
+        .query("tracks")
+        .withIndex("by_artist", (q) => q.eq("artistId", artist._id))
+        .first(),
+    ]);
 
-      await Promise.all(
-        page.page.map(async (album) => {
-          if (album.trackCount > 0) return;
-
-          const song = await ctx.db
-            .query("tracks")
-            .withIndex("by_album", (q) => q.eq("albumId", album._id))
-            .first();
-
-          if (song === null) await ctx.db.delete(album._id);
-        }),
-      );
-
-      await ctx.scheduler.runAfter(0, internal.maintenance.pruneEmptyCatalog, {
-        libraryId,
-        phase: page.isDone ? "artists" : "albums",
-        cursor: page.isDone ? null : page.continueCursor,
-      });
-
-      return;
-    }
-
-    const page = await ctx.db
-      .query("artists")
-      .withIndex("by_library_key", (q) => q.eq("libraryId", libraryId))
-      .paginate({ cursor, numItems: CATALOG_BATCH });
-
-    await Promise.all(
-      page.page.map(async (artist) => {
-        if (artist.albumCount > 0) return;
-
-        const [album, song] = await Promise.all([
-          ctx.db
-            .query("albums")
-            .withIndex("by_artist", (q) => q.eq("artistId", artist._id))
-            .first(),
-          ctx.db
-            .query("tracks")
-            .withIndex("by_artist", (q) => q.eq("artistId", artist._id))
-            .first(),
-        ]);
-
-        if (album === null && song === null) await ctx.db.delete(artist._id);
-      }),
-    );
-
-    if (!page.isDone) {
-      await ctx.scheduler.runAfter(0, internal.maintenance.pruneEmptyCatalog, {
-        libraryId,
-        phase: "artists",
-        cursor: page.continueCursor,
-      });
-    }
+    if (otherAlbum === null && otherSong === null) await ctx.db.delete(artist._id);
   },
 });

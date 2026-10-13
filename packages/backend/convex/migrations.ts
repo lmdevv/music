@@ -14,7 +14,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { albumSearchText, artistSearchText, trackSearchText } from "./lib/catalog";
-import { clearedLegacyQueue, hasLegacyQueue, legacyQueue } from "./lib/queue";
+import { clearedLegacyQueue, hasLegacyQueue, legacyQueue, saveQueue } from "./lib/queue";
 
 /** Rows per batch: a track is well under 2 KB, so a batch stays far below the read limits. */
 const BATCH = 256;
@@ -84,21 +84,9 @@ const MIGRATIONS = {
           .withIndex("by_user", (q) => q.eq("userId", session.userId))
           .unique();
 
-        if (row === null) {
-          const queue = legacyQueue(session);
-
-          await ctx.db.insert("playbackQueues", {
-            userId: session.userId,
-            queue: [...queue.queue],
-            unshuffled: queue.unshuffled === undefined ? undefined : [...queue.unshuffled],
-            index: queue.index,
-            shuffle: queue.shuffle,
-            repeat: queue.repeat,
-            reportedTrackId: queue.reportedTrackId,
-          });
-        }
-
-        await ctx.db.patch(session._id, clearedLegacyQueue);
+        // Without a row, saving creates it and clears the session; with one, the row is newer.
+        if (row === null) await saveQueue(ctx, session.userId, legacyQueue(session));
+        else await ctx.db.patch(session._id, clearedLegacyQueue);
       }),
     );
 
