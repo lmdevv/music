@@ -65,9 +65,9 @@ export const usePageChain = () => {
 export const useHeldPage = <Page,>(page: Page | undefined): Page | undefined => {
   const [held, setHeld] = useState(page);
 
-  useEffect(() => {
-    if (page !== undefined) setHeld(page);
-  }, [page]);
+  // Updating state while rendering, as React documents for values that follow a prop: the render
+  // restarts at once, with no effect and no extra frame.
+  if (page !== undefined && page !== held) setHeld(page);
 
   return page ?? held;
 };

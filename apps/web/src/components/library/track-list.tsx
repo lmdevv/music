@@ -312,7 +312,6 @@ function UnavailableRow({
   return (
     <div
       role="row"
-      aria-disabled="true"
       className={cn(
         "group/row relative flex shrink-0 items-center gap-3 rounded-sm select-none",
         "h-12 border-t-[0.5px] border-border pr-1 lg:border-t-0 lg:px-2",
