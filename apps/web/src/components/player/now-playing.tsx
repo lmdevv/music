@@ -118,7 +118,7 @@ function LyricsButton({ className }: { readonly className?: string }) {
           disabled
           className={cn(glassButton, "size-9 opacity-(--opacity-disabled)", className)}
         >
-          <MessageCircleIcon className="size-[18px]" />
+          <MessageCircleIcon className="size-4.5" />
         </button>
       </span>
     </Tooltip>
@@ -189,7 +189,7 @@ function DesktopNowPlaying({ track, view, onView }: ViewProps) {
             <Artwork
               url={track.artUrl}
               seed={track.albumId}
-              className="aspect-square w-[min(560px,58vh)] rounded-lg shadow-[0_40px_80px_rgb(0_0_0/45%)]"
+              className="aspect-square w-[min(--spacing(140),58vh)] rounded-lg shadow-now-playing-art"
             />
             <div className="flex flex-col items-center gap-0.5 text-center">
               <h2 className="font-sans text-xl/xl font-heavy tracking-tight text-text">
@@ -197,7 +197,7 @@ function DesktopNowPlaying({ track, view, onView }: ViewProps) {
               </h2>
               <span className="font-sans text-md/base text-text-muted">{track.artist}</span>
             </div>
-            <div className="flex w-[560px] max-w-full items-center gap-5">
+            <div className="flex w-140 max-w-full items-center gap-5">
               <Progress
                 remaining
                 timeClassName="w-10 font-mono text-xs/xs text-text-muted"
@@ -214,11 +214,11 @@ function DesktopNowPlaying({ track, view, onView }: ViewProps) {
         )),
         Match.when("queue", () => (
           <div className="flex grow items-center gap-24 px-6 py-6">
-            <div className="flex w-[380px] shrink-0 flex-col gap-[22px]">
+            <div className="flex w-95 shrink-0 flex-col gap-5.5">
               <Artwork
                 url={track.artUrl}
                 seed={track.albumId}
-                className="aspect-square w-full rounded-lg shadow-[0_32px_64px_rgb(0_0_0/45%)]"
+                className="aspect-square w-full rounded-lg shadow-now-playing-art-sm"
               />
               <div className="flex items-end justify-between gap-3">
                 <div className="flex min-w-0 flex-col gap-0.5">
@@ -242,17 +242,17 @@ function DesktopNowPlaying({ track, view, onView }: ViewProps) {
               <div className="flex items-center justify-between">
                 <ShuffleButton iconClassName="size-5" />
                 <SkipButton direction="previous" iconClassName="size-7" />
-                <PlayPauseButton className="size-[60px]" iconClassName="size-[22px]" />
+                <PlayPauseButton className="size-15" iconClassName="size-5.5" />
                 <SkipButton direction="next" iconClassName="size-7" />
                 <RepeatButton iconClassName="size-5" />
               </div>
               <div className="flex items-center justify-center gap-2">
                 <LyricsButton />
                 <ViewButton label="Hide queue" active onClick={() => onView("player")}>
-                  <ListMusicIcon className="size-[18px]" />
+                  <ListMusicIcon className="size-4.5" />
                 </ViewButton>
                 <ViewButton label="Cover only" active={false} onClick={() => onView("cover")}>
-                  <ExpandIcon className="size-[18px]" />
+                  <ExpandIcon className="size-4.5" />
                 </ViewButton>
               </div>
             </div>
@@ -260,11 +260,11 @@ function DesktopNowPlaying({ track, view, onView }: ViewProps) {
           </div>
         )),
         Match.when("player", () => (
-          <div className="flex grow items-center gap-[72px] px-6 py-6">
+          <div className="flex grow items-center gap-18 px-6 py-6">
             <Artwork
               url={track.artUrl}
               seed={track.albumId}
-              className="aspect-square w-[min(520px,42vw,62vh)] rounded-lg shadow-[0_40px_80px_rgb(0_0_0/45%)]"
+              className="aspect-square w-[min(--spacing(130),42vw,62vh)] rounded-lg shadow-now-playing-art"
             />
             <div className="flex min-w-0 grow flex-col gap-9">
               <div className="flex flex-col gap-2.5">
@@ -288,13 +288,13 @@ function DesktopNowPlaying({ track, view, onView }: ViewProps) {
                 thumbClassName="bg-text opacity-100"
               />
               <div className="flex items-center justify-between">
-                <ShuffleButton iconClassName="size-[22px]" />
+                <ShuffleButton iconClassName="size-5.5" />
                 <div className="flex items-center gap-row">
                   <SkipButton direction="previous" iconClassName="size-8" />
-                  <PlayPauseButton className="size-[76px]" iconClassName="size-7" />
+                  <PlayPauseButton className="size-19" iconClassName="size-7" />
                   <SkipButton direction="next" iconClassName="size-8" />
                 </div>
-                <RepeatButton iconClassName="size-[22px]" />
+                <RepeatButton iconClassName="size-5.5" />
               </div>
               <div className="flex items-center gap-5">
                 <Volume1Icon aria-hidden className="size-5 text-text-muted" />
@@ -309,10 +309,10 @@ function DesktopNowPlaying({ track, view, onView }: ViewProps) {
                 <div className="flex items-center gap-2">
                   <LyricsButton />
                   <ViewButton label="Queue" active={false} onClick={() => onView("queue")}>
-                    <ListMusicIcon className="size-[18px]" />
+                    <ListMusicIcon className="size-4.5" />
                   </ViewButton>
                   <ViewButton label="Cover only" active={false} onClick={() => onView("cover")}>
-                    <ExpandIcon className="size-[18px]" />
+                    <ExpandIcon className="size-4.5" />
                   </ViewButton>
                 </div>
               </div>
@@ -337,10 +337,10 @@ function DevicePill() {
       <PopoverTrigger
         className={cn(glassButton, "h-9 gap-2 px-3.5 font-sans text-sm/xs font-medium")}
       >
-        <Icon aria-hidden className="size-[18px]" />
+        <Icon aria-hidden className="size-4.5" />
         {name}
       </PopoverTrigger>
-      <PopoverContent side="top" align="center" className="w-[380px] gap-0.5 p-2">
+      <PopoverContent side="top" align="center" className="w-95 gap-0.5 p-2">
         <span className="px-3 pt-2.5 pb-2 font-sans text-md/base font-semibold text-text">
           Play on
         </span>
@@ -355,9 +355,9 @@ function UpNext() {
   const [clear, clearing] = useClearQueue();
 
   return (
-    <div className="flex max-w-[620px] min-w-0 grow flex-col gap-7">
+    <div className="flex max-w-155 min-w-0 grow flex-col gap-7">
       <div className="flex items-center justify-between">
-        <h2 className="font-sans text-xl leading-[34px] font-heavy tracking-tight text-text">
+        <h2 className="font-sans text-xl leading-8.5 font-heavy tracking-tight text-text">
           Up next
         </h2>
         {next.length > 0 ? (
@@ -365,7 +365,7 @@ function UpNext() {
             type="button"
             disabled={clearing}
             onClick={() => void clear()}
-            className="rounded-full bg-text/8 px-3.5 py-[7px] font-sans text-sm/xs font-medium text-text/70 hover:bg-text/14 disabled:opacity-(--opacity-muted)"
+            className="rounded-full bg-text/8 px-3.5 py-1.75 font-sans text-sm/xs font-medium text-text/70 hover:bg-text/14 disabled:opacity-(--opacity-muted)"
           >
             {clearing ? "Clearing…" : "Clear"}
           </button>
@@ -406,7 +406,7 @@ function PhoneNowPlaying({ track, view, onView }: ViewProps) {
   return (
     <div
       className={cn(
-        "flex flex-col px-5 pt-[max(12px,env(safe-area-inset-top))] pb-[max(30px,env(safe-area-inset-bottom))]",
+        "flex flex-col px-5 pt-safe-top-sm pb-safe-bottom-lg",
         // The queue scrolls inside the screen so the transport stays pinned at the bottom (05 · 04c).
         queue ? "h-full" : "min-h-full",
       )}
@@ -414,9 +414,9 @@ function PhoneNowPlaying({ track, view, onView }: ViewProps) {
     >
       <DialogClose
         aria-label="Close Now Playing"
-        className="flex justify-center pt-1.5 pb-[18px] outline-none"
+        className="flex justify-center pt-1.5 pb-4.5 outline-none"
       >
-        <span className="h-[5px] w-9 rounded-[3px] bg-text/35" />
+        <span className="h-1.25 w-9 rounded-2xs bg-text/35" />
       </DialogClose>
 
       {queue ? (
@@ -425,23 +425,23 @@ function PhoneNowPlaying({ track, view, onView }: ViewProps) {
             <Artwork
               url={track.artUrl}
               seed={track.albumId}
-              className="size-row-touch rounded-sm shadow-[0_6px_14px_rgb(0_0_0/35%)]"
+              className="size-row-touch rounded-sm shadow-now-playing-thumb"
             />
             <div className="flex min-w-0 grow flex-col">
-              <span className="truncate font-sans text-[17px] leading-[22px] font-semibold text-text">
+              <span className="truncate font-sans text-phone-body leading-5.5 font-semibold text-text">
                 {track.title}
               </span>
-              <span className="truncate font-sans text-[17px] leading-[22px] text-text/60">
+              <span className="truncate font-sans text-phone-body leading-5.5 text-text/60">
                 {track.artist}
               </span>
             </div>
             <TrackMenu
               track={track}
-              className="size-[30px] bg-text/14 hover:bg-text/20"
+              className="size-7.5 bg-text/14 hover:bg-text/20"
               trigger={<MoreHorizontalIcon className="size-4" />}
             />
           </div>
-          <div className="flex gap-2 pt-[22px]">
+          <div className="flex gap-2 pt-5.5">
             <PillToggle
               label="Shuffle"
               pressed={player.shuffle}
@@ -464,22 +464,22 @@ function PhoneNowPlaying({ track, view, onView }: ViewProps) {
           <Artwork
             url={track.artUrl}
             seed={track.albumId}
-            className="aspect-square w-full rounded-[10px] shadow-[0_24px_48px_rgb(0_0_0/40%)]"
+            className="aspect-square w-full rounded-phone-art shadow-now-playing-art-phone"
           />
           <div className="flex items-center justify-between gap-3 pt-11">
             <div className="flex min-w-0 flex-col gap-px">
-              <span className="truncate font-sans text-lg leading-[25px] font-semibold tracking-[-0.01em] text-text">
+              <span className="truncate font-sans text-lg leading-6.25 font-semibold tracking-snug text-text">
                 {track.title}
               </span>
-              <span className="truncate font-sans text-lg leading-[25px] text-text/60">
+              <span className="truncate font-sans text-lg leading-6.25 text-text/60">
                 {track.artist}
               </span>
             </div>
             <div className="flex gap-3">
-              <LikeButton track={track} className="size-[30px] bg-text/14" iconClassName="size-4" />
+              <LikeButton track={track} className="size-7.5 bg-text/14" iconClassName="size-4" />
               <TrackMenu
                 track={track}
-                className="size-[30px] bg-text/14 hover:bg-text/20"
+                className="size-7.5 bg-text/14 hover:bg-text/20"
                 trigger={<MoreHorizontalIcon className="size-4" />}
               />
             </div>
@@ -489,23 +489,23 @@ function PhoneNowPlaying({ track, view, onView }: ViewProps) {
               <RemotePill />
             </div>
           ) : null}
-          <div className="flex flex-col gap-2 pt-[26px]">
+          <div className="flex flex-col gap-2 pt-6.5">
             <Progress
               layout="stacked"
               remaining
               timeClassName="font-sans text-xs/xs font-semibold text-text/50"
               fillClassName="bg-text/85"
-              trackClassName="h-[7px] bg-text/22"
+              trackClassName="h-1.75 bg-text/22"
               thumbClassName="hidden"
             />
-            <div className="-mt-[26px] flex justify-center">
-              <span className="rounded-[4px] bg-text/12 px-1.5 py-0.5 font-sans text-[11px] leading-[14px] font-semibold text-text/75">
+            <div className="-mt-6.5 flex justify-center">
+              <span className="rounded-xs bg-text/12 px-1.5 py-0.5 font-sans text-2xs leading-3.5 font-semibold text-text/75">
                 {track.lossless ? "Lossless" : formatQuality(track)}
               </span>
             </div>
           </div>
-          <PhoneTransport className="px-9 pt-[26px]" big />
-          <div className="flex items-center gap-3 pt-[34px]">
+          <PhoneTransport className="px-9 pt-6.5" big />
+          <div className="flex items-center gap-3 pt-8.5">
             <Volume
               className="grow [&>button]:text-text/60"
               sliderClassName="grow"
@@ -516,8 +516,8 @@ function PhoneNowPlaying({ track, view, onView }: ViewProps) {
         </>
       )}
 
-      {queue ? <PhoneTransport className="justify-center gap-row-touch pt-1 pb-[22px]" /> : null}
-      <div className="flex items-center justify-between px-[30px] pt-4">
+      {queue ? <PhoneTransport className="justify-center gap-row-touch pt-1 pb-5.5" /> : null}
+      <div className="flex items-center justify-between px-7.5 pt-4">
         <span>
           <button
             type="button"
@@ -531,12 +531,12 @@ function PhoneNowPlaying({ track, view, onView }: ViewProps) {
         <button
           type="button"
           onClick={() => setSheet(true)}
-          className="flex flex-col items-center gap-[3px] text-text/75 outline-none"
+          className="flex flex-col items-center gap-0.75 text-text/75 outline-none"
           aria-label={`Play on another device. Now: ${deviceName}`}
         >
           <AirPlayGlyph />
           {queue ? null : (
-            <span className="font-sans text-[11px] leading-[14px] font-medium text-text/60">
+            <span className="font-sans text-2xs leading-3.5 font-medium text-text/60">
               {deviceName}
             </span>
           )}
@@ -547,7 +547,7 @@ function PhoneNowPlaying({ track, view, onView }: ViewProps) {
           aria-pressed={queue}
           onClick={() => onView(queue ? "player" : "queue")}
           className={cn(
-            "flex size-row items-center justify-center rounded-[20px]",
+            "flex size-row items-center justify-center rounded-full",
             queue ? "bg-text/90 text-text-inverse" : "text-text/75",
           )}
         >
@@ -583,7 +583,7 @@ function PhoneTransport({
         onClick={() => perform(player.previous())}
         className="text-text"
       >
-        <PhoneSkipGlyph direction="previous" className={big ? "h-[30px] w-11" : "h-6 w-[34px]"} />
+        <PhoneSkipGlyph direction="previous" className={big ? "h-7.5 w-11" : "h-6 w-8.5"} />
       </button>
       <button
         type="button"
@@ -592,9 +592,9 @@ function PhoneTransport({
         className="text-text"
       >
         {playing ? (
-          <PhonePauseGlyph className={big ? "h-11 w-10" : "h-[34px] w-[30px]"} />
+          <PhonePauseGlyph className={big ? "h-11 w-10" : "h-8.5 w-7.5"} />
         ) : (
-          <PhonePlayGlyph className={big ? "h-11 w-10" : "h-[34px] w-[30px]"} />
+          <PhonePlayGlyph className={big ? "h-11 w-10" : "h-8.5 w-7.5"} />
         )}
       </button>
       <button
@@ -603,7 +603,7 @@ function PhoneTransport({
         onClick={() => perform(player.next())}
         className="text-text"
       >
-        <PhoneSkipGlyph direction="next" className={big ? "h-[30px] w-11" : "h-6 w-[34px]"} />
+        <PhoneSkipGlyph direction="next" className={big ? "h-7.5 w-11" : "h-6 w-8.5"} />
       </button>
     </div>
   );
@@ -627,7 +627,7 @@ function PillToggle({
       aria-pressed={pressed}
       onClick={onClick}
       className={cn(
-        "flex h-[34px] grow basis-0 items-center justify-center rounded-[17px]",
+        "flex h-8.5 grow basis-0 items-center justify-center rounded-full",
         pressed ? "bg-text/90 text-dark-art" : "bg-text/14 text-text",
       )}
     >
@@ -646,7 +646,7 @@ function ShuffleButtonGlyph() {
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="size-[18px]"
+      className="size-4.5"
     >
       <path d="m18 14 4 4-4 4" />
       <path d="m18 2 4 4-4 4" />
@@ -667,7 +667,7 @@ function RepeatGlyph({ one }: { readonly one: boolean }) {
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="size-[18px]"
+      className="size-4.5"
     >
       <path d="m17 2 4 4-4 4" />
       <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
@@ -700,9 +700,9 @@ function PhoneUpNext() {
   const { next, source } = useUpNext();
 
   return (
-    <div className="flex min-h-0 grow flex-col pt-[22px]">
+    <div className="flex min-h-0 grow flex-col pt-5.5">
       <div className="flex flex-col px-2 pb-2">
-        <span className="font-sans text-[17px] leading-[22px] font-semibold text-text">
+        <span className="font-sans text-phone-body leading-5.5 font-semibold text-text">
           Continue Playing
         </span>
         {source === null ? null : (
