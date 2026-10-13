@@ -1,4 +1,6 @@
-import type { Job, Library } from "@music/commands/models";
+import type { UserId } from "@music/commands/ids";
+import type { Job, Library, LibraryVisibility } from "@music/commands/models";
+import { can, roleLabel } from "@music/commands/permissions";
 import { useRead, useRun } from "@music/sdk/react";
 import { Button } from "@music/ui/components/button";
 import { Chip } from "@music/ui/components/chip";
@@ -7,6 +9,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@music/ui/components/dropdown-menu";
 import { FieldHint, FieldLabel, Input } from "@music/ui/components/input";
@@ -35,12 +38,12 @@ function LibrariesSettings() {
 
   if (me === undefined) return <Skeleton className="h-40 w-full rounded-lg" />;
 
-  if (me.role !== "admin") return <AdminOnly />;
+  if (!can(me.role, "admin")) return <AdminOnly />;
 
-  return <Libraries />;
+  return <Libraries myId={me.id} />;
 }
 
-function Libraries() {
+function Libraries({ myId }: { readonly myId: UserId }) {
   const libraries = useRead("libraries.list", {});
   const jobs = useRead("jobs.list", {});
   const { add } = Route.useSearch();
@@ -80,6 +83,7 @@ function Libraries() {
             <LibraryCard
               key={library.id}
               library={library}
+              myId={myId}
               // Jobs come newest first, so this is the folder's latest scan.
               latest={(jobs ?? []).find((job) => job.libraryId === library.id)}
             />
@@ -121,9 +125,11 @@ function Stat({
 
 function LibraryCard({
   library,
+  myId,
   latest,
 }: {
   readonly library: Library;
+  readonly myId: UserId;
   /** The folder's most recent scan job, if any. */
   readonly latest: Job | undefined;
 }) {
@@ -132,7 +138,9 @@ function LibraryCard({
   const scan = useRun("libraries.scan");
   const remove = useRun("libraries.delete");
   const [confirming, setConfirming] = useState(false);
+  const [editing, setEditing] = useState<"name" | "access" | null>(null);
   const busy = job !== undefined || library.scanning;
+  const owner = library.ownerId === myId ? "you" : (library.ownerName ?? "its owner");
 
   const [rescan, rescanning] = useAction(() => scan({ libraryId: library.id }), {
     success: () => `Rescanning ${library.path}`,
@@ -155,17 +163,24 @@ function LibraryCard({
     >
       <div className="flex flex-wrap items-center gap-3">
         <FolderIcon aria-hidden className="size-5 text-text" />
-        <span className="min-w-0 grow truncate font-mono text-md/base text-text">
-          {library.path}
+        <span className="flex min-w-0 grow basis-40 flex-col gap-px">
+          <span className="truncate font-mono text-md/base text-text">{library.path}</span>
+          <span className="truncate font-sans text-sm/xs text-text-muted">
+            {library.name}
+            {library.ownerId === myId ? "" : ` · added by ${owner}`}
+          </span>
         </span>
-        <span
+        <button
+          type="button"
+          aria-label={`Who can listen to ${library.path}: ${visibilityLabel(library.visibility, owner)}`}
+          onClick={() => setEditing("access")}
           className={cn(
-            "rounded-full px-2.5 py-1 font-sans text-sm/xs font-medium text-text",
+            "cursor-pointer rounded-full px-2.5 py-1 font-sans text-sm/xs font-medium text-text outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
             library.visibility === "shared" ? "bg-surface" : "border border-border",
           )}
         >
-          {library.visibility === "shared" ? "Everyone" : "Only you"}
-        </span>
+          {visibilityLabel(library.visibility, owner)}
+        </button>
         <Button
           variant="ghost"
           size="sm"
@@ -184,6 +199,11 @@ function LibraryCard({
             <MoreHorizontalIcon className="size-5" />
           </DropdownMenuTrigger>
           <DropdownMenuContent>
+            <DropdownMenuItem onClick={() => setEditing("name")}>Rename…</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setEditing("access")}>
+              Who can listen…
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem tone="danger" onClick={() => setConfirming(true)}>
               Remove from [music]…
             </DropdownMenuItem>
@@ -192,6 +212,9 @@ function LibraryCard({
       </div>
       <div className="flex flex-wrap gap-x-row gap-y-3 pl-8">
         <Stat value={formatCount(library.trackCount)} label="songs" />
+        {library.readable ? null : (
+          <Stat value="Not for you" label="you manage it but aren't on its list" />
+        )}
         <Stat
           value={library.lastScanAt === null ? "Never" : formatAgo(library.lastScanAt)}
           label="last full scan"
@@ -232,9 +255,221 @@ function LibraryCard({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <Dialog open={editing !== null} onOpenChange={(open) => setEditing(open ? editing : null)}>
+        {editing === "name" ? (
+          <RenameForm library={library} onDone={() => setEditing(null)} />
+        ) : null}
+        {editing === "access" ? (
+          <AccessForm library={library} owner={owner} onDone={() => setEditing(null)} />
+        ) : null}
+      </Dialog>
     </section>
   );
 }
+
+/** The visibility pill: who besides the owner can listen. */
+const visibilityLabel = (visibility: LibraryVisibility, owner: string): string =>
+  ({
+    shared: "Everyone",
+    restricted: "Specific people",
+    private: owner === "you" ? "Only you" : `Only ${owner}`,
+  })[visibility];
+
+function RenameForm({
+  library,
+  onDone,
+}: {
+  readonly library: Library;
+  readonly onDone: () => void;
+}) {
+  const update = useRun("libraries.update");
+  // Untouched, the field shows the current name, including a rename made elsewhere meanwhile.
+  const [edited, setName] = useState<string | null>(null);
+  const name = edited ?? library.name;
+  const trimmed = name.trim();
+
+  const [save, saving] = useAction(
+    async () => {
+      await update({ libraryId: library.id, name: trimmed });
+      onDone();
+    },
+    { success: () => `Renamed to ${trimmed}` },
+  );
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (trimmed.length > 0 && trimmed !== library.name) void save();
+  };
+
+  return (
+    <DialogContent
+      title="Rename library folder"
+      description={`The name people see for ${library.path}. The folder on disk keeps its name.`}
+    >
+      <form className="flex flex-col gap-6" onSubmit={submit}>
+        <div className="flex flex-col gap-1.5">
+          <FieldLabel htmlFor="library-name">Name</FieldLabel>
+          <Input
+            id="library-name"
+            autoComplete="off"
+            required
+            maxLength={120}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+          />
+        </div>
+        <DialogFooter>
+          <DialogClose render={<Button variant="ghost" type="button" />}>Cancel</DialogClose>
+          <Button
+            type="submit"
+            variant="solid"
+            disabled={trimmed.length === 0 || trimmed === library.name}
+            pending={saving}
+          >
+            Save
+          </Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
+  );
+}
+
+const VISIBILITY_HINTS: Readonly<Record<LibraryVisibility, (owner: string) => string>> = {
+  shared: () => "Everyone on the server except guests. Add guests below to let them listen too.",
+  restricted: (owner) => `Only the people below, and ${owner}.`,
+  private: (owner) =>
+    owner === "you"
+      ? "Only you. Other admins can't see or manage it."
+      : `Only ${owner}. It leaves your list, and only ${owner} can open it up again.`,
+};
+
+/** Who can listen to a library: its visibility and the people added to it. */
+function AccessForm({
+  library,
+  owner,
+  onDone,
+}: {
+  readonly library: Library;
+  readonly owner: string;
+  readonly onDone: () => void;
+}) {
+  const update = useRun("libraries.update");
+  const grant = useRun("libraries.grant");
+  const revoke = useRun("libraries.revoke");
+  const people = useRead("people.list", {});
+  const added = useRead("libraries.people", { libraryId: library.id });
+  const visibility = library.visibility;
+
+  const [setVisibility, changing] = useAction(
+    async (next: LibraryVisibility) => {
+      await update({ libraryId: library.id, visibility: next });
+
+      // A private folder of someone else's leaves this admin's list with this card.
+      if (next === "private" && owner !== "you") onDone();
+    },
+    { success: () => "Saved who can listen" },
+  );
+
+  const [add, adding] = useAction((userId: UserId) => grant({ libraryId: library.id, userId }));
+  const [remove] = useAction((userId: UserId) => revoke({ libraryId: library.id, userId }));
+  const addedIds = new Set((added ?? []).map((person) => person.id));
+
+  // Shared folders already reach everyone but guests, so only guests are worth adding.
+  const candidates = (people ?? []).filter(
+    (person) =>
+      person.id !== library.ownerId &&
+      !addedIds.has(person.id) &&
+      (visibility === "restricted" || person.role === "guest"),
+  );
+
+  return (
+    <DialogContent title="Who can listen" description={library.path}>
+      <div className="flex flex-col gap-1.5">
+        <div role="group" aria-label="Who can listen" className="flex flex-wrap gap-2">
+          {(["shared", "restricted", "private"] as const).map((option) => (
+            <Chip
+              key={option}
+              selected={visibility === option}
+              disabled={changing}
+              onClick={() => (option === visibility ? undefined : void setVisibility(option))}
+            >
+              {visibilityLabel(option, owner)}
+            </Chip>
+          ))}
+        </div>
+        <FieldHint>{VISIBILITY_HINTS[visibility](owner)}</FieldHint>
+      </div>
+      {visibility === "private" ? null : (
+        <div className="flex flex-col gap-2">
+          <span className="font-sans text-sm/xs font-medium text-text">
+            {visibility === "shared" ? "Guests who can listen" : "People who can listen"}
+          </span>
+          {added === undefined ? (
+            <Skeleton className="h-12 w-full rounded-md" />
+          ) : (
+            <ul aria-label="People who can listen" className="flex flex-col">
+              {added.length === 0 ? (
+                <li className="py-2 font-sans text-sm/xs text-text-muted">Nobody added yet.</li>
+              ) : null}
+              {added.map((person) => (
+                <li
+                  key={person.id}
+                  className="flex min-h-11 items-center gap-3 border-b border-border py-1.5"
+                >
+                  <span className="flex min-w-0 grow flex-col">
+                    <span className="truncate font-sans text-base/sm text-text">
+                      {person.name ?? person.email}
+                    </span>
+                    <span className="truncate font-sans text-sm/xs text-text-muted">
+                      {roleLabel(person.role)} · {person.email}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${person.name ?? person.email}`}
+                    onClick={() => void remove(person.id)}
+                    className="font-sans text-sm/xs font-medium text-danger hover:underline"
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {candidates.length === 0 ? null : (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={<Button variant="secondary" size="sm" className="w-fit" pending={adding} />}
+              >
+                <PlusIcon strokeWidth={2} />
+                Add someone
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                {candidates.map((person) => (
+                  <DropdownMenuItem key={person.id} onClick={() => void add(person.id)}>
+                    {person.name ?? person.email} · {roleLabel(person.role)}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+      )}
+      <DialogFooter>
+        <Button variant="solid" onClick={onDone}>
+          Done
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  );
+}
+
+const ADD_VISIBILITY_HINTS: Readonly<Record<LibraryVisibility, string>> = {
+  shared: "Everyone but guests. You can add guests from the folder's menu.",
+  restricted: "Only the people you add from the folder's menu after it's created.",
+  private: "Only you. Other admins can't see it.",
+};
 
 function AddLibraryDialog({
   open,
@@ -245,7 +480,7 @@ function AddLibraryDialog({
 }) {
   const create = useRun("libraries.create");
   const [path, setPath] = useState("");
-  const [visibility, setVisibility] = useState<"shared" | "private">("shared");
+  const [visibility, setVisibility] = useState<LibraryVisibility>("shared");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -304,14 +539,21 @@ function AddLibraryDialog({
           </div>
           <div className="flex flex-col gap-1.5">
             <span className="font-sans text-sm/xs font-medium text-text">Who can see it</span>
-            <div role="group" aria-label="Who can see it" className="flex gap-2">
+            <div role="group" aria-label="Who can see it" className="flex flex-wrap gap-2">
               <Chip selected={visibility === "shared"} onClick={() => setVisibility("shared")}>
                 Everyone on this server
+              </Chip>
+              <Chip
+                selected={visibility === "restricted"}
+                onClick={() => setVisibility("restricted")}
+              >
+                Specific people
               </Chip>
               <Chip selected={visibility === "private"} onClick={() => setVisibility("private")}>
                 Only me
               </Chip>
             </div>
+            <FieldHint>{ADD_VISIBILITY_HINTS[visibility]}</FieldHint>
           </div>
           <DialogFooter>
             <DialogClose render={<Button variant="ghost" type="button" />}>Cancel</DialogClose>
