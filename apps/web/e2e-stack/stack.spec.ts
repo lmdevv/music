@@ -118,13 +118,13 @@ test("an album plays real audio, pauses, and skips", async ({ page }) => {
   await expectAudioPast(page, 1);
 });
 
-test("Ctrl+N and Ctrl+P move through the command menu", async ({ page }) => {
+test("Ctrl+J and Ctrl+P move through the command menu", async ({ page }) => {
   await signIn(page);
   await page.keyboard.press("ControlOrMeta+k");
   const menu = page.getByRole("dialog", { name: "Command menu" });
   // With no query, a "Now playing" row can arrive after the first row was selected, and the
   // selection stays put. A query selects its first result once the search settles; wait for that
-  // result, or Ctrl+N can land on the list from before the query.
+  // result, or Ctrl+J can land on the list from before the query.
   const options = menu.getByRole("option");
   const third = await options.nth(2).boundingBox();
 
@@ -143,9 +143,9 @@ test("Ctrl+N and Ctrl+P move through the command menu", async ({ page }) => {
   await expect(options.first()).toHaveId("command-open-queue");
   await expect(options.first()).toHaveAttribute("aria-selected", "true");
 
-  await press("Control+n");
+  await press("Control+j");
   await expect(options.nth(1)).toHaveAttribute("aria-selected", "true");
-  await press("Control+n");
+  await press("Control+j");
   await expect(options.nth(2)).toHaveAttribute("aria-selected", "true");
   await press("Control+p");
   await expect(options.nth(1)).toHaveAttribute("aria-selected", "true");

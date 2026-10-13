@@ -8,10 +8,11 @@ type MenuKey = "next" | "previous" | "run";
 export const menuKeyOf = (
   event: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "metaKey" | "shiftKey" | "isComposing">,
 ): MenuKey | null => {
-  // Ctrl+N and Ctrl+P move like the arrows, as in Emacs, fzf, and most terminal pickers.
+  // Ctrl+J and Ctrl+P move like the arrows, as in fzf and Emacs. Not Ctrl+N: browsers keep it for
+  // a new window and never pass it to the page. Not Ctrl+K: it opens and closes the menu.
   const ctrl = event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey;
 
-  if (event.key === "ArrowDown" || (ctrl && event.key === "n")) return "next";
+  if (event.key === "ArrowDown" || (ctrl && event.key === "j")) return "next";
 
   if (event.key === "ArrowUp" || (ctrl && event.key === "p")) return "previous";
 

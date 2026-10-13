@@ -27,13 +27,19 @@ describe("menuKeyOf", () => {
     expect(press("ArrowUp")).toBe("previous");
   });
 
-  it("moves with Ctrl+N and Ctrl+P", () => {
-    expect(press("n", { ctrlKey: true })).toBe("next");
+  it("moves with Ctrl+J and Ctrl+P", () => {
+    expect(press("j", { ctrlKey: true })).toBe("next");
     expect(press("p", { ctrlKey: true })).toBe("previous");
   });
 
+  it("leaves Ctrl+N (a new browser window) and Ctrl+K (the menu toggle) alone", () => {
+    expect(press("n", { ctrlKey: true })).toBeNull();
+    expect(press("k", { ctrlKey: true })).toBeNull();
+  });
+
   it("leaves Ctrl with other modifiers, and the letters alone, to the field", () => {
-    expect(press("n")).toBeNull();
+    expect(press("j")).toBeNull();
+    expect(press("j", { ctrlKey: true, shiftKey: true })).toBeNull();
     expect(press("p", { ctrlKey: true, shiftKey: true })).toBeNull();
     expect(press("p", { ctrlKey: true, altKey: true })).toBeNull();
     expect(press("p", { ctrlKey: true, metaKey: true })).toBeNull();
