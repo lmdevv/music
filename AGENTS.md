@@ -14,8 +14,8 @@ included; the repo and packages use `music`.
   ideas and edge cases. Never copy, port, or translate their code into this repo. Effect, OpenCode,
   and Pi are MIT and safe to reference.
 - **Load the `coding-standards` skill** before writing, reviewing, or refactoring TypeScript. It is
-  in `.agents/skills/coding-standards/`, from `dmmulroy/skills`. Where it conflicts with this file,
-  this file wins: no lint suppressions, even where its examples use them.
+  in `.agents/skills/coding-standards/`, from `dmmulroy/skills`. Where any skill conflicts with this
+  file, this file wins: no lint suppressions or disabled rules, even where a skill shows them.
 - **No MCP server.** Agents use the CLI and `skills/music/SKILL.md`.
 - **Never commit secret values.** `.env.example` lists configuration names only.
 - **Never weaken a lint rule, add a cast, or add a suppression to pass checks.** Fix the code or
@@ -78,9 +78,10 @@ worktree. Commit the regenerated `convex/_generated/`.
 - Project skills in `.agents/skills/`, pinned in `skills-lock.json`: `create-verification-skill`
   writes a `verify-<app>` skill when the repo has none, and `maintain-verification-skill` keeps it
   current. `playwright-best-practices` covers flaky tests, `before-and-after` attaches UI captures
-  to a PR (needs Vercel's `agent-browser` CLI: `npm i -g agent-browser && agent-browser install`),
-  plus `react-doctor`, `react-best-practices`, and `diagnosing-bugs`. They're all model-invoked;
-  after `skills update`, delete any `disable-model-invocation` line it brings back.
+  to a PR with `.agents/skills/before-and-after/scripts/format.mjs` and Vercel's `agent-browser` CLI
+  (`npm i -g agent-browser && agent-browser install`), plus `react-doctor`, `react-best-practices`,
+  and `diagnosing-bugs`. They're all model-invoked; after `skills update`, delete any
+  `disable-model-invocation` line it brings back.
 - `main` requires the `check` and `stack-e2e` CI jobs. PRs matching the `paths` in
   `.github/workflows/image.yml` also run the `Image` workflow; check it too. Never merge with admin
   bypass.
