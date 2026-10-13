@@ -17,8 +17,7 @@ const EXPECTED_SIGN_IN_FAILURE =
 const decodeLine = Schema.decodeUnknownOption(Schema.String);
 
 /** Whether a Convex log line reports an expected sign-in failure rather than a fault. */
-export const isExpectedSignInFailure = (line: string): boolean =>
-  EXPECTED_SIGN_IN_FAILURE.test(line);
+const isExpectedSignInFailure = (line: string): boolean => EXPECTED_SIGN_IN_FAILURE.test(line);
 
 /**
  * Logs Convex client messages to `sink`, except a rejected sign-in: the sign-in screen already

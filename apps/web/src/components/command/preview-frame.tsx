@@ -31,31 +31,16 @@ export const usePrimary = (
   }, [registerPrimary]);
 };
 
-/**
- * The preview pane's padded column, with a Back button on phones.
- *
- * @param tint - A colour for a faint gradient behind the top of the pane.
- */
+/** The preview pane's padded column, with a Back button on phones. */
 export function PreviewFrame({
   children,
-  tint,
   onBack,
 }: {
   readonly children: ReactNode;
-  readonly tint?: string | undefined;
   readonly onBack: () => void;
 }) {
   return (
-    <div
-      className="flex w-full flex-col gap-4 p-6"
-      style={
-        tint === undefined
-          ? undefined
-          : {
-              backgroundImage: `linear-gradient(in oklab 180deg, color-mix(in oklab, ${tint} 10%, transparent) 0%, transparent 60%)`,
-            }
-      }
-    >
+    <div className="flex w-full flex-col gap-4 p-6">
       <button
         type="button"
         onClick={onBack}

@@ -48,7 +48,7 @@ export const useClearQueue = () => {
  * One queued song. Click to play it; the remove button appears on hover or focus. `tone="glass"`
  * draws it for the art-tinted Now Playing background.
  */
-export function QueueRow({
+function QueueRow({
   track,
   index,
   tone = "plain",

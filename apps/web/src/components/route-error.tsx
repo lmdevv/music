@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
 import { describeFailure } from "@/lib/action";
 
 /** Where a missing-item screen sends the user instead. */
-export interface BackLink {
+interface BackLink {
   readonly to: NonNullable<LinkProps["to"]>;
   readonly label: string;
 }
