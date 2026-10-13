@@ -129,6 +129,12 @@ export interface ArtistDetail extends Schema.Schema.Type<typeof ArtistDetail> {}
 /** Cursor-based page. Pass `cursor` back to read the next page until `done`. */
 export const PageArgs = Schema.Struct({
   cursor: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  /**
+   * The cursor the following page starts at, once a live client has loaded that page. The page
+   * then covers everything up to it, growing past `limit` as rows are added, so no row falls
+   * between two pages on screen.
+   */
+  end: Schema.optionalKey(Schema.NullOr(Schema.String)),
   limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 200 }))),
 });
 

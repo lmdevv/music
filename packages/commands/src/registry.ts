@@ -39,7 +39,6 @@ import {
   SearchResults,
   StreamProfile,
   StreamUrl,
-  Track,
   TrackPage,
   User,
 } from "./models";
@@ -330,13 +329,13 @@ export const commands = {
 
   // Likes and history
   "likes.list": command({
-    summary: "List liked songs, newest first",
+    summary: "List liked songs, newest first, a page at a time",
     group: "likes",
     kind: "query",
     access: "user",
     job: false,
-    args: NoArgs,
-    result: Schema.Array(Track),
+    args: PageArgs,
+    result: TrackPage,
   }),
   "likes.set": command({
     summary: "Like or unlike a song",

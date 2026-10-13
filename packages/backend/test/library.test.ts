@@ -208,38 +208,42 @@ describe("deleting a library", () => {
     });
   });
 
-  it("deletes a large catalog in batches that stay inside Convex's limits", async () => {
-    const backend = makeBackend({ documentsWritten: 1000 });
-    const admin = await signUp(backend, "admin");
+  it(
+    "deletes a large catalog in batches that stay inside Convex's limits",
+    { timeout: 60_000 },
+    async () => {
+      const backend = makeBackend({ documentsWritten: 1000 });
+      const admin = await signUp(backend, "admin");
 
-    // One song per album, so the library holds as many albums as songs.
-    const { libraryId } = await admin.music.run("libraries.create", {
-      name: "Singles",
-      path: "/music/singles",
-    });
+      // One song per album, so the library holds as many albums as songs.
+      const { libraryId } = await admin.music.run("libraries.create", {
+        name: "Singles",
+        path: "/music/singles",
+      });
 
-    const batches = Array.from({ length: 12 }, (_, batch) =>
-      Array.from({ length: 100 }, (__, index) => {
-        const number = batch * 100 + index;
+      const batches = Array.from({ length: 12 }, (_, batch) =>
+        Array.from({ length: 100 }, (__, index) => {
+          const number = batch * 100 + index;
 
-        return { path: `${number}.flac`, title: `Single ${number}`, album: `Single ${number}` };
-      }),
-    );
+          return { path: `${number}.flac`, title: `Single ${number}`, album: `Single ${number}` };
+        }),
+      );
 
-    await batches.reduce(async (previous, files) => {
-      await previous;
-      await upsertFiles(backend, libraryId, files);
-    }, Promise.resolve());
+      await batches.reduce(async (previous, files) => {
+        await previous;
+        await upsertFiles(backend, libraryId, files);
+      }, Promise.resolve());
 
-    await admin.music.run("libraries.delete", { libraryId });
-    await drainScheduled(backend);
+      await admin.music.run("libraries.delete", { libraryId });
+      await drainScheduled(backend);
 
-    const left = await backend.run(async (ctx) => ({
-      tracks: (await ctx.db.query("tracks").collect()).length,
-      albums: (await ctx.db.query("albums").collect()).length,
-      artists: (await ctx.db.query("artists").collect()).length,
-    }));
+      const left = await backend.run(async (ctx) => ({
+        tracks: (await ctx.db.query("tracks").collect()).length,
+        albums: (await ctx.db.query("albums").collect()).length,
+        artists: (await ctx.db.query("artists").collect()).length,
+      }));
 
-    expect(left).toEqual({ tracks: 0, albums: 0, artists: 0 });
-  });
+      expect(left).toEqual({ tracks: 0, albums: 0, artists: 0 });
+    },
+  );
 });

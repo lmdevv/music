@@ -12,7 +12,7 @@ import { ok } from "./types";
 
 const STREAM_TTL_MS = 6 * 60 * 60 * 1000;
 
-const MAX_LIKES = 1000;
+const LIKES_PAGE = 50;
 
 const MAX_PLAYLIST = 2000;
 
@@ -88,20 +88,30 @@ const appendTracks = async (
 };
 
 export const collectionQueries = {
-  "likes.list": async (ctx, viewer) => {
-    const likes = await ctx.db
+  "likes.list": async (ctx, viewer, args) => {
+    const page = await ctx.db
       .query("likes")
       .withIndex("by_user", (q) => q.eq("userId", viewer.id))
       .order("desc")
-      .take(MAX_LIKES);
+      .paginate({
+        cursor: args.cursor ?? null,
+        endCursor: args.end ?? null,
+        numItems: args.limit ?? LIKES_PAGE,
+      });
 
+    // A song you can no longer read, or whose file is gone, is left out, so a page can come back
+    // short while `done` is false.
     const tracks = await readableTracks(
       ctx,
       viewer,
-      likes.map((like) => like.trackId),
+      page.page.map((like) => like.trackId),
     );
 
-    return makePresenter(ctx, viewer).tracks(tracks);
+    return {
+      items: await makePresenter(ctx, viewer).tracks(tracks),
+      cursor: page.continueCursor,
+      done: page.isDone,
+    };
   },
 
   "history.list": async (ctx, viewer, args) => {

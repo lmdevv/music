@@ -471,7 +471,7 @@ describe.skipIf(server === undefined)("music against a real server", () => {
       );
 
       // Newest like first.
-      expect(likes[0]?.id).toBe(current?.id);
+      expect(likes.items[0]?.id).toBe(current?.id);
 
       expect((await music(["pause"])).stdout).toBe("Paused.\n");
       expect(

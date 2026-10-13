@@ -122,11 +122,11 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 ### library
 
 - `music library home`: Recently added and recently played albums, recently played artists, and library totals.
-- `music albums list [--cursor <text>] [--limit <int>]`: List albums, newest first.
+- `music albums list [--cursor <text>] [--end <text>] [--limit <int>]`: List albums, newest first.
 - `music albums get <album-id>`: Show an album and its tracks.
-- `music artists list [--cursor <text>] [--limit <int>]`: List artists by name.
+- `music artists list [--cursor <text>] [--end <text>] [--limit <int>]`: List artists by name.
 - `music artists get <artist-id>`: Show an artist, their albums, and top songs.
-- `music tracks list [--cursor <text>] [--limit <int>]`: List songs by title.
+- `music tracks list [--cursor <text>] [--end <text>] [--limit <int>]`: List songs by title.
 
 ### search
 
@@ -164,7 +164,7 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 
 ### likes
 
-- `music likes list`: List liked songs, newest first.
+- `music likes list [--cursor <text>] [--end <text>] [--limit <int>]`: List liked songs, newest first, a page at a time.
 - `music likes set <track-id> (--liked | --no-liked)`: Like or unlike a song.
 - `music history list [--limit <int>]`: List recently played songs.
 

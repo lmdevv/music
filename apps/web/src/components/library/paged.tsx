@@ -57,6 +57,21 @@ export const usePageChain = () => {
   };
 };
 
+/**
+ * The page at `cursor`, kept on screen while it re-subscribes. A page gets `end` once the page
+ * after it loads, so it keeps covering the same range as rows are added; changing it starts a new
+ * subscription, and showing the previous result meanwhile keeps the list from flashing.
+ */
+export const useHeldPage = <Page,>(page: Page | undefined): Page | undefined => {
+  const [held, setHeld] = useState(page);
+
+  useEffect(() => {
+    if (page !== undefined) setHeld(page);
+  }, [page]);
+
+  return page ?? held;
+};
+
 /** Tells the chain what `page` shows once it loads or changes. */
 export const useReportPage = (
   cursor: string | null,
@@ -82,7 +97,7 @@ export function Paged<Item>({
   skeleton,
   empty,
 }: {
-  readonly usePage: (cursor: string | null) => PageResult<Item> | undefined;
+  readonly usePage: (cursor: string | null, end: string | null) => PageResult<Item> | undefined;
   readonly renderItem: (item: Item) => ReactNode;
   readonly skeleton: ReactNode;
   readonly empty?: ReactNode;
@@ -95,6 +110,7 @@ export function Paged<Item>({
         <Page
           key={keyOf(cursor)}
           cursor={cursor}
+          end={chain.cursors[index + 1] ?? null}
           last={index === chain.cursors.length - 1}
           usePage={usePage}
           renderItem={renderItem}
@@ -110,6 +126,7 @@ export function Paged<Item>({
 
 function Page<Item>({
   cursor,
+  end,
   last,
   usePage,
   renderItem,
@@ -118,14 +135,16 @@ function Page<Item>({
   onReport,
 }: {
   readonly cursor: string | null;
+  /** Where the next page starts, once it exists. */
+  readonly end: string | null;
   readonly last: boolean;
-  readonly usePage: (cursor: string | null) => PageResult<Item> | undefined;
+  readonly usePage: (cursor: string | null, end: string | null) => PageResult<Item> | undefined;
   readonly renderItem: (item: Item) => ReactNode;
   readonly skeleton: ReactNode;
   readonly onMore: (cursor: string) => void;
   readonly onReport: (cursor: string | null, items: number, done: boolean) => void;
 }) {
-  const page = usePage(cursor);
+  const page = useHeldPage(usePage(cursor, end));
   useReportPage(cursor, page, onReport);
   const sentinel = useRef<HTMLDivElement>(null);
   const more = page !== undefined && !page.done && last ? page.cursor : null;

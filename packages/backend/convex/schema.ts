@@ -108,6 +108,7 @@ export default defineSchema({
     .index("by_library_artist_key", ["libraryId", "artistId", "key"])
     .index("by_artist", ["artistId"])
     .index("by_added", ["addedAt"])
+    .index("by_library_added", ["libraryId", "addedAt"])
     .index("by_key", ["key"])
     .searchIndex("search_text", { searchField: "searchText", filterFields: ["libraryId"] }),
 
@@ -139,6 +140,7 @@ export default defineSchema({
     .index("by_album", ["albumId", "discNumber", "trackNumber"])
     .index("by_artist", ["artistId"])
     .index("by_title", ["missing", "titleKey"])
+    .index("by_library_title", ["libraryId", "missing", "titleKey"])
     .searchIndex("search_text", {
       searchField: "searchText",
       filterFields: ["libraryId", "missing"],

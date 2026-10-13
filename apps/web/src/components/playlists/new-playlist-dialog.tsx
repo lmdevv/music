@@ -13,8 +13,12 @@ import type { FormEvent } from "react";
 import { useUi } from "@/components/shell/ui-state";
 import { useAction } from "@/lib/action";
 import { formatCount, plural } from "@/lib/format";
+import { readPages } from "@/lib/read-pages";
 
 type StartWith = "nothing" | "selection" | "queue" | "liked";
+
+/** Songs a playlist holds at most. */
+const MAX_PLAYLIST = 2000;
 
 /** The New playlist dialog from Paper (06 · 02): a name and what the playlist starts with. */
 export function NewPlaylistDialog() {
@@ -53,7 +57,11 @@ function NewPlaylistForm({
       const trackIds: ReadonlyArray<TrackId> = await Match.value(startWith).pipe(
         Match.when("selection", () => Promise.resolve(seed)),
         Match.when("queue", () => Promise.resolve(player.queue.map((track) => track.id))),
-        Match.when("liked", async () => (await readLikes({})).map((track) => track.id)),
+        Match.when("liked", async () =>
+          (await readPages((cursor) => readLikes({ cursor, limit: 200 }), MAX_PLAYLIST)).map(
+            (track) => track.id,
+          ),
+        ),
         Match.when("nothing", () => Promise.resolve([])),
         Match.exhaustive,
       );
@@ -63,7 +71,7 @@ function NewPlaylistForm({
       const { playlistId } = await create(
         trackIds.length === 0
           ? { name: trimmed }
-          : { name: trimmed, trackIds: trackIds.slice(0, 2000) },
+          : { name: trimmed, trackIds: trackIds.slice(0, MAX_PLAYLIST) },
       );
 
       onDone();
