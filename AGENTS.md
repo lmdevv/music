@@ -74,7 +74,8 @@ worktree. Commit the regenerated `convex/_generated/`.
 - `scripts/stack-e2e.sh` needs Docker. `MUSIC_VIDEO=1` records video; results land in
   `apps/web/test-results/stack`. On NixOS, set `CHROMIUM_PATH=$(which chromium)`.
 - Repeat runs: `pnpm --filter web exec playwright test --repeat-each=20`, `pnpm test --repeats=20`.
-- `main` requires the `check` and `stack-e2e` CI jobs. Never merge with admin bypass.
+- `main` requires the `check` and `stack-e2e` CI jobs. PRs touching `apps/`, `packages/`, `deploy/`,
+  or the lockfile also run the `Image` workflow; check it too. Never merge with admin bypass.
 - Every PR gets CodeRabbit (`.coderabbit.yaml`), Codex automatic review, and Claude's
   `/code-review`. Don't add a project skill named `code-review`; it shadows Claude's.
 - Cloud environments: none yet. Pin the Claude one in `.claude/settings.json`
