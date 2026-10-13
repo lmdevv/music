@@ -225,6 +225,11 @@ describe("music (in-process)", () => {
 
       expect(both.code).toBe(2);
       expect(both.stderr).toContain("Use --key or --key-stdin, not both");
+
+      const blank = await run("login", "--server", `${server.url}/convex`, "--key", " ");
+
+      expect(blank.code).toBe(2);
+      expect(blank.stderr).toContain("--key is empty");
     });
 
     it("takes the key from MUSIC_API_KEY", async () => {
@@ -235,6 +240,18 @@ describe("music (in-process)", () => {
 
       expect(result.code).toBe(1);
       expect(signedInWith("mk_env-key")).toBe(true);
+    });
+
+    it("asks with the hidden prompt when --key-stdin is given a terminal", async () => {
+      const result = await invoke(
+        ["login", "--server", `${server.url}/convex`, "--key-stdin"],
+        { HOME: home },
+        { typed: "mk_typed-for-stdin", piped: "mk_never-read" },
+      );
+
+      expect(result.prompts).toEqual(["API key: "]);
+      expect(signedInWith("mk_typed-for-stdin")).toBe(true);
+      expect(signedInWith("mk_never-read")).toBe(false);
     });
 
     it("asks for the key at a terminal", async () => {
@@ -298,7 +315,19 @@ describe("music (in-process)", () => {
       expect(refused.code).toBe(2);
       expect(refused.stderr).toContain("MUSIC_INSECURE=1");
 
-      const allowed = await invoke(["whoami"], { ...env, MUSIC_INSECURE: "1" });
+      // An empty or unrecognized value leaves it off rather than breaking every command.
+      const offs = await Promise.all(
+        ["", "nope"].map((off) => invoke(["whoami"], { ...env, MUSIC_INSECURE: off })),
+      );
+
+      for (const result of offs) {
+        expect(result.code).toBe(2);
+        expect(result.stderr).toContain("MUSIC_INSECURE=1");
+      }
+
+      expect((await invoke(["whoami"], { HOME: home, MUSIC_INSECURE: "" })).code).toBe(3);
+
+      const allowed = await invoke(["whoami"], { ...env, MUSIC_INSECURE: "yes" });
 
       expect(allowed.code).toBe(1);
       expect(server.bodies.some((body) => body.includes('"key":"mk_env-remote"'))).toBe(true);

@@ -241,16 +241,27 @@ const loginKey = Effect.fn("Cli.loginKey")(function* (tokens: ParsedTokens, env:
   if (isTrue(tokens, "key-stdin")) {
     if (Option.isSome(flag)) return yield* missingKey("Use --key or --key-stdin, not both");
 
-    const piped = nonBlank(yield* input.readAll);
+    // Nothing is piped when stdin is the terminal: reading it to its end would echo the key and
+    // wait for Ctrl-D, so ask with the hidden prompt instead.
+    const piped = nonBlank(
+      yield* (yield* input.interactive) ? input.promptSecret("API key: ") : input.readAll,
+    );
 
     if (Option.isNone(piped)) return yield* missingKey("--key-stdin read no key from stdin");
 
     return piped.value;
   }
 
-  const given = Option.orElse(Option.map(flag, Redacted.make), () => env.key);
+  if (Option.isSome(flag)) {
+    const typed = nonBlank(Redacted.make(flag.value));
 
-  if (Option.isSome(given)) return given.value;
+    if (Option.isNone(typed)) return yield* missingKey("--key is empty");
+
+    return typed.value;
+  }
+
+  // Already trimmed, and absent when blank.
+  if (Option.isSome(env.key)) return env.key.value;
 
   if (!(yield* input.interactive)) {
     return yield* missingKey(

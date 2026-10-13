@@ -39,6 +39,8 @@ export const runMusic = (
       env: { PATH: process.env["PATH"] ?? "", ...env },
     });
 
+    // A run that exits before reading stdin closes the pipe; that EPIPE is not a test failure.
+    child.stdin.on("error", () => {});
     child.stdin.end(stdin);
 
     let stdout = "";

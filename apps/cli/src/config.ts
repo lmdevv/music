@@ -36,6 +36,13 @@ const nonEmpty = (name: string): Config.Config<Option.Option<string>> =>
     Config.map(Option.filter((value) => value.trim().length > 0)),
   );
 
+/**
+ * Whether an opt-in variable is switched on. Anything else, including a typo, leaves it off: the
+ * safe side for `MUSIC_INSECURE`, and no reason to fail every command.
+ */
+const isTruthy = (value: string): boolean =>
+  ["1", "true", "yes", "y", "on"].includes(value.trim().toLowerCase());
+
 /** Values the environment supplies. */
 export interface Environment {
   readonly paths: ConfigPaths;
@@ -54,7 +61,7 @@ export const environment: Config.Config<Environment> = Config.all({
   home: nonEmpty("HOME"),
   server: nonEmpty("MUSIC_SERVER"),
   key: nonEmpty("MUSIC_API_KEY"),
-  insecure: Config.Boolean("MUSIC_INSECURE").pipe(Config.withDefault(false)),
+  insecure: nonEmpty("MUSIC_INSECURE"),
 }).pipe(
   Config.map(({ xdg, home, server, key, insecure }) => ({
     paths: pathsFor(
@@ -67,7 +74,7 @@ export const environment: Config.Config<Environment> = Config.all({
     ),
     server: Option.map(server, normalizeServer),
     key: Option.map(key, (value) => Redacted.make(value.trim())),
-    insecure,
+    insecure: Option.exists(insecure, isTruthy),
   })),
 );
 
