@@ -8,7 +8,7 @@ import { artPath, imageContentType } from "./art-store.ts";
 import { runTool } from "./ffmpeg.ts";
 import * as Files from "./files.ts";
 import type { JobProgress } from "./media-backend.ts";
-import { LibraryUnavailable, scanLibrary } from "./scan.ts";
+import { LibraryEmpty, LibraryUnavailable, scanLibrary } from "./scan.ts";
 import {
   fixtureLibrary,
   MEDIA_TEST_TIMEOUT,
@@ -269,6 +269,42 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       }),
     ),
   );
+
+  it("fails instead of marking every song missing when the folder is empty", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root, control, scan } = yield* setup;
+
+        yield* scan;
+        // An unmounted share: the mount point is there and reads fine, with nothing in it.
+
+        for (const name of yield* Files.listNames(root)) yield* Files.removePath(join(root, name));
+
+        const error = yield* Effect.flip(scan);
+
+        expect(error).toBeInstanceOf(LibraryEmpty);
+        expect(error.message).toBe(`The folder is empty. Is the drive mounted? (${root})`);
+        expect((yield* control.tracks).filter((track) => track.missing)).toEqual([]);
+      }),
+    ));
+
+  it("scans an empty folder for a library without songs", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const dataDir = yield* temporaryDirectory("data");
+        const empty = yield* temporaryDirectory("library");
+        const context = yield* Layer.build(Layer.merge(layerMemory, testConfig(dataDir)));
+        const control = yield* MemoryMediaBackendControl.pipe(Effect.provideContext(context));
+        const libraryId = yield* control.addLibrary(empty);
+        const progress = yield* Ref.make<JobProgress>({ done: 0 });
+
+        expect(
+          yield* scanLibrary({ id: libraryId, path: empty }, progress).pipe(
+            Effect.provideContext(context),
+          ),
+        ).toMatchObject({ files: 0, missing: 0 });
+      }),
+    ));
 
   it("fails with LibraryUnavailable when the folder is missing", () =>
     runScoped(

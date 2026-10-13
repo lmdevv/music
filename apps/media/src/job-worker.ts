@@ -50,6 +50,7 @@ const runJob = Effect.fn("JobWorker.runJob")(
       Effect.map((summary) => JobEnd.Finished({ summary })),
       Effect.catchTags({
         LibraryUnavailable: (error) => Effect.succeed(JobEnd.Failed({ error: error.message })),
+        LibraryEmpty: (error) => Effect.succeed(JobEnd.Failed({ error: error.message })),
         BackendError: (error) => Effect.succeed(JobEnd.Failed({ error: error.message })),
       }),
       // A defect in one scan must not stop the worker; record it on the job instead.

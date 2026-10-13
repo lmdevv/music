@@ -1,6 +1,9 @@
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Schedule } from "effect";
 
+import * as Files from "./files.ts";
 import * as JobWorker from "./job-worker.ts";
 import { MediaBackend } from "./media-backend.ts";
 import {
@@ -72,6 +75,33 @@ describe("JobWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           status: "failed",
           error: `Library folder unavailable: ${dataDir}/missing`,
         });
+      }),
+    ));
+
+  it("fails a job whose library folder is empty, keeping its songs", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root } = yield* fixtureLibrary;
+        const dataDir = yield* temporaryDirectory("data");
+        const services = Layer.merge(layerMemory, testConfig(dataDir));
+
+        const context = yield* Layer.build(
+          Layer.merge(services, JobWorker.layer.pipe(Layer.provide(services))),
+        );
+
+        const control = yield* MemoryMediaBackendControl.pipe(Effect.provideContext(context));
+        const libraryId = yield* control.addLibrary(root);
+
+        yield* untilSettled(control, yield* control.enqueueScan(libraryId));
+
+        for (const name of yield* Files.listNames(root)) yield* Files.removePath(join(root, name));
+        const job = yield* untilSettled(control, yield* control.enqueueScan(libraryId));
+
+        expect(job?.outcome).toEqual({
+          status: "failed",
+          error: `The folder is empty. Is the drive mounted? (${root})`,
+        });
+        expect((yield* control.tracks).filter((track) => track.missing)).toEqual([]);
       }),
     ));
 

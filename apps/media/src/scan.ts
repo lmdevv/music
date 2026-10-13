@@ -58,6 +58,20 @@ export class LibraryUnavailable extends Schema.TaggedError<LibraryUnavailable>()
   }
 }
 
+/**
+ * The library folder holds no audio files while Convex knows songs in it: most likely a network
+ * share or a drive that is not mounted, whose empty mount point reads fine. The scan stops
+ * without marking anything missing.
+ */
+export class LibraryEmpty extends Schema.TaggedError<LibraryEmpty>()("LibraryEmpty", {
+  libraryId: Schema.String,
+  path: Schema.String,
+}) {
+  override get message(): string {
+    return `The folder is empty. Is the drive mounted? (${this.path})`;
+  }
+}
+
 /** The library being scanned. */
 export interface ScanTarget {
   readonly id: LibraryId;
@@ -123,6 +137,9 @@ const knownFingerprints = Effect.fn("Scan.knownFingerprints")(function* (library
 /**
  * Scans `library`, writing progress into `progress` as it goes. Unreadable files are skipped and
  * counted; they are retried on the next scan because Convex never learns their fingerprint.
+ *
+ * @returns The scan's counts, or `LibraryUnavailable` when the folder cannot be read, or
+ *   `LibraryEmpty` when it holds no audio files although the library has songs.
  */
 export const scanLibrary = Effect.fn("Scan.library")(function* (
   library: ScanTarget,
@@ -141,6 +158,11 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
 
   yield* Ref.set(progress, { done: 0, message: `Found ${files.length} files, comparing` });
   const known = yield* knownFingerprints(library.id);
+
+  if (files.length === 0 && known.values().some((file) => !file.missing)) {
+    return yield* new LibraryEmpty({ libraryId: library.id, path: library.path });
+  }
+
   const changed = files.filter((file) => !isUnchanged(known.get(file.relativePath), file));
 
   const folderArt = yield* Cache.make({
