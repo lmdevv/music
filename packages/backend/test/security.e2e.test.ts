@@ -10,6 +10,8 @@
  * Without them the suite is skipped. On an empty server the first test races two sign-ups for
  * the admin account; later runs sign in as whichever of them won and skip that test.
  */
+import { createHash } from "node:crypto";
+
 import {
   AlbumId,
   ApiKeyId,
@@ -44,6 +46,76 @@ import {
 const server = process.env["MUSIC_SECURITY_E2E_SERVER"] ?? "";
 
 const mediaSecret = process.env["MUSIC_SECURITY_E2E_MEDIA_SECRET"] ?? "";
+
+/** One file as the media service reports it. */
+interface ScannedSong {
+  readonly path: string;
+  readonly size: number;
+  readonly mtimeMs: number;
+  readonly title: string;
+  readonly artist: string;
+  readonly album: string;
+  readonly durationMs: number;
+  readonly codec: string;
+  readonly lossless: boolean;
+  readonly artHash?: string;
+  readonly folderArt?: string;
+}
+
+/** The one song of the cover test, with the art the media service found for it. */
+const coverSong = (artHash: string, folderArt: string): ScannedSong => ({
+  path: "Album/song.flac",
+  size: 1234,
+  mtimeMs: 1_700_000_000_000,
+  title: `Cover Song ${TOKEN}`,
+  artist: `Painter ${TOKEN}`,
+  album: `Canvas ${TOKEN}`,
+  durationMs: 100_000,
+  codec: "flac",
+  lossless: true,
+  artHash,
+  folderArt,
+});
+
+const upsertTracksRef = makeFunctionReference<
+  "mutation",
+  { secret: string; libraryId: string; tracks: ReadonlyArray<ScannedSong> },
+  { upserted: number }
+>("media:upsertTracks");
+
+const moveTracksRef = makeFunctionReference<
+  "mutation",
+  {
+    secret: string;
+    libraryId: string;
+    moves: ReadonlyArray<{ from: string; track: ScannedSong }>;
+  },
+  { moved: number }
+>("media:moveTracks");
+
+const fingerprintsRef = makeFunctionReference<
+  "query",
+  { secret: string; libraryId: string; cursor: string | null },
+  {
+    files: ReadonlyArray<{
+      path: string;
+      missing: boolean;
+      folderArt?: string;
+      durationMs?: number;
+      title?: string;
+      artist?: string;
+      album?: string;
+    }>;
+    cursor: string;
+    done: boolean;
+  }
+>("media:fingerprints");
+
+const artHashesRef = makeFunctionReference<
+  "query",
+  { secret: string; table: "tracks" | "albums" | "artists"; cursor: string | null },
+  { hashes: ReadonlyArray<string>; cursor: string; done: boolean }
+>("media:artHashes");
 
 const PASSWORD = "security-e2e-password";
 
@@ -521,6 +593,139 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     expect(await visitor.convex.query(inviteLookup, { code: "not-a-code" })).toEqual({
       state: "invalid",
     });
+  });
+
+  it("keeps a song's likes and playlist entries when the media service moves its file", async () => {
+    const { adminA } = fixture;
+    // The media service's connection: no user, only the shared secret.
+    const media = anonymous(server).convex;
+
+    const { libraryId } = await adminA.music.run("libraries.create", {
+      name: `Moves ${id}`,
+      path: `/security-${id}/moves`,
+    });
+
+    const song = {
+      path: "Before/song.flac",
+      size: 4321,
+      mtimeMs: 1_700_000_000_000,
+      title: `Moving Song ${TOKEN}`,
+      artist: `Mover ${TOKEN}`,
+      album: `Boxes ${TOKEN}`,
+      durationMs: 200_000,
+      codec: "flac",
+      lossless: true,
+    };
+
+    await media.mutation(upsertTracksRef, { secret: mediaSecret, libraryId, tracks: [song] });
+    const before = await findTrack(adminA, song.title);
+
+    await adminA.music.run("likes.set", { trackId: before.id, liked: true });
+
+    const { playlistId } = await adminA.music.run("playlists.create", {
+      name: `Moves ${id}`,
+      trackIds: [before.id],
+    });
+
+    expect(
+      await media.mutation(moveTracksRef, {
+        secret: mediaSecret,
+        libraryId,
+        moves: [{ from: song.path, track: { ...song, path: "After/song.flac" } }],
+      }),
+    ).toEqual({ moved: 1 });
+
+    expect((await findTrack(adminA, song.title)).id).toBe(before.id);
+    expect((await adminA.music.read("likes.list", {})).map((track) => track.id)).toContain(
+      before.id,
+    );
+    expect(
+      (await adminA.music.read("playlists.get", { playlistId })).items.map((item) => item.track.id),
+    ).toEqual([before.id]);
+
+    const known = await media.query(fingerprintsRef, {
+      secret: mediaSecret,
+      libraryId,
+      cursor: null,
+    });
+
+    expect(known.files).toEqual([
+      expect.objectContaining({
+        path: "After/song.flac",
+        missing: false,
+        durationMs: song.durationMs,
+        title: song.title,
+        artist: song.artist,
+        album: song.album,
+      }),
+    ]);
+  });
+
+  it("moves an album's art to a replaced cover and lists only the art in use", async () => {
+    const { adminA } = fixture;
+    const media = anonymous(server).convex;
+
+    const { libraryId } = await adminA.music.run("libraries.create", {
+      name: `Covers ${id}`,
+      path: `/security-${id}/covers`,
+    });
+
+    const [oldHash, newHash] = ["old", "new"].map((cover) =>
+      createHash("sha256").update(`${cover} cover ${id}`).digest("hex"),
+    );
+
+    if (oldHash === undefined || newHash === undefined) throw new Error("No cover hashes");
+
+    const albumArt = async (): Promise<string | null> => {
+      const track = await findTrack(adminA, `Cover Song ${TOKEN}`);
+
+      return (await adminA.music.read("albums.get", { albumId: track.albumId })).album.artUrl;
+    };
+
+    const artInUse = async (): Promise<ReadonlyArray<string>> => {
+      const pages = await Promise.all(
+        (["tracks", "albums", "artists"] as const).map(async (table) => {
+          const collect = async (
+            cursor: string | null,
+            hashes: ReadonlyArray<string>,
+          ): Promise<ReadonlyArray<string>> => {
+            const page = await media.query(artHashesRef, { secret: mediaSecret, table, cursor });
+            const all = [...hashes, ...page.hashes];
+
+            return page.done ? all : collect(page.cursor, all);
+          };
+
+          return collect(null, []);
+        }),
+      );
+
+      return pages.flat();
+    };
+
+    await media.mutation(upsertTracksRef, {
+      secret: mediaSecret,
+      libraryId,
+      tracks: [coverSong(oldHash, "Album/cover.jpg:10:1")],
+    });
+    expect(await albumArt()).toContain(`/art/${oldHash}?`);
+    expect(await artInUse()).toContain(oldHash);
+
+    await media.mutation(upsertTracksRef, {
+      secret: mediaSecret,
+      libraryId,
+      tracks: [coverSong(newHash, "Album/cover.jpg:20:2")],
+    });
+    expect(await albumArt()).toContain(`/art/${newHash}?`);
+    expect(await artInUse()).toContain(newHash);
+    expect(await artInUse()).not.toContain(oldHash);
+
+    const known = await media.query(fingerprintsRef, {
+      secret: mediaSecret,
+      libraryId,
+      cursor: null,
+    });
+
+    expect(known.files).toEqual([expect.objectContaining({ folderArt: "Album/cover.jpg:20:2" })]);
   });
 
   it("refuses media service functions without the service secret", async () => {
