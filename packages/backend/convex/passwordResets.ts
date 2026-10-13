@@ -9,7 +9,7 @@ import { v } from "convex/values";
 import { internalMutation } from "./_generated/server";
 import { createPasswordReset } from "./handlers/people";
 import { fail } from "./lib/errors";
-import { endSession } from "./lib/sessions";
+import { endUserSessions } from "./lib/sessions";
 import { SUSPENDED_MESSAGE } from "./lib/viewer";
 
 /**
@@ -46,15 +46,25 @@ export const redeem = internalMutation({
     if (account === null) return fail("invalid_args", "This account has no password to reset");
 
     await ctx.db.patch(reset._id, { usedAt: Date.now() });
-
-    const sessions = await ctx.db
-      .query("authSessions")
-      .withIndex("userId", (q) => q.eq("userId", user._id))
-      .collect();
-
-    await Promise.all(sessions.map((session) => endSession(ctx, session._id)));
+    await endUserSessions(ctx, user._id);
 
     return { userId: user._id, accountId: account.providerAccountId };
+  },
+});
+
+/**
+ * Makes a claimed link usable again when setting the password failed after `redeem`, so the
+ * person can retry instead of needing a new link.
+ */
+export const release = internalMutation({
+  args: { hash: v.string() },
+  handler: async (ctx, { hash }) => {
+    const reset = await ctx.db
+      .query("passwordResets")
+      .withIndex("by_hash", (q) => q.eq("hash", hash))
+      .unique();
+
+    if (reset !== null) await ctx.db.patch(reset._id, { usedAt: undefined });
   },
 });
 

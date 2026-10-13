@@ -340,8 +340,8 @@ const VISIBILITY_HINTS: Readonly<Record<LibraryVisibility, (owner: string) => st
   restricted: (owner) => `Only the people below, and ${owner}.`,
   private: (owner) =>
     owner === "you"
-      ? "Only you. Other admins can't see or manage it."
-      : `Only ${owner}. It leaves your list, and only ${owner} can open it up again.`,
+      ? "Only you. Other admins can't see or manage it while you are an admin."
+      : `Only ${owner} can listen. If they are an admin, it leaves your list until they open it up.`,
 };
 
 /** Who can listen to a library: its visibility and the people added to it. */

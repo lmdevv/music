@@ -1234,6 +1234,57 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     await expectReadFailure(person, "people.list", {}, "forbidden");
   });
 
+  it("takes an admin's invites and sole say over private libraries when they step down", async () => {
+    const { adminA, adminB } = fixture;
+    const keeper = await invite(adminA, `keeper-${id}@music.test`, "admin");
+    const { id: keeperId } = await keeper.music.read("account.me", {});
+    const adminInvite = await keeper.music.run("invites.create", { role: "admin" });
+    const guestInvite = await keeper.music.run("invites.create", { role: "guest" });
+
+    const vault = await keeper.music.run("libraries.create", {
+      name: `Vault ${id}`,
+      path: `/security-${id}/vault`,
+      visibility: "private",
+    });
+
+    const listed = async () =>
+      (await adminB.music.read("libraries.list", {})).map((library) => library.id);
+
+    expect(await listed()).not.toContain(vault.libraryId);
+
+    await adminA.music.run("people.role", { userId: keeperId, role: "member" });
+
+    // A member can't invite anyone, so neither invite they sent works any more.
+    expect(
+      await failureCode(
+        signUp(server, {
+          email: `via-admin-${id}@music.test`,
+          password: PASSWORD,
+          inviteCode: adminInvite.code,
+        }),
+      ),
+    ).toBe("signup_closed");
+    expect(await anonymous(server).convex.query(inviteLookup, { code: guestInvite.code })).toEqual({
+      state: "invalid",
+    });
+
+    // Their private library is still theirs to hear, and now admins can manage it.
+    expect(await listed()).toContain(vault.libraryId);
+    await adminB.music.run("libraries.update", {
+      libraryId: vault.libraryId,
+      name: `Vault kept ${id}`,
+    });
+    expect((await keeper.music.read("libraries.list", {})).map((library) => library.id)).toContain(
+      vault.libraryId,
+    );
+    await expectReadFailure(
+      keeper,
+      "libraries.people",
+      { libraryId: vault.libraryId },
+      "forbidden",
+    );
+  });
+
   it("removes a person with their sessions, keys, and data, and gives their libraries to the owner", async () => {
     const { adminA, adminB, shared } = fixture;
     const email = `leaver-${id}@music.test`;

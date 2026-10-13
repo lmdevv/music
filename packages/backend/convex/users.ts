@@ -2,6 +2,7 @@ import { v } from "convex/values";
 
 import { internalMutation } from "./_generated/server";
 import { fail } from "./lib/errors";
+import { inviterStillAllows } from "./lib/invites";
 
 /**
  * Creates the account for a password sign-up. The first account becomes the owner; every later
@@ -36,6 +37,10 @@ export const createFromSignUp = internalMutation({
     }
 
     if (invite.expiresAt < now) return fail("signup_closed", "This invite has expired");
+
+    if (!inviterStillAllows(await ctx.db.get(invite.createdBy), invite)) {
+      return fail("signup_closed", "This invite is no longer valid; ask an admin for a new one");
+    }
 
     if (invite.email !== undefined && invite.email !== email) {
       return fail("signup_closed", `This invite is for ${invite.email}`);

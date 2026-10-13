@@ -121,14 +121,19 @@ const password = ConvexCredentials<DataModel>({
 
     checkPassword(input.newPassword);
 
-    const { userId, accountId } = await ctx.runMutation(internal.passwordResets.redeem, {
-      hash: await sha256Hex(input.token),
-    });
+    const hash = await sha256Hex(input.token);
+    const { userId, accountId } = await ctx.runMutation(internal.passwordResets.redeem, { hash });
 
-    await modifyAccountCredentials(ctx, {
-      provider: PASSWORD,
-      account: { id: accountId, secret: input.newPassword },
-    });
+    try {
+      await modifyAccountCredentials(ctx, {
+        provider: PASSWORD,
+        account: { id: accountId, secret: input.newPassword },
+      });
+    } catch (cause) {
+      // The password did not change, so the link must still work for a retry.
+      await ctx.runMutation(internal.passwordResets.release, { hash });
+      throw cause;
+    }
 
     return { userId };
   },

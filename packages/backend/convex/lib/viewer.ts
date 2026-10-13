@@ -5,6 +5,7 @@ import { can } from "@music/commands/permissions";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx } from "../_generated/server";
 import { fail } from "./errors";
+import { tableId } from "./ids";
 
 export type ReadCtx = Pick<QueryCtx, "db" | "auth">;
 
@@ -94,7 +95,23 @@ export const canRead = (viewer: Viewer, libraryId: Id<"libraries">): boolean =>
 
 /**
  * Checks that the viewer can manage a library: admins manage every shared and restricted library,
- * listening or not, but a private library stays its owner's alone.
+ * listening or not. A private library stays its owner's alone while the owner is an admin who can
+ * manage it; once they are not (demoted, or it was made private for a member), any admin can, so
+ * no library is ever left without someone to manage it.
  */
-export const canManage = (viewer: Viewer, library: Doc<"libraries">): boolean =>
-  can(viewer.role, "admin") && (library.visibility !== "private" || library.ownerId === viewer.id);
+export const canManage = async (
+  ctx: ReadCtx,
+  viewer: Viewer,
+  library: Doc<"libraries">,
+): Promise<boolean> => {
+  if (!can(viewer.role, "admin")) return false;
+
+  if (library.visibility !== "private" || library.ownerId === viewer.id) return true;
+  const owner = await ctx.db.get(library.ownerId);
+
+  return owner === null || !can(roleOf(owner), "admin");
+};
+
+/** A person by wire ID, or a `not_found` failure. */
+export const loadPerson = async (ctx: ReadCtx, id: string): Promise<Doc<"users">> =>
+  (await ctx.db.get(tableId(ctx, "users", id))) ?? fail("not_found", "Person not found");

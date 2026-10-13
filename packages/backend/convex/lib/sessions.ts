@@ -18,3 +18,13 @@ export const endSession = async (
 
   if ((await ctx.db.get(sessionId)) !== null) await ctx.db.delete(sessionId);
 };
+
+/** Ends every session a person has, password and API key alike. */
+export const endUserSessions = async (ctx: MutationCtx, userId: Id<"users">): Promise<void> => {
+  const sessions = await ctx.db
+    .query("authSessions")
+    .withIndex("userId", (q) => q.eq("userId", userId))
+    .collect();
+
+  await Promise.all(sessions.map((session) => endSession(ctx, session._id)));
+};

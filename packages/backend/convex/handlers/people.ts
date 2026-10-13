@@ -14,10 +14,10 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { randomToken, sha256Hex } from "../lib/crypto";
 import { fail } from "../lib/errors";
-import { tableId } from "../lib/ids";
 import { findSession } from "../lib/playback";
-import { endSession } from "../lib/sessions";
-import { roleOf } from "../lib/viewer";
+import { inviterStillAllows } from "../lib/invites";
+import { endSession, endUserSessions } from "../lib/sessions";
+import { loadPerson, roleOf } from "../lib/viewer";
 import type { Viewer } from "../lib/viewer";
 import type { MutationHandlers, QueryHandlers } from "./types";
 import { ok } from "./types";
@@ -30,16 +30,19 @@ const RESET_TTL_MS = 24 * 60 * 60 * 1000;
  * Each comes from an index on the person, so this reads a few rows per person.
  */
 const lastActiveAt = async (ctx: QueryCtx, userId: Id<"users">): Promise<number | null> => {
-  const [device, sessions, keys, playback] = await Promise.all([
+  const [device, session, keys, playback] = await Promise.all([
     ctx.db
       .query("devices")
       .withIndex("by_user_last_seen", (q) => q.eq("userId", userId))
       .order("desc")
       .first(),
+    // Within one person the index orders sessions by creation, so this is the latest sign-in.
     ctx.db
       .query("authSessions")
       .withIndex("userId", (q) => q.eq("userId", userId))
-      .collect(),
+      .order("desc")
+      .first(),
+    // A person has a handful of keys; their last use is not indexed.
     ctx.db
       .query("apiKeys")
       .withIndex("by_user", (q) => q.eq("userId", userId))
@@ -50,7 +53,7 @@ const lastActiveAt = async (ctx: QueryCtx, userId: Id<"users">): Promise<number 
   const times = [
     device?.lastSeenAt,
     playback?.updatedAt,
-    ...sessions.map((session) => session._creationTime),
+    session?._creationTime,
     ...keys.map((key) => key.lastUsedAt),
   ].filter((time) => time !== undefined);
 
@@ -69,8 +72,7 @@ const presentPerson = async (ctx: QueryCtx, doc: Doc<"users">) => ({
 
 /** A person the viewer may manage (see `canManagePerson`), or a `forbidden` failure saying why. */
 const managedPerson = async (ctx: QueryCtx, viewer: Viewer, id: string): Promise<Doc<"users">> => {
-  const user =
-    (await ctx.db.get(tableId(ctx, "users", id))) ?? fail("not_found", "Person not found");
+  const user = await loadPerson(ctx, id);
 
   if (canManagePerson(viewer, { id: user._id, role: roleOf(user) })) return user;
 
@@ -110,14 +112,22 @@ const keepAnAdmin = async (ctx: QueryCtx, leaving: Doc<"users">): Promise<void> 
   }
 };
 
-/** Ends every session the person has, password and API key alike. */
-const endSessions = async (ctx: MutationCtx, userId: Id<"users">): Promise<void> => {
-  const sessions = await ctx.db
-    .query("authSessions")
-    .withIndex("userId", (q) => q.eq("userId", userId))
+/**
+ * Revokes the open invites a person made that their role no longer allows, so a demoted or
+ * suspended admin's invites stop working (sign-up checks this again, see `inviterStillAllows`).
+ */
+const revokeLapsedInvites = async (ctx: MutationCtx, inviter: Doc<"users">): Promise<void> => {
+  const invites = await ctx.db
+    .query("invites")
+    .withIndex("by_creator", (q) => q.eq("createdBy", inviter._id))
     .collect();
 
-  await Promise.all(sessions.map((session) => endSession(ctx, session._id)));
+  await Promise.all(
+    invites
+      .filter((invite) => !invite.revoked && invite.acceptedBy === undefined)
+      .filter((invite) => !inviterStillAllows(inviter, invite))
+      .map((invite) => ctx.db.patch(invite._id, { revoked: true })),
+  );
 };
 
 /** Revokes every API key the person has and ends the sessions they opened. */
@@ -195,6 +205,7 @@ export const peopleMutations = {
     if (args.role !== "admin") await keepAnAdmin(ctx, user);
 
     await ctx.db.patch(user._id, { role: args.role });
+    await revokeLapsedInvites(ctx, { ...user, role: args.role });
 
     // Guests have no API keys; the ones they had stop working with the change.
     if (args.role === "guest") await revokeKeys(ctx, user._id);
@@ -207,10 +218,14 @@ export const peopleMutations = {
 
     await keepAnAdmin(ctx, user);
 
-    if (user.suspendedAt === undefined) await ctx.db.patch(user._id, { suspendedAt: Date.now() });
+    const suspendedAt = user.suspendedAt ?? Date.now();
 
-    // API keys stay, refusing to sign in until the person is unsuspended.
-    await endSessions(ctx, user._id);
+    await ctx.db.patch(user._id, { suspendedAt });
+    await revokeLapsedInvites(ctx, { ...user, suspendedAt });
+
+    // API keys stay, refusing to sign in until the person is unsuspended. Stream URLs already
+    // signed keep working until they expire, as after any revocation.
+    await endUserSessions(ctx, user._id);
 
     return ok;
   },
@@ -280,7 +295,7 @@ export const peopleMutations = {
       ),
     );
 
-    await endSessions(ctx, user._id);
+    await endUserSessions(ctx, user._id);
 
     await Promise.all([
       // Private libraries stay private, now to the owner; nothing on disk changes.
@@ -302,10 +317,7 @@ export const peopleMutations = {
   },
 
   "people.transfer": async (ctx, viewer, args) => {
-    const user =
-      (await ctx.db.get(tableId(ctx, "users", args.userId))) ??
-      fail("not_found", "Person not found");
-
+    const user = await loadPerson(ctx, args.userId);
     const target = { id: user._id, role: roleOf(user), suspended: user.suspendedAt !== undefined };
 
     if (!canTransferOwnership(viewer, target)) {

@@ -2,6 +2,7 @@ import { v } from "convex/values";
 
 import { query } from "./_generated/server";
 import { sha256Hex } from "./lib/crypto";
+import { inviterStillAllows } from "./lib/invites";
 
 /** First-run state for the welcome screen. Public: it reveals only whether setup is done. */
 export const status = query({
@@ -28,6 +29,10 @@ export const invite = query({
 
     if (found === null || found.revoked) return { state: "invalid" as const };
     const inviter = await ctx.db.get(found.createdBy);
+
+    if (found.acceptedBy === undefined && !inviterStillAllows(inviter, found)) {
+      return { state: "invalid" as const };
+    }
 
     const details = {
       email: found.email ?? null,

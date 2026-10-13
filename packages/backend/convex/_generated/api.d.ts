@@ -27,6 +27,7 @@ import type * as lib_errors from "../lib/errors.js";
 import type * as lib_ids from "../lib/ids.js";
 import type * as lib_pages from "../lib/pages.js";
 import type * as lib_paths from "../lib/paths.js";
+import type * as lib_invites from "../lib/invites.js";
 import type * as lib_playback from "../lib/playback.js";
 import type * as lib_present from "../lib/present.js";
 import type * as lib_queue from "../lib/queue.js";
@@ -68,6 +69,7 @@ declare const fullApi: ApiFromModules<{
   "lib/ids": typeof lib_ids;
   "lib/pages": typeof lib_pages;
   "lib/paths": typeof lib_paths;
+  "lib/invites": typeof lib_invites;
   "lib/playback": typeof lib_playback;
   "lib/present": typeof lib_present;
   "lib/queue": typeof lib_queue;
