@@ -38,9 +38,6 @@ export function PhoneNowPlaying({ track, view, onView }: PhoneNowPlayingProps) {
   const remote = useIsRemote();
   const colors = useArtColors(track.artUrl, track.albumId);
   const background = nowPlayingBackground(colors, "linear");
-  const [sheet, setSheet] = useState(false);
-  // This view stays mounted (CSS-hidden) at desktop width, so its sheet must not outlive a resize.
-  const desktop = useIsDesktop();
   const queue = view === "queue";
   const playing = player.status === "playing";
 
@@ -172,19 +169,7 @@ export function PhoneNowPlaying({ track, view, onView }: PhoneNowPlayingProps) {
             <MessageCircleIcon className="size-6" />
           </button>
         </span>
-        <button
-          type="button"
-          onClick={() => setSheet(true)}
-          className="flex flex-col items-center gap-0.75 text-text/75 outline-none"
-          aria-label={`Play on another device. Now: ${deviceName}`}
-        >
-          <AirPlayGlyph />
-          {queue ? null : (
-            <span className="font-sans text-2xs leading-3.5 font-medium text-text/60">
-              {deviceName}
-            </span>
-          )}
-        </button>
+        <PlayOnButton track={track} deviceName={deviceName} showName={!queue} />
         <button
           type="button"
           aria-label={queue ? "Hide queue" : "Queue"}
@@ -199,13 +184,46 @@ export function PhoneNowPlaying({ track, view, onView }: PhoneNowPlayingProps) {
         </button>
       </div>
       <span className="sr-only">{playing ? "Playing" : "Paused"}</span>
+    </div>
+  );
+}
 
-      <Sheet open={sheet && !desktop} onOpenChange={setSheet}>
+/** The AirPlay-style button and the Play on sheet it opens. */
+function PlayOnButton({
+  track,
+  deviceName,
+  showName,
+}: {
+  readonly track: Track;
+  readonly deviceName: string;
+  readonly showName: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  // Now Playing keeps this view mounted (CSS-hidden) at desktop width, so the sheet must not
+  // outlive a resize there (ADS-106).
+  const desktop = useIsDesktop();
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex flex-col items-center gap-0.75 text-text/75 outline-none"
+        aria-label={`Play on another device. Now: ${deviceName}`}
+      >
+        <AirPlayGlyph />
+        {showName ? (
+          <span className="font-sans text-2xs leading-3.5 font-medium text-text/60">
+            {deviceName}
+          </span>
+        ) : null}
+      </button>
+      <Sheet open={open && !desktop} onOpenChange={setOpen}>
         <SheetContent title="Play on" description={`${track.title} · ${track.artist}`}>
           <DeviceList touch />
         </SheetContent>
       </Sheet>
-    </div>
+    </>
   );
 }
 

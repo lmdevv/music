@@ -1,10 +1,9 @@
-import { commandFailure } from "@music/sdk/errors";
 import { Button, buttonClassName } from "@music/ui/components/button";
 import { Link } from "@tanstack/react-router";
 import type { ErrorComponentProps, LinkProps } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
-import { describeFailure } from "@/lib/action";
+import { describeFailure, isNotFoundFailure } from "@/lib/action";
 
 /** Where a missing-item screen sends the user instead. */
 interface BackLink {
@@ -67,10 +66,6 @@ export function PageNotFound() {
     />
   );
 }
-
-/** Whether `error` is the server saying the item a screen shows doesn't exist (any more). */
-export const isNotFoundFailure = (error: Error): boolean =>
-  commandFailure(error)?.code === "not_found";
 
 /** What a detail screen says when its item is gone, and where it sends the user. */
 export interface MissingCopy {

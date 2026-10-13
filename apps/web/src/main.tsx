@@ -8,8 +8,9 @@ import { StrictMode } from "react";
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 
-import { PageNotFound, RouteError, isNotFoundFailure } from "./components/route-error";
+import { PageNotFound, RouteError } from "./components/route-error";
 import { resolveConvexUrl } from "./config";
+import { isNotFoundFailure } from "./lib/action";
 import { convexLogger } from "./lib/convex-logger";
 import { parseSearch, stringifySearch } from "./lib/search-params";
 import { routeTree } from "./routeTree.gen";
