@@ -75,10 +75,12 @@ fi
 cd /app/backend
 convex() { ./node_modules/.bin/convex "$@"; }
 
-# What the last successful boot deployed. Images before the build identity recorded only the
-# package version, so an install that has /data/version but no /data/build is an upgrade from one
-# of them. An install with neither has never finished a boot and has nothing to back up.
-if [ -s "$data/build" ]; then
+# What the last successful boot deployed. Images before the build identity record only the
+# package version, rewriting /data/version on every boot, and never touch /data/build. So an
+# install with /data/version but no /data/build, or with a /data/version newer than /data/build
+# (someone rolled back to such an image since), last ran one of them. An install with neither
+# has never finished a boot and has nothing to back up.
+if [ -s "$data/build" ] && ! [ "$data/version" -nt "$data/build" ]; then
   previous="$(cat "$data/build")"
 elif [ -s "$data/version" ]; then
   previous="version $(cat "$data/version")"
@@ -88,12 +90,12 @@ fi
 
 # An upgrade whose boot fails after the export retries on the next boot (and a restart policy may
 # retry it many times). The first export is the one taken before anything changed, so the retries
-# reuse it instead of exporting again and pruning it away.
+# reuse it instead of exporting again and pruning it away, as long as it is still there.
 pending="$backups/.pending"
 upgrade="$previous -> $build"
 
 if [ -n "$previous" ] && [ "$previous" != "$build" ] && [ -s "$pending" ] \
-  && [ "$(head -n 1 "$pending")" = "$upgrade" ]; then
+  && [ "$(head -n 1 "$pending")" = "$upgrade" ] && [ -s "$(tail -n 1 "$pending")" ]; then
   log "upgrading from $previous to $version ($build); already backed up to $(tail -n 1 "$pending")"
 elif [ -n "$previous" ] && [ "$previous" != "$build" ]; then
   backup="$backups/pre-$version-$build-$(date -u +%Y%m%d%H%M%S).zip"
@@ -136,8 +138,10 @@ PORT=4100
 ENV
 
 # Recorded only once the deploy succeeded, so a failed upgrade backs up again on the next try.
-# /data/version stays for images from before the build identity, should someone roll back.
-printf '%s\n' "$build" > "$data/build"
+# /data/version stays for images from before the build identity, should someone roll back. It is
+# written first so that /data/build is the newer file until such an image rewrites /data/version.
 printf '%s\n' "$version" > "$data/version"
+printf '%s\n' "$build" > "$data/build"
+touch -r "$data/version" -d '+1 second' "$data/build" 2>/dev/null || touch "$data/build"
 rm -f "$pending"
 log "ready at $public (version $version, build $build)"

@@ -165,7 +165,10 @@ secrets_check() {
       fi
       for f in /proc/[0-9]*/cmdline /proc/[0-9]*/environ; do
         grep -qaFf "$patterns" "$f" 2>/dev/null && echo "$f"
-      done; rm -f "$patterns"; true')"
+      done; rm -f "$patterns"
+      # The scan can only pass by reading: it must see the Convex process'"'"'s placeholder.
+      grep -qaF @ARGV_SECRET_FILE /proc/[0-9]*/cmdline 2>/dev/null || echo "an unreadable /proc"
+      true')"
   if [[ -n "$found" ]]; then
     fail "the media user can read a secret in: $found"
   fi
@@ -245,8 +248,20 @@ echo "users before the restart: $users_before, after: $users_after"
 [[ "$users_before" -gt 0 && "$users_before" == "$users_after" ]] || fail "users did not survive a restart"
 [[ "$(backups | head -n 1)" == "${kept[0]}" ]] || fail "a restart of the same build took a backup"
 
+# A rollback to an image from before the build identity rewrites /data/version on every boot and
+# leaves /data/build alone. Coming back to this build afterwards must back up again, even though
+# an earlier boot of the same upgrade left a .pending note, since the backup it names is gone.
+in_container 'sleep 1 && echo 0.1.0 > /data/version && printf "%s\n%s\n" \
+  "version 0.1.0 -> $(cat /app/build-id)" /data/backups/pre-deleted.zip > /data/backups/.pending'
+docker restart "$name" >/dev/null
+wait_healthy
+mapfile -t after_rollback < <(backups)
+printf 'backups after a rollback and back: %s\n' "${after_rollback[*]}"
+[[ "${after_rollback[0]}" != "${kept[0]}" && "${#after_rollback[@]}" == 5 ]] ||
+  fail "returning from a rollback to an older image did not back up first"
+
 # Docker's own health check agrees.
-for _ in $(seq 1 45); do
+for _ in $(seq 1 30); do
   [[ "$(docker inspect -f '{{.State.Health.Status}}' "$name")" == "healthy" ]] && break
   sleep 2
 done

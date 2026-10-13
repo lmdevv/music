@@ -55,12 +55,11 @@ docker start music
 
 ## Restore
 
-A `pre-*.zip` holds the data as the _previous_ version stored it. To undo an upgrade, go back to
-the image that wrote it, then import it:
+A `pre-*.zip` holds the data as the version _before_ the upgrade stored it. Every newer version
+can read data an older one wrote, but not the other way round, so to undo an upgrade, restore
+first and change the image second:
 
-1. Start the previous image on the same volume (see [Pin a version](#pin-a-version)). It deploys
-   its own functions again (and backs up the current data first).
-2. Replace the database with the backup:
+1. While the current image still runs, replace the database with the backup:
 
    ```sh
    docker exec music sh -c 'cd /app/backend && CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210 \
@@ -72,7 +71,11 @@ the image that wrote it, then import it:
    its contents. A file from outside the container must be copied in first:
    `docker cp ./backup.zip music:/data/backups/`.
 
-3. Restart (`docker restart music`) so every service starts from the restored data.
+2. Start the previous image on the same volume (see [Pin a version](#pin-a-version)). It deploys
+   its own functions again over the restored data.
+
+To restore without going back to an older image, run only step 1, then `docker restart music` so
+the data migrations run over the restored rows.
 
 The same import restores a backup into a new install: start the image on an empty volume, wait
 for it to report healthy, and import. People sign in again; their API keys keep working.
@@ -145,10 +148,11 @@ the media service, and Convex all work: Caddy proxies it to the media service's 
 which queries Convex and checks ffmpeg. It answers `502` while the media service is down or still
 starting and `503` when it cannot reach Convex or run ffmpeg. Point uptime monitors at it.
 
-The image's `HEALTHCHECK` uses the same endpoint every 30 seconds, with a 120-second start period,
-so `docker ps` shows `healthy` once everything is up. A first start, or an upgrade with a large
-database to back up, can take longer than the start period; the container is not restarted for
-being unhealthy unless your orchestrator does so.
+The image's `HEALTHCHECK` uses the same endpoint: every 5 seconds while starting, so `docker ps`
+shows `healthy` as soon as everything is up, then every 30 seconds. Failures in the first 10
+minutes don't count, because an upgrade backs up and deploys before the media service starts and
+can take minutes on a large database. Keep any autoheal or orchestrator restart policy at least as
+patient, or it may restart the container in the middle of an upgrade.
 
 Logs from every service go to the container's output: `docker logs -f music` (or
 `journalctl -u podman-music` on NixOS).

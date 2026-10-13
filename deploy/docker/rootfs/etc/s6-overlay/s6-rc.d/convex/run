@@ -9,6 +9,9 @@ umask 077
 data="${MUSIC_DATA:-/data}"
 mkdir -p "$data/convex/storage" "$data/convex/tmp" "$data/secrets"
 chmod 700 "$data/secrets" "$data/convex"
+# The backend's user passes through /data (without listing it) to reach /data/convex, which a
+# bind mount created under a strict umask would not allow. Init does the same for the media user.
+chmod o+x "$data"
 if [ ! -s "$data/secrets/instance_secret" ]; then
   node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))' > "$data/secrets/instance_secret"
 fi

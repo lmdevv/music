@@ -17,13 +17,26 @@ FROM ${CONVEX_IMAGE} AS convex
 FROM ${CADDY_IMAGE} AS caddy
 
 # The LD_PRELOAD shim that keeps the Convex instance secret off command lines (see its source).
-# It is built for the target CPU, so arm64 builds compile it under emulation; it is one small file.
-FROM ${NODE_IMAGE} AS argv-secret
-RUN apt-get update \
- && apt-get install -y --no-install-recommends gcc libc6-dev \
- && rm -rf /var/lib/apt/lists/*
+# Compiled on the build machine, with a cross compiler when the target CPU differs, so no part of
+# it runs under emulation.
+FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS argv-secret
+ARG TARGETARCH
 COPY deploy/docker/argv-secret.c /src/
-RUN gcc -shared -fPIC -O2 -Wall -Wextra -Werror -o /argv-secret.so /src/argv-secret.c
+RUN set -eux; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) triple=x86_64-linux-gnu; cross=gcc-x86-64-linux-gnu ;; \
+      arm64) triple=aarch64-linux-gnu; cross=gcc-aarch64-linux-gnu ;; \
+      *) echo "unsupported arch ${TARGETARCH}"; exit 1 ;; \
+    esac; \
+    if [ "$(dpkg --print-architecture)" = "${TARGETARCH:-amd64}" ]; then \
+      packages="gcc libc6-dev"; cc=gcc; \
+    else \
+      packages="$cross libc6-dev-${TARGETARCH}-cross"; cc="$triple-gcc"; \
+    fi; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends $packages; \
+    rm -rf /var/lib/apt/lists/*; \
+    "$cc" -shared -fPIC -O2 -Wall -Wextra -Werror -o /argv-secret.so /src/argv-secret.c
 
 # JavaScript builds are architecture-independent, so build on the native platform and install
 # native optional binaries (esbuild, used by `convex deploy` at runtime) for both target CPUs.
@@ -44,11 +57,15 @@ RUN pnpm --filter @music/backend deploy --prod --legacy /out/backend \
 # The build identity: a hash of everything that decides what init deploys to Convex, and of the
 # Convex backend itself. Init exports a backup before deploying whenever it differs from the one
 # recorded in /data, so a change to functions, schema, or migrations is backed up first, on :main
-# as much as on a release. It errs towards backing up: any lockfile change also changes it.
-RUN { printf '%s\n' "$CONVEX_IMAGE"; \
-      find packages/backend/convex packages/backend/package.json packages/commands pnpm-lock.yaml \
-        -type f -not -path '*/node_modules/*' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum; \
-    } | sha256sum | cut -c1-16 > /out/build-id
+# as much as on a release. It errs towards backing up: any lockfile change also changes it. A
+# failure anywhere in the pipeline fails the build rather than hashing a partial list.
+SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
+RUN files="$(find packages/backend/convex packages/backend/package.json packages/commands \
+      pnpm-lock.yaml -type f -not -path '*/node_modules/*' | LC_ALL=C sort)"; \
+    [ "$(grep -c '^packages/backend/convex/schema.ts$' <<<"$files")" = 1 ]; \
+    { printf '%s\n' "$CONVEX_IMAGE"; xargs -d '\n' sha256sum <<<"$files"; } \
+      | sha256sum | cut -c1-16 > /out/build-id; \
+    grep -Eq '^[0-9a-f]{16}$' /out/build-id
 
 FROM ${NODE_IMAGE}
 ARG TARGETARCH
@@ -111,7 +128,10 @@ ENV PUBLIC_URL=http://localhost:8080 \
 VOLUME ["/data"]
 EXPOSE 8080
 # /healthz is the media service's health check through Caddy, and that check queries Convex, so
-# the container is healthy only while Caddy, the media service, and Convex all answer.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=120s \
+# the container is healthy only while Caddy, the media service, and Convex all answer. The media
+# service starts only after init, which exports a backup and deploys on an upgrade; with a large
+# database that takes minutes, so the start period is long enough not to call an upgrade
+# unhealthy (it ends at the first passing check, made every 5 seconds until then).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10m --start-interval=5s \
   CMD curl -fsS http://127.0.0.1:8080/healthz >/dev/null || exit 1
 ENTRYPOINT ["/init"]
