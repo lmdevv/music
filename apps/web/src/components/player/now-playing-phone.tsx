@@ -20,7 +20,7 @@ import { DeviceList } from "./devices";
 import { nowPlayingBackground } from "./now-playing-background";
 import { AirPlayGlyph, RepeatGlyph, ShuffleGlyph } from "./now-playing-glyphs";
 import { RemotePill } from "./now-playing-remote-pill";
-import { QueueRow, useUpNext } from "./queue";
+import { QueueList, useUpNext } from "./queue";
 
 interface PhoneNowPlayingProps {
   readonly track: Track;
@@ -290,20 +290,12 @@ function PhoneUpNext() {
           <span className="font-sans text-sm/sm text-text/55">From {source}</span>
         )}
       </div>
-      {next.length === 0 ? (
-        <p className="px-2 font-sans text-sm/sm text-text/60">Nothing after this song.</p>
-      ) : (
-        <div className="min-h-0 grow overflow-y-auto overscroll-contain">
-          {next.map((entry) => (
-            <QueueRow
-              key={`${entry.index}-${entry.track.id}`}
-              track={entry.track}
-              index={entry.index}
-              tone="glass"
-            />
-          ))}
-        </div>
-      )}
+      <QueueList
+        next={next}
+        tone="glass"
+        className="min-h-0 grow overflow-y-auto overscroll-contain"
+        empty={<p className="px-2 font-sans text-sm/sm text-text/60">Nothing after this song.</p>}
+      />
     </div>
   );
 }

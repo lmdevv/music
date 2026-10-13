@@ -35,7 +35,7 @@ import {
 import { DeviceList } from "./devices";
 import { nowPlayingBackground } from "./now-playing-background";
 import { RemotePill } from "./now-playing-remote-pill";
-import { QueueRow, useClearQueue, useUpNext } from "./queue";
+import { QueueList, useClearQueue, useUpNext } from "./queue";
 
 /** Translucent white fills on the always-dark Now Playing; `text` is white inside `.dark`. */
 const glassButton =
@@ -300,18 +300,14 @@ function UpNext() {
         <span className="px-3 pb-1.5 font-sans text-xs/xs font-medium tracking-mono text-text/55 uppercase">
           {source === null ? "Next up" : `From ${source}`}
         </span>
-        {next.length === 0 ? (
-          <p className="px-3 font-sans text-base/sm text-text/60">Nothing after this song.</p>
-        ) : (
-          next.map((entry) => (
-            <QueueRow
-              key={`${entry.index}-${entry.track.id}`}
-              track={entry.track}
-              index={entry.index}
-              tone="glass"
-            />
-          ))
-        )}
+        <QueueList
+          next={next}
+          tone="glass"
+          className="flex flex-col gap-1"
+          empty={
+            <p className="px-3 font-sans text-base/sm text-text/60">Nothing after this song.</p>
+          }
+        />
       </div>
     </div>
   );

@@ -4,7 +4,8 @@ import { useRun } from "@music/sdk/react";
 import { Tooltip } from "@music/ui/components/tooltip";
 import { cn } from "@music/ui/lib/utils";
 import { XIcon } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import type { ReactNode } from "react";
 
 import { Artwork, PlayingBars } from "@/components/library/artwork";
 import { useUi } from "@/components/shell/ui-state";
@@ -52,11 +53,14 @@ export function QueueRow({
   index,
   tone = "plain",
   current = false,
+  onRemove,
 }: {
   readonly track: Track;
   readonly index: number;
   readonly tone?: "plain" | "glass";
   readonly current?: boolean;
+  /** Called as the remove button is pressed, before the queue changes. */
+  readonly onRemove?: () => void;
 }) {
   const player = usePlayer();
   const glass = tone === "glass";
@@ -114,7 +118,11 @@ export function QueueRow({
             <button
               type="button"
               aria-label={`Remove ${track.title} from the queue`}
-              onClick={() => perform(player.removeFromQueue(index))}
+              data-queue-remove
+              onClick={() => {
+                onRemove?.();
+                perform(player.removeFromQueue(index));
+              }}
               className={cn(
                 "relative flex size-7 shrink-0 items-center justify-center rounded-full opacity-0 outline-none group-hover/queue:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50",
                 glass
@@ -127,6 +135,60 @@ export function QueueRow({
           </Tooltip>
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * The upcoming songs as queue rows, or `empty` when there are none. Removing a row moves focus to
+ * the row that takes its place, or to the new last row, instead of dropping it to the page
+ * (ADS-107); with no rows left, the list itself takes focus.
+ */
+export function QueueList({
+  next,
+  empty,
+  tone = "plain",
+  className,
+}: {
+  readonly next: UpNext["next"];
+  readonly empty: ReactNode;
+  readonly tone?: "plain" | "glass";
+  readonly className?: string;
+}) {
+  const list = useRef<HTMLDivElement>(null);
+  const removedAt = useRef<number | null>(null);
+  // Rows remount when the queue changes (their keys carry the queue position), so focus is placed
+  // once the list itself has changed, not on every render.
+  const signature = next.map((entry) => entry.track.id).join(" ");
+
+  useEffect(() => {
+    const position = removedAt.current;
+    const element = list.current;
+
+    if (position === null || element === null) return;
+
+    removedAt.current = null;
+
+    const buttons = element.querySelectorAll<HTMLElement>("[data-queue-remove]");
+
+    (buttons[Math.min(position, buttons.length - 1)] ?? element).focus();
+  }, [signature]);
+
+  return (
+    <div ref={list} tabIndex={-1} className={cn("outline-none", className)}>
+      {next.length === 0
+        ? empty
+        : next.map((entry, position) => (
+            <QueueRow
+              key={`${entry.index}-${entry.track.id}`}
+              track={entry.track}
+              index={entry.index}
+              tone={tone}
+              onRemove={() => {
+                removedAt.current = position;
+              }}
+            />
+          ))}
     </div>
   );
 }
@@ -192,19 +254,15 @@ export function QueuePanel() {
             </button>
           ) : null}
         </div>
-        {next.length === 0 ? (
-          <p className="px-2 py-1 font-sans text-sm/sm text-text-muted">
-            Nothing after this song. Use “Play next” or “Add to queue” on any song.
-          </p>
-        ) : (
-          next.map((entry) => (
-            <QueueRow
-              key={`${entry.index}-${entry.track.id}`}
-              track={entry.track}
-              index={entry.index}
-            />
-          ))
-        )}
+        <QueueList
+          next={next}
+          className="flex flex-col gap-0.5"
+          empty={
+            <p className="px-2 py-1 font-sans text-sm/sm text-text-muted">
+              Nothing after this song. Use “Play next” or “Add to queue” on any song.
+            </p>
+          }
+        />
       </div>
     </aside>
   );
