@@ -46,7 +46,7 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const { root, albums, dataDir, control, progress, scan, trackAt } = yield* setup;
         const summary = yield* scan;
 
-        expect(summary).toEqual({ files: 10, updated: 10, missing: 0, failed: 0 });
+        expect(summary).toEqual({ files: 10, updated: 10, moved: 0, missing: 0, failed: 0 });
         expect(yield* Ref.get(progress)).toMatchObject({ done: 10, total: 10 });
         const tracks = yield* control.tracks;
 
@@ -131,16 +131,104 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const path = "Aurora Tones/Night Drive/02 Overpass.mp3";
 
         yield* scan;
-        expect(yield* scan).toEqual({ files: 10, updated: 0, missing: 0, failed: 0 });
+        expect(yield* scan).toEqual({ files: 10, updated: 0, moved: 0, missing: 0, failed: 0 });
 
         const bytes = yield* Files.readWholeFile(join(root, path));
         yield* Files.removePath(join(root, path));
-        expect(yield* scan).toEqual({ files: 9, updated: 0, missing: 1, failed: 0 });
+        expect(yield* scan).toEqual({ files: 9, updated: 0, moved: 0, missing: 1, failed: 0 });
         expect((yield* trackAt(path))?.missing).toBe(true);
 
         yield* Files.writeFileAtomic(join(root, path), bytes, "restore");
-        expect(yield* scan).toEqual({ files: 10, updated: 1, missing: 0, failed: 0 });
+        expect(yield* scan).toEqual({ files: 10, updated: 1, moved: 0, missing: 0, failed: 0 });
         expect((yield* trackAt(path))?.missing).toBe(false);
+      }),
+    ));
+
+  it("keeps the identity of songs that were renamed or moved to another folder", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root, scan, trackAt } = yield* setup;
+        const renamed = "Aurora Tones/First Light/01 Dawn.flac";
+        const album = "Aurora Tones/Night Drive";
+
+        yield* scan;
+        const dawn = yield* trackAt(renamed);
+        const neon = yield* trackAt(`${album}/01 Neon.mp3`);
+        const overpass = yield* trackAt(`${album}/02 Overpass.mp3`);
+
+        yield* Files.renameFile(
+          join(root, renamed),
+          join(root, "Aurora Tones/First Light/Dawn.flac"),
+        );
+        yield* Files.makeDirectory(join(root, "Moved"));
+        yield* Files.renameFile(join(root, album), join(root, "Moved/Night Drive"));
+
+        // Dawn, and the three songs of Night Drive.
+        expect(yield* scan).toEqual({ files: 10, updated: 0, moved: 4, missing: 0, failed: 0 });
+        expect((yield* trackAt("Aurora Tones/First Light/Dawn.flac"))?.id).toBe(dawn?.id);
+        expect((yield* trackAt("Moved/Night Drive/01 Neon.mp3"))?.id).toBe(neon?.id);
+        expect((yield* trackAt("Moved/Night Drive/02 Overpass.mp3"))?.id).toBe(overpass?.id);
+        expect(yield* trackAt(renamed)).toBeUndefined();
+        expect(yield* scan).toEqual({ files: 10, updated: 0, moved: 0, missing: 0, failed: 0 });
+      }),
+    ));
+
+  it("keeps the identity of a renamed untagged song whose title comes from its name", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root, scan, trackAt } = yield* setup;
+
+        yield* runTool("ffmpeg", [
+          "-v",
+          "error",
+          "-f",
+          "lavfi",
+          "-i",
+          "sine=frequency=330:duration=2",
+          "-map_metadata",
+          "-1",
+          "-c:a",
+          "libmp3lame",
+          join(root, "take one.mp3"),
+        ]);
+
+        yield* scan;
+        const before = yield* trackAt("take one.mp3");
+
+        yield* Files.renameFile(join(root, "take one.mp3"), join(root, "final take.mp3"));
+
+        expect(yield* scan).toMatchObject({ moved: 1, missing: 0 });
+        expect(yield* trackAt("final take.mp3")).toMatchObject({
+          id: before?.id,
+          missing: false,
+          scanned: { title: "final take" },
+        });
+      }),
+    ));
+
+  it("treats a copy as a new song, and does not guess between identical songs", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root, control, scan, trackAt } = yield* setup;
+        const dawn = "Aurora Tones/First Light/01 Dawn.flac";
+
+        yield* Files.copyTree(join(root, dawn), join(root, "Dawn copy.flac"));
+        yield* Files.copyTree(join(root, dawn), join(root, "Dawn again.flac"));
+        yield* scan;
+        const tracks = (yield* control.tracks).length;
+
+        // The original stays, so its copy is a song of its own.
+        yield* Files.copyTree(join(root, dawn), join(root, "Third Dawn.flac"));
+        expect(yield* scan).toMatchObject({ updated: 1, moved: 0 });
+        expect(yield* control.tracks).toHaveLength(tracks + 1);
+
+        // Two identical songs gone and one found: it could be either, so it is new.
+        yield* Files.removePath(join(root, "Dawn copy.flac"));
+        yield* Files.removePath(join(root, "Dawn again.flac"));
+        yield* Files.removePath(join(root, "Third Dawn.flac"));
+        yield* Files.copyTree(join(root, dawn), join(root, "Last Dawn.flac"));
+        expect(yield* scan).toMatchObject({ updated: 1, moved: 0, missing: 3 });
+        expect((yield* trackAt("Dawn copy.flac"))?.missing).toBe(true);
       }),
     ));
 
@@ -169,7 +257,7 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           new TextEncoder().encode("not audio"),
           "x",
         );
-        expect(yield* scan).toEqual({ files: 12, updated: 11, missing: 0, failed: 1 });
+        expect(yield* scan).toEqual({ files: 12, updated: 11, moved: 0, missing: 0, failed: 1 });
 
         expect((yield* trackAt("Loose/untitled take.mp3"))?.scanned).toMatchObject({
           title: "untitled take",
@@ -202,7 +290,7 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         yield* Files.copyTree(join(folderArt, "01 Brushes.m4a"), join(root, "Bare", "song.m4a"));
         yield* Files.makeSymlink(join(outside, "cover.jpg"), join(root, "Bare", "cover.jpg"));
 
-        expect(yield* scan).toEqual({ files: 12, updated: 12, missing: 0, failed: 0 });
+        expect(yield* scan).toEqual({ files: 12, updated: 12, moved: 0, missing: 0, failed: 0 });
 
         const paths = (yield* control.tracks).map((track) => track.scanned.path);
 

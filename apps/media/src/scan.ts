@@ -1,8 +1,10 @@
 /**
  * Scans one library folder into Convex: list audio files, skip the ones Convex already has with
  * the same size and modification time (and the same folder artwork beside them), read tags for
- * the rest, upsert them in batches, and mark files that disappeared as missing. Every write is
- * keyed by library and relative path, so running a scan twice is safe.
+ * the rest, upsert them in batches, and mark files that disappeared as missing. A new file that
+ * is a gone one moved or renamed (see `moved-files.ts`) moves that track instead, keeping its
+ * likes, plays, and playlist entries. Every write is keyed by library and relative path, so
+ * running a scan twice is safe.
  */
 import { basename, dirname, join } from "node:path";
 
@@ -19,8 +21,10 @@ import {
   type JobProgress,
   MediaBackend,
   type ScannedTrack,
+  type TrackMove,
 } from "./media-backend.ts";
 import { MediaConfig } from "./media-config.ts";
+import { movedFileMatcher } from "./moved-files.ts";
 import type { WalkedFile } from "./platform/node-files.ts";
 import { readTrackTags } from "./tag-reader.ts";
 
@@ -79,18 +83,20 @@ export interface ScanTarget {
 /** Counts from a finished scan. */
 export interface ScanSummary {
   readonly files: number;
+  /** New and changed files read and stored, besides the moved ones. */
   readonly updated: number;
+  /** Files found at a new path whose track moved with them. */
+  readonly moved: number;
   readonly missing: number;
   readonly failed: number;
 }
 
 /** A one-line description of a scan result for the jobs list. */
 export const describeScan = (summary: ScanSummary): string => {
-  const parts = [
-    `${summary.files} files`,
-    `${summary.updated} updated`,
-    `${summary.missing} missing`,
-  ];
+  const parts = [`${summary.files} files`, `${summary.updated} updated`];
+
+  if (summary.moved > 0) parts.push(`${summary.moved} moved`);
+  parts.push(`${summary.missing} missing`);
 
   if (summary.failed > 0) parts.push(`${summary.failed} unreadable`);
 
@@ -236,16 +242,39 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
       Effect.annotateLogs({ libraryId: library.id }),
     );
 
+  const seen = new Set(files.map((file) => file.relativePath));
+
+  const vanished = known
+    .values()
+    .filter((file) => !seen.has(file.path))
+    .toArray();
+
+  const movedFrom = movedFileMatcher(vanished);
+  const moved = new Set<string>();
+
   let done = 0;
   let failed = 0;
 
   for (const batch of chunks(changed, UPSERT_BATCH)) {
     const read = yield* Effect.forEach(batch, readOne, { concurrency: TAG_CONCURRENCY });
     const tracks = read.flatMap((track) => (Option.isSome(track) ? [track.value] : []));
+    const moves: Array<TrackMove> = [];
+    const upserts: Array<ScannedTrack> = [];
+
+    for (const track of tracks) {
+      const from = known.has(track.path) ? undefined : movedFrom(track);
+
+      if (from === undefined) upserts.push(track);
+      else moves.push({ from, track });
+    }
 
     failed += read.length - tracks.length;
 
-    if (tracks.length > 0) yield* backend.upsertTracks(library.id, tracks);
+    if (upserts.length > 0) yield* backend.upsertTracks(library.id, upserts);
+
+    if (moves.length > 0) yield* backend.moveTracks(library.id, moves);
+
+    for (const { from } of moves) moved.add(from);
     done += batch.length;
     yield* Ref.set(progress, {
       done,
@@ -254,19 +283,16 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
     });
   }
 
-  const seen = new Set(files.map((file) => file.relativePath));
-
-  const gone = known
-    .values()
-    .filter((file) => !file.missing && !seen.has(file.path))
-    .map((file) => file.path)
-    .toArray();
+  const gone = vanished
+    .filter((file) => !file.missing && !moved.has(file.path))
+    .map((file) => file.path);
 
   for (const batch of chunks(gone, MISSING_BATCH)) yield* backend.markMissing(library.id, batch);
 
   const summary: ScanSummary = {
     files: files.length,
-    updated: changed.length - failed,
+    updated: changed.length - failed - moved.size,
+    moved: moved.size,
     missing: gone.length,
     failed,
   };

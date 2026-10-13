@@ -56,6 +56,11 @@ const Fingerprint = Schema.Struct({
   missing: Schema.Boolean,
   /** The folder artwork the last scan saw beside the file (see `ScannedTrack.folderArt`). */
   folderArt: Schema.optional(Schema.String),
+  /** Length and tags, for telling a moved file from a new one (see `moved-files.ts`). */
+  durationMs: Schema.optional(Schema.Finite),
+  title: Schema.optional(Schema.String),
+  artist: Schema.optional(Schema.String),
+  album: Schema.optional(Schema.String),
 });
 
 /** What Convex knows about one file, for skipping unchanged files. */
@@ -107,6 +112,12 @@ export interface ScannedTrack {
    * or not the file has a picture of its own. A later scan reads the file again when it changes.
    */
   readonly folderArt?: string | undefined;
+}
+
+/** A file found at `track.path` that is the known track at `from`, moved or renamed. */
+export interface TrackMove {
+  readonly from: string;
+  readonly track: ScannedTrack;
 }
 
 /** Progress of a running job. */
@@ -166,6 +177,11 @@ const functions = {
     Secret & { libraryId: string; tracks: ReadonlyArray<ScannedTrack> },
     unknown
   >("media:upsertTracks"),
+  moveTracks: makeFunctionReference<
+    "mutation",
+    Secret & { libraryId: string; moves: ReadonlyArray<TrackMove> },
+    unknown
+  >("media:moveTracks"),
   markMissing: makeFunctionReference<
     "mutation",
     Secret & { libraryId: string; paths: ReadonlyArray<string> },
@@ -209,6 +225,14 @@ export interface Interface {
   readonly upsertTracks: (
     libraryId: LibraryId,
     tracks: ReadonlyArray<ScannedTrack>,
+  ) => Effect.Effect<void, BackendError>;
+  /**
+   * Moves at most 100 known tracks to the paths their files were found at, keeping their IDs. A
+   * move whose source is gone or whose new path is taken is stored as a new file instead.
+   */
+  readonly moveTracks: (
+    libraryId: LibraryId,
+    moves: ReadonlyArray<TrackMove>,
   ) => Effect.Effect<void, BackendError>;
   readonly markMissing: (
     libraryId: LibraryId,
@@ -356,6 +380,15 @@ const make = Effect.gen(function* () {
     ) {
       yield* call("upsertTracks", () =>
         client.mutation(functions.upsertTracks, { secret: secret(), libraryId, tracks }),
+      );
+    }),
+
+    moveTracks: Effect.fn("MediaBackend.moveTracks")(function* (
+      libraryId: LibraryId,
+      moves: ReadonlyArray<TrackMove>,
+    ) {
+      yield* call("moveTracks", () =>
+        client.mutation(functions.moveTracks, { secret: secret(), libraryId, moves }),
       );
     }),
 

@@ -303,6 +303,41 @@ export const upsertScannedTrack = async (
   await adjustAlbum(ctx, album._id, 1, scanned.durationMs);
 };
 
+/**
+ * Moves the track at `from` to the scanned file's path and updates it like `upsertScannedTrack`,
+ * keeping its ID, so its likes, plays, playlist entries, and queue places follow the file. A
+ * missing track at `from` comes back. When there is no track at `from`, or another track already
+ * has the new path, the file is upserted as usual and `from` is marked missing instead.
+ *
+ * @returns Whether the track at `from` moved.
+ */
+export const moveScannedTrack = async (
+  ctx: MutationCtx,
+  libraryId: Id<"libraries">,
+  from: string,
+  scanned: ScannedTrack,
+): Promise<boolean> => {
+  const byPath = (path: string) =>
+    ctx.db
+      .query("tracks")
+      .withIndex("by_library_path", (q) => q.eq("libraryId", libraryId).eq("path", path))
+      .unique();
+
+  const [source, occupied] = await Promise.all([byPath(from), byPath(scanned.path)]);
+
+  if (source === null || occupied !== null || from === scanned.path) {
+    if (from !== scanned.path) await markTrackMissing(ctx, libraryId, from);
+    await upsertScannedTrack(ctx, libraryId, scanned);
+
+    return false;
+  }
+
+  await ctx.db.patch(source._id, { path: scanned.path });
+  await upsertScannedTrack(ctx, libraryId, scanned);
+
+  return true;
+};
+
 /** Hides a file that disappeared from disk. Likes and playlists keep pointing at it. */
 export const markTrackMissing = async (
   ctx: MutationCtx,

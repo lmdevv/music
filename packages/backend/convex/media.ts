@@ -6,7 +6,7 @@ import { v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
 import { enqueueScan } from "./handlers/admin";
-import { markTrackMissing, upsertScannedTrack } from "./lib/catalog";
+import { markTrackMissing, moveScannedTrack, upsertScannedTrack } from "./lib/catalog";
 import { inOrder } from "./lib/sequence";
 import { requireService } from "./lib/service";
 
@@ -164,6 +164,11 @@ export const fingerprints = query({
         mtimeMs: track.mtimeMs,
         missing: track.missing,
         folderArt: track.folderArt,
+        // What a scan matches a new file against to tell a moved file from a new one.
+        durationMs: track.durationMs,
+        title: track.title,
+        artist: track.artistName,
+        album: track.albumTitle,
       })),
       cursor: page.continueCursor,
       done: page.isDone,
@@ -186,6 +191,31 @@ export const upsertTracks = mutation({
     await inOrder(tracks, (track) => upsertScannedTrack(ctx, libraryId, track));
 
     return { upserted: tracks.length };
+  },
+});
+
+/**
+ * Moves tracks whose files a scan found at new paths (renamed, or moved within the library),
+ * keeping each track's ID and so its likes, plays, and playlist entries. Keep batches at 100
+ * moves or fewer.
+ */
+export const moveTracks = mutation({
+  args: {
+    secret: v.string(),
+    libraryId: v.id("libraries"),
+    moves: v.array(v.object({ from: v.string(), track: scannedTrack })),
+  },
+  handler: async (ctx, { secret, libraryId, moves }) => {
+    requireService(secret);
+
+    if ((await ctx.db.get(libraryId)) === null) return { moved: 0 };
+    let moved = 0;
+
+    await inOrder(moves, async ({ from, track }) => {
+      if (await moveScannedTrack(ctx, libraryId, from, track)) moved += 1;
+    });
+
+    return { moved };
   },
 });
 

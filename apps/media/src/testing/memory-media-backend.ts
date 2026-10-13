@@ -15,6 +15,7 @@ import {
   MediaBackend,
   type PendingJob,
   type ScannedTrack,
+  type TrackMove,
   type TrackSource,
 } from "../media-backend.ts";
 
@@ -124,6 +125,54 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
 
       const changes = SubscriptionRef.changes(state);
 
+      const trackAt = (
+        libraryId: LibraryId,
+        path: string,
+      ): Effect.Effect<MemoryTrack | undefined> =>
+        SubscriptionRef.get(state).pipe(
+          Effect.map((current) =>
+            current.tracks.find(
+              (candidate) => candidate.libraryId === libraryId && candidate.scanned.path === path,
+            ),
+          ),
+        );
+
+      const store = (track: MemoryTrack): Effect.Effect<void> =>
+        SubscriptionRef.update(state, (latest) => ({
+          ...latest,
+          tracks: latest.tracks.some((candidate) => candidate.id === track.id)
+            ? latest.tracks.map((candidate) => (candidate.id === track.id ? track : candidate))
+            : [...latest.tracks, track],
+        }));
+
+      const upsertTracks = Effect.fn("MemoryMediaBackend.upsertTracks")(function* (
+        libraryId: LibraryId,
+        scanned: ReadonlyArray<ScannedTrack>,
+      ) {
+        for (const track of scanned) {
+          const existing = yield* trackAt(libraryId, track.path);
+          const id = existing?.id ?? TrackId.make(yield* allocate("track"));
+
+          yield* store({ id, libraryId, scanned: track, missing: false });
+        }
+      });
+
+      const markMissing = Effect.fn("MemoryMediaBackend.markMissing")(function* (
+        libraryId: LibraryId,
+        paths: ReadonlyArray<string>,
+      ) {
+        const gone = new Set(paths);
+
+        yield* SubscriptionRef.update(state, (current) => ({
+          ...current,
+          tracks: current.tracks.map((track) =>
+            track.libraryId === libraryId && gone.has(track.scanned.path)
+              ? { ...track, missing: true }
+              : track,
+          ),
+        }));
+      });
+
       const backend = MediaBackend.of({
         pendingJobs: changes.pipe(
           Stream.map((current): ReadonlyArray<PendingJob> =>
@@ -199,6 +248,10 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
               mtimeMs: track.scanned.mtimeMs,
               missing: track.missing,
               folderArt: track.scanned.folderArt,
+              durationMs: track.scanned.durationMs,
+              title: track.scanned.title,
+              artist: track.scanned.artist,
+              album: track.scanned.album,
             }));
 
           const page: FingerprintPage = {
@@ -210,46 +263,26 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
           return page;
         }),
 
-        upsertTracks: Effect.fn("MemoryMediaBackend.upsertTracks")(function* (
+        upsertTracks,
+
+        moveTracks: Effect.fn("MemoryMediaBackend.moveTracks")(function* (
           libraryId: LibraryId,
-          scanned: ReadonlyArray<ScannedTrack>,
+          moves: ReadonlyArray<TrackMove>,
         ) {
-          for (const track of scanned) {
-            const current = yield* SubscriptionRef.get(state);
+          for (const { from, track } of moves) {
+            const source = yield* trackAt(libraryId, from);
+            const occupied = yield* trackAt(libraryId, track.path);
 
-            const existing = current.tracks.find(
-              (candidate) =>
-                candidate.libraryId === libraryId && candidate.scanned.path === track.path,
-            );
-
-            const id = existing?.id ?? TrackId.make(yield* allocate("track"));
-            const stored: MemoryTrack = { id, libraryId, scanned: track, missing: false };
-
-            yield* SubscriptionRef.update(state, (latest) => ({
-              ...latest,
-              tracks:
-                existing === undefined
-                  ? [...latest.tracks, stored]
-                  : latest.tracks.map((candidate) => (candidate.id === id ? stored : candidate)),
-            }));
+            if (source === undefined || occupied !== undefined || from === track.path) {
+              if (from !== track.path) yield* markMissing(libraryId, [from]);
+              yield* upsertTracks(libraryId, [track]);
+            } else {
+              yield* store({ id: source.id, libraryId, scanned: track, missing: false });
+            }
           }
         }),
 
-        markMissing: Effect.fn("MemoryMediaBackend.markMissing")(function* (
-          libraryId: LibraryId,
-          paths: ReadonlyArray<string>,
-        ) {
-          const gone = new Set(paths);
-
-          yield* SubscriptionRef.update(state, (current) => ({
-            ...current,
-            tracks: current.tracks.map((track) =>
-              track.libraryId === libraryId && gone.has(track.scanned.path)
-                ? { ...track, missing: true }
-                : track,
-            ),
-          }));
-        }),
+        markMissing,
 
         trackSource: Effect.fn("MemoryMediaBackend.trackSource")(function* (trackId: TrackId) {
           const current = yield* SubscriptionRef.get(state);
