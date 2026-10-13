@@ -3,17 +3,32 @@
 # supervised by s6-overlay. Build from the repo root:
 #   docker build -f deploy/docker/Dockerfile -t music .
 
-ARG NODE_IMAGE=node:24-trixie-slim
+# Base images are pinned by the digest of their multi-arch index; the tag each digest was taken
+# from is in the comment above it. Update both together.
+# node:24-trixie-slim
+ARG NODE_IMAGE=node:24-trixie-slim@sha256:173f125896c3b47ddf056734c7ea789d04595a6a08769a8f78e0df642781fb66
+# ghcr.io/get-convex/convex-backend (scripts/dev-backend.sh reads this line to run the same one)
 ARG CONVEX_IMAGE=ghcr.io/get-convex/convex-backend@sha256:d715e9ec088784407ca4ba2d3db592702cd328d02c76cdca3852c0018f2a76b4
-ARG CADDY_IMAGE=caddy:2.11
+# caddy:2.11
+ARG CADDY_IMAGE=caddy:2.11@sha256:f2a1290d0463aad60660d4ec134943f183ee2a5f6c3eb7bf32dd984f2f020772
 
 FROM ${CONVEX_IMAGE} AS convex
 
 FROM ${CADDY_IMAGE} AS caddy
 
+# The LD_PRELOAD shim that keeps the Convex instance secret off command lines (see its source).
+# It is built for the target CPU, so arm64 builds compile it under emulation; it is one small file.
+FROM ${NODE_IMAGE} AS argv-secret
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends gcc libc6-dev \
+ && rm -rf /var/lib/apt/lists/*
+COPY deploy/docker/argv-secret.c /src/
+RUN gcc -shared -fPIC -O2 -Wall -Wextra -Werror -o /argv-secret.so /src/argv-secret.c
+
 # JavaScript builds are architecture-independent, so build on the native platform and install
 # native optional binaries (esbuild, used by `convex deploy` at runtime) for both target CPUs.
 FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS build
+ARG CONVEX_IMAGE
 ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH CI=1
 RUN corepack enable
 WORKDIR /src
@@ -26,42 +41,77 @@ RUN pnpm --config.verify-deps-before-run=false --filter web build \
 RUN pnpm --filter @music/backend deploy --prod --legacy /out/backend \
  && pnpm --filter @music/media deploy --prod --legacy /out/media \
  && cp -r apps/web/dist /out/web
+# The build identity: a hash of everything that decides what init deploys to Convex, and of the
+# Convex backend itself. Init exports a backup before deploying whenever it differs from the one
+# recorded in /data, so a change to functions, schema, or migrations is backed up first, on :main
+# as much as on a release. It errs towards backing up: any lockfile change also changes it.
+RUN { printf '%s\n' "$CONVEX_IMAGE"; \
+      find packages/backend/convex packages/backend/package.json packages/commands pnpm-lock.yaml \
+        -type f -not -path '*/node_modules/*' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum; \
+    } | sha256sum | cut -c1-16 > /out/build-id
 
 FROM ${NODE_IMAGE}
 ARG TARGETARCH
 ARG S6_OVERLAY_VERSION=3.2.1.0
+# SHA-256 of the s6-overlay release tarballs, from the release's .sha256 files.
+ARG S6_OVERLAY_NOARCH_SHA256=42e038a9a00fc0fef70bf0bc42f625a9c14f8ecdfe77d4ad93281edf717e10c5
+ARG S6_OVERLAY_X86_64_SHA256=8bcbc2cada58426f976b159dcc4e06cbb1454d5f39252b3bb0c778ccf71c9435
+ARG S6_OVERLAY_AARCH64_SHA256=c8fd6b1f0380d399422fc986a1e6799f6a287e2cfa24813ad0b6a4fb4fa755cc
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg ca-certificates xz-utils curl \
  && rm -rf /var/lib/apt/lists/*
-# The media service, which parses every file in the library with ffmpeg, runs as this user
-# instead of root. Init moves it to PUID/PGID at boot. The base image's `node` user held uid 1000.
+# Every service runs as its own unprivileged user. The media service, which parses every file in
+# the library with ffmpeg, runs as `music`; init moves it to PUID/PGID at boot. The base image's
+# `node` user held uid 1000. Convex and Caddy get fixed system ids that PUID/PGID may not take.
 RUN userdel --remove node \
  && groupadd --gid 1000 music \
  && useradd --uid 1000 --gid music --no-create-home --home-dir /nonexistent \
-      --shell /usr/sbin/nologin music
+      --shell /usr/sbin/nologin music \
+ && groupadd --system --gid 901 convex \
+ && useradd --system --uid 901 --gid convex --no-create-home --home-dir /nonexistent \
+      --shell /usr/sbin/nologin convex \
+ && groupadd --system --gid 902 caddy \
+ && useradd --system --uid 902 --gid caddy --no-create-home --home-dir /nonexistent \
+      --shell /usr/sbin/nologin caddy
 RUN set -eux; \
-    case "${TARGETARCH:-amd64}" in amd64) s6arch=x86_64 ;; arm64) s6arch=aarch64 ;; *) echo "unsupported arch ${TARGETARCH}"; exit 1 ;; esac; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) s6arch=x86_64; s6sum="$S6_OVERLAY_X86_64_SHA256" ;; \
+      arm64) s6arch=aarch64; s6sum="$S6_OVERLAY_AARCH64_SHA256" ;; \
+      *) echo "unsupported arch ${TARGETARCH}"; exit 1 ;; \
+    esac; \
     base="https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}"; \
-    curl -fsSL "$base/s6-overlay-noarch.tar.xz" | tar -C / -Jxp; \
-    curl -fsSL "$base/s6-overlay-${s6arch}.tar.xz" | tar -C / -Jxp
+    cd /tmp; \
+    curl -fsSLO "$base/s6-overlay-noarch.tar.xz"; \
+    curl -fsSLO "$base/s6-overlay-${s6arch}.tar.xz"; \
+    printf '%s  %s\n' "$S6_OVERLAY_NOARCH_SHA256" s6-overlay-noarch.tar.xz \
+      "$s6sum" "s6-overlay-${s6arch}.tar.xz" | sha256sum -c -; \
+    tar -C / -Jxpf s6-overlay-noarch.tar.xz; \
+    tar -C / -Jxpf "s6-overlay-${s6arch}.tar.xz"; \
+    rm s6-overlay-*.tar.xz
 
-COPY --from=convex /convex/convex-local-backend /convex/generate_key /app/convex/
+# The Convex image ships its binaries executable by root only; the backend runs as `convex`.
+COPY --from=convex --chmod=755 /convex/convex-local-backend /convex/generate_key /app/convex/
+COPY --from=argv-secret --chmod=755 /argv-secret.so /app/convex/argv-secret.so
 COPY --from=caddy /usr/bin/caddy /usr/bin/caddy
 COPY --from=build /out/backend /app/backend
 COPY --from=build /out/media /app/media
 COPY --from=build /out/web /app/web
+COPY --from=build /out/build-id /app/build-id
 COPY deploy/docker/rootfs/ /
 
 ENV PUBLIC_URL=http://localhost:8080 \
     MUSIC_DATA=/data \
     PUID=1000 \
     PGID=1000 \
+    BACKUP_KEEP=5 \
     S6_CMD_WAIT_FOR_SERVICES_MAXTIME=0 \
     S6_BEHAVIOUR_IF_STAGE2_FAILS=2 \
     S6_VERBOSITY=1
 
 VOLUME ["/data"]
 EXPOSE 8080
+# /healthz is the media service's health check through Caddy, and that check queries Convex, so
+# the container is healthy only while Caddy, the media service, and Convex all answer.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=120s \
-  CMD curl -fsS http://127.0.0.1:8080/healthz || exit 1
+  CMD curl -fsS http://127.0.0.1:8080/healthz >/dev/null || exit 1
 ENTRYPOINT ["/init"]
