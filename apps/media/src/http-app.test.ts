@@ -155,6 +155,7 @@ const setupWith = Effect.fn("Test.setup")(function* (ffmpegPath: string) {
     dataDir,
     scan,
     libraryId,
+    control,
     backend,
     trackId,
     findTrackId,
@@ -208,6 +209,26 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(head.status).toBe(200);
         expect(head.headers.get("Content-Length")).toBe(String(file.length));
         expect((yield* bytes(head)).length).toBe(0);
+      }),
+    ));
+
+  it("plays from a library whose folder is the file system root", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root, control, backend, findTrackId, request } = yield* setup;
+        const dawn = (yield* control.tracks).find((track) => track.scanned.path === DAWN);
+
+        if (dawn === undefined) expect.unreachable("the fixture scan found no Dawn");
+        const everything = yield* control.addLibrary("/");
+        const fromRoot = join(root, DAWN).slice(1);
+
+        yield* backend.upsertTracks(everything, [{ ...dawn.scanned, path: fromRoot }]);
+        const response = yield* request(yield* streamUrl(yield* findTrackId(fromRoot), "original"));
+
+        expect(response.status).toBe(200);
+        expect(yield* bytes(response)).toEqual(
+          new Uint8Array(yield* Files.readWholeFile(join(root, DAWN))),
+        );
       }),
     ));
 
