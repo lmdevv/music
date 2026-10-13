@@ -107,6 +107,9 @@ const STUCK_AHEAD_SECONDS = 1;
 /** Pickups of a cut-off stream in a row, without a successful append, before the song fails. */
 const MAX_RECOVERIES = 3;
 
+/** The media service's answer to a signed URL it refuses, such as an expired one. */
+const FORBIDDEN = 403;
+
 /** A playhead this close to a seek target is at it. */
 const TARGET_TOLERANCE = 0.01;
 
@@ -606,6 +609,10 @@ export class MseEngine implements PlayerEngine {
       throw new EngineFailure("network", error instanceof Error ? error.message : String(error));
     }
 
+    if (response.status === FORBIDDEN) {
+      throw new EngineFailure("expired", "The stream's signed URL has expired");
+    }
+
     const timing = parseStreamTiming((name) => response.headers.get(name));
 
     if (!response.ok || timing === null || timing.estimated) {
@@ -1008,6 +1015,12 @@ export class MseEngine implements PlayerEngine {
       await delay(busy, song.abort.signal);
 
       return;
+    }
+
+    if (response.status === FORBIDDEN) {
+      void response.body?.cancel().catch(() => undefined);
+
+      throw new EngineFailure("expired", "The stream's signed URL has expired");
     }
 
     if (!response.ok || response.body === null) {

@@ -370,6 +370,32 @@ test.describe("MseEngine", () => {
     expect(await ofType(page, "error")).toEqual([]);
   });
 
+  test("reports a refused stream URL as expired, not as a format it cannot play", async ({
+    page,
+    request,
+  }) => {
+    const song = "song-1.flac?p=fmp4-flac";
+
+    await warmCache(request, [song]);
+    await page.evaluate((file) => window.harness?.load(file, 0, true, 90_000), song);
+    await waitForEvent(page, "playing");
+
+    // Hours later, the signed URL has expired; a seek outside the buffer fetches again.
+    expect((await request.post(`${media}/control/expire-urls`)).ok()).toBe(true);
+
+    try {
+      await page.evaluate(() => {
+        window.harness?.engine.seek(80_000);
+      });
+      await waitForEvent(page, "error");
+      expect(
+        (await ofType(page, "error")).map((event) => event.type === "error" && event.reason),
+      ).toEqual(["expired"]);
+    } finally {
+      expect((await request.post(`${media}/control/renew-urls`)).ok()).toBe(true);
+    }
+  });
+
   test("seeks behind and ahead of a song that is still being transcoded", async ({
     page,
     request,
