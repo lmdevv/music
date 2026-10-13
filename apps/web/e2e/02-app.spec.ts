@@ -85,6 +85,63 @@ test("create a playlist and add a song to it", async ({ page }) => {
   await expect(page.getByRole("table", { name: `Songs in ${name}` })).toContainText("Glory Box");
 });
 
+test("a playlist deleted in another session shows that, and the player keeps going", async ({
+  page,
+  browser,
+}) => {
+  const name = unique("Doomed");
+
+  await signIn(page);
+  await page.goto("/albums");
+  await page.getByRole("link", { name: "Blue Lines" }).first().click();
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  const bar = page.getByRole("region", { name: "Player" });
+  await expect(bar.getByRole("button", { name: "Safe From Harm", exact: true })).toBeVisible();
+  await expect(bar.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "New playlist" }).click();
+  await page.getByLabel("Name").fill(name);
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+
+  const other = await browser.newContext();
+  const elsewhere = await other.newPage();
+  await signIn(elsewhere);
+  await elsewhere.getByRole("navigation", { name: "Library" }).getByRole("link", { name }).click();
+  await elsewhere.getByRole("button", { name: `More actions for ${name}` }).click();
+  await elsewhere.getByRole("menuitem", { name: "Delete playlist…" }).click();
+  await elsewhere.getByRole("button", { name: "Delete playlist" }).click();
+  await expect(elsewhere).toHaveURL(/\/playlists$/);
+  await other.close();
+
+  await expect(page.getByRole("heading", { name: "This playlist was deleted" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Library" })).toBeVisible();
+  await expect(bar.getByRole("button", { name: "Safe From Harm", exact: true })).toBeVisible();
+  await expect(bar.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+
+  await page.getByRole("link", { name: "Back to playlists" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Playlists" })).toBeVisible();
+  await bar.getByRole("button", { name: "Pause", exact: true }).click();
+});
+
+test("links to missing screens show a not-found state inside the app", async ({ page }) => {
+  await signIn(page);
+
+  await page.goto("/albums/not-an-album");
+  await expect(
+    page.getByRole("heading", { name: "This album isn't in your library anymore" }),
+  ).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Library" })).toBeVisible();
+  await page.getByRole("link", { name: "Back to albums" }).click();
+  await expect(page).toHaveURL(/\/albums$/);
+
+  await page.goto("/nowhere/at-all");
+  await expect(page.getByRole("heading", { name: "There's nothing here" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Library" })).toBeVisible();
+  await page.getByRole("link", { name: "Go to Home" }).click();
+  await expect(page).toHaveURL(/\/$/);
+});
+
 test("like a song and find it in Liked songs", async ({ page }) => {
   await signIn(page);
   await page.goto("/albums");

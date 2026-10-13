@@ -52,6 +52,10 @@ const decodeCreated = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.Struct({ libraryId: LibraryId, jobId: JobId })),
 );
 
+const decodeCreatedPlaylist = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ playlistId: Schema.String })),
+);
+
 const openFirstAlbum = async (page: Page): Promise<string> => {
   await page
     .getByRole("navigation", { name: "Library" })
@@ -189,6 +193,40 @@ test("an API key drives the CLI, and the CLI controls the browser's playback", a
   cli(apiKey, ["resume"]);
   await expect(bar.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
   await expectAudioPast(page, 1);
+});
+
+test("a playlist deleted from the CLI while open shows its deleted state and the audio plays on", async ({
+  page,
+}) => {
+  await signIn(page);
+  await openFirstAlbum(page);
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+  await expectAudioPast(page, 1);
+
+  const created = decodeCreatedPlaylist(cli(apiKey, ["playlists", "create", "Doomed", "--json"]));
+  // Navigate inside the app: a page load would stop the audio this test is about.
+  await page
+    .getByRole("navigation", { name: "Library" })
+    .getByRole("link", { name: /Doomed/ })
+    .click();
+  await expect(page.getByRole("heading", { level: 1, name: "Doomed" })).toBeVisible();
+
+  cli(apiKey, ["playlists", "delete", created.playlistId]);
+
+  await expect(page.getByRole("heading", { name: "This playlist was deleted" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Library" })).toBeVisible();
+  const bar = page.getByRole("region", { name: "Player" });
+  await expect(bar.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+
+  const before = await page.evaluate(() =>
+    Math.max(0, ...[...(window.musicTestMedia ?? [])].map((element) => element.currentTime)),
+  );
+
+  await expectAudioPast(page, before + 1);
+
+  await page.getByRole("link", { name: "Back to playlists" }).click();
+  await expect(page).toHaveURL(/\/playlists$/);
+  await expect(page.getByRole("link", { name: /Doomed/ })).toHaveCount(0);
 });
 
 test("playback moves to a second browser and the first one stops", async ({ page, browser }) => {

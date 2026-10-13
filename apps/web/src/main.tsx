@@ -8,6 +8,7 @@ import { StrictMode } from "react";
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 
+import { PageNotFound, RouteError, isNotFoundFailure } from "./components/route-error";
 import { resolveConvexUrl } from "./config";
 import { parseSearch, stringifySearch } from "./lib/search-params";
 import { routeTree } from "./routeTree.gen";
@@ -17,6 +18,10 @@ const convex = new ConvexReactClient(resolveConvexUrl());
 const router = createRouter({
   routeTree,
   defaultPreload: "intent",
+  // Every route gets its own boundaries, so a failing or missing screen under `/_app` renders inside
+  // the shell and leaves the player (and its audio) mounted.
+  defaultErrorComponent: RouteError,
+  defaultNotFoundComponent: PageNotFound,
   scrollRestoration: true,
   // Search values stay plain strings; each route parses its own with a schema.
   parseSearch,
@@ -36,7 +41,14 @@ const rootElement = document.getElementById("app");
 
 if (rootElement === null) throw new Error("The #app element is missing from index.html");
 
-createRoot(rootElement).render(
+createRoot(rootElement, {
+  // A detail screen whose item is gone shows its own "deleted" state: expected, not a fault.
+  onCaughtError: (error, info) => {
+    if (error instanceof Error && isNotFoundFailure(error)) return;
+
+    console.error(error, info.componentStack);
+  },
+}).render(
   <StrictMode>
     <RouterProvider router={router} />
   </StrictMode>,
