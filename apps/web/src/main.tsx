@@ -10,10 +10,11 @@ import { createRoot } from "react-dom/client";
 
 import { PageNotFound, RouteError, isNotFoundFailure } from "./components/route-error";
 import { resolveConvexUrl } from "./config";
+import { convexLogger } from "./lib/convex-logger";
 import { parseSearch, stringifySearch } from "./lib/search-params";
 import { routeTree } from "./routeTree.gen";
 
-const convex = new ConvexReactClient(resolveConvexUrl());
+const convex = new ConvexReactClient(resolveConvexUrl(), { logger: convexLogger(console) });
 
 const router = createRouter({
   routeTree,

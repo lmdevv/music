@@ -9,13 +9,19 @@ test.beforeAll(() => {
   seed();
 });
 
-test("a wrong password shows the sign-in error", async ({ page }) => {
+test("a wrong password shows the sign-in error and logs nothing", async ({ page }) => {
+  const errors: Array<string> = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
   await page.goto("/sign-in");
   await page.getByLabel("Email").fill(ADMIN.email);
   await page.getByLabel("Password").fill("not-the-password");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("alert")).toHaveText("That email and password don't match.");
   await expect(page.getByLabel("Password")).toHaveAttribute("aria-invalid", "true");
+  // A wrong password is an expected outcome, not a server error (ADS-109).
+  expect(errors).toEqual([]);
 });
 
 test("browse to an album and press play", async ({ page }) => {
