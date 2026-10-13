@@ -199,3 +199,17 @@
     cursor: pointer;
   }
 }
+
+/* Reduced motion: overlays, sheets, and hover effects appear and change at once instead of
+   sliding, zooming, or fading, and skeletons stop pulsing. Spinners keep turning, since they are
+   the only sign that work is still going on. */
+@media (prefers-reduced-motion: reduce) {
+  *:not(.animate-spin),
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
