@@ -35,11 +35,9 @@ export const e2eConvexUrl = (): string => {
 
   if (!existsSync(webEnv)) return DEV_BACKEND;
 
-  const line = readFileSync(webEnv, "utf8")
-    .split("\n")
-    .find((entry) => entry.startsWith("VITE_CONVEX_URL="));
+  const url = envValue(webEnv, "VITE_CONVEX_URL");
 
-  if (line === undefined) throw new Error("Set E2E_CONVEX_URL or run scripts/dev-backend.sh first");
+  if (url === undefined) throw new Error("Set E2E_CONVEX_URL or run scripts/dev-backend.sh first");
 
-  return line.slice("VITE_CONVEX_URL=".length).trim();
+  return url;
 };

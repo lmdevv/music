@@ -14,9 +14,9 @@
 #   scripts/backend-e2e.sh security cli          # some of them
 #
 # Env: BASE_PORT (default 3810): the suites' backends use BASE_PORT, +10, +20, and +30, each also
-# taking the next port for HTTP actions and port + 890 for a media service. WEB_PORT and
+# taking the next port for HTTP actions and port + 890 for a media service.
 # E2E_PORT (default 3002) for the Playwright suite's web server, CHROMIUM_PATH for its browser,
-# KEEP=1 to leave the backends running.
+# KEEP=1 to leave the backends running (and the .env.local files pointing at the last one).
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -27,11 +27,28 @@ suites=("$@")
 started=()
 results="$(mktemp -d)"
 
+# dev-backend.sh points these at the backend it starts. Put back whatever a developer had, so
+# their own backend keeps working after a run.
+env_files=(packages/backend/.env.local apps/web/.env.local apps/media/.env.local)
+for file in "${env_files[@]}"; do
+  if [[ -f "$root/$file" ]]; then
+    mkdir -p "$results/env/$(dirname "$file")"
+    cp -p "$root/$file" "$results/env/$file"
+  fi
+done
+
 cleanup() {
   if [[ "${KEEP:-0}" != "1" ]]; then
     for name in "${started[@]}"; do
       "$root/scripts/dev-backend.sh" stop "$name" >/dev/null 2>&1 || true
       docker volume rm "music-convex-${name}-data" >/dev/null 2>&1 || true
+    done
+    for file in "${env_files[@]}"; do
+      if [[ -f "$results/env/$file" ]]; then
+        cp -p "$results/env/$file" "$root/$file"
+      else
+        rm -f "$root/$file"
+      fi
     done
   fi
   rm -rf "$results"
@@ -65,23 +82,20 @@ vitest_all() {
   ' "$report" "$1"
 }
 
-for suite in "${suites[@]}"; do
-  echo "::group::$suite"
-  case "$suite" in
+# Runs one suite against the backend fresh_backend just started.
+run_suite() {
+  case "$1" in
     security)
-      fresh_backend security "$base"
       MUSIC_SECURITY_E2E_SERVER="http://127.0.0.1:${base}" \
         MUSIC_SECURITY_E2E_MEDIA_SECRET="$(convex_env MEDIA_SERVICE_SECRET)" \
         vitest_all packages/backend/test/security.e2e.test.ts
       ;;
     cli)
-      fresh_backend cli "$((base + 10))"
       MUSIC_E2E_SERVER="http://127.0.0.1:$((base + 10))" \
         MUSIC_E2E_MEDIA_SECRET="$(convex_env MEDIA_SERVICE_SECRET)" \
         vitest_all apps/cli/src/e2e.test.ts
       ;;
     media)
-      fresh_backend media "$((base + 20))"
       MEDIA_E2E_CONVEX_URL="http://127.0.0.1:$((base + 20))" \
         MEDIA_E2E_SERVICE_SECRET="$(convex_env MEDIA_SERVICE_SECRET)" \
         MEDIA_E2E_SIGNING_KEY="$(convex_env STREAM_SIGNING_KEY)" \
@@ -90,13 +104,34 @@ for suite in "${suites[@]}"; do
     web)
       # The Playwright suite and its seed script read the backend from the .env.local files
       # dev-backend.sh writes, and 01-setup.spec.ts needs an empty backend.
-      fresh_backend web "$((base + 30))"
-      (cd "$root" && E2E_PORT="$e2e_port" pnpm --filter web exec playwright test)
-      ;;
-    *)
-      echo "unknown suite $suite; expected security, cli, media, or web" >&2
-      exit 2
+      cd "$root" && E2E_PORT="$e2e_port" pnpm --filter web exec playwright test
       ;;
   esac
+}
+
+declare -A ports=([security]=0 [cli]=10 [media]=20 [web]=30)
+for suite in "${suites[@]}"; do
+  if [[ -z "${ports[$suite]+set}" ]]; then
+    echo "unknown suite $suite; expected security, cli, media, or web" >&2
+    exit 2
+  fi
+done
+
+# Every suite runs even when an earlier one fails, so one run reports all of them.
+failed=()
+for suite in "${suites[@]}"; do
+  echo "::group::$suite"
+  fresh_backend "$suite" "$((base + ports[$suite]))"
+  set +e
+  (set -e && run_suite "$suite")
+  status=$?
+  set -e
+  [[ "$status" == 0 ]] || failed+=("$suite")
   echo "::endgroup::"
 done
+
+if [[ ${#failed[@]} -gt 0 ]]; then
+  echo "failed: ${failed[*]}" >&2
+  exit 1
+fi
+echo "passed: ${suites[*]}"

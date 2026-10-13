@@ -48,7 +48,10 @@ let
     || lib.hasInfix ":" mount.name
   ) mounts;
 
-  relativePaths = builtins.filter (mount: !lib.hasPrefix "/" mount.path) mounts;
+  # The runtime reads `host:container:ro`, so a host path needs a leading / and no colon.
+  badPaths = builtins.filter (
+    mount: !lib.hasPrefix "/" mount.path || lib.hasInfix ":" mount.path
+  ) mounts;
 in
 {
   options.services.music = {
@@ -162,10 +165,10 @@ in
         } cannot name a mount under /music; use a plain folder name without / or :.";
       }
       {
-        assertion = relativePaths == [ ];
+        assertion = badPaths == [ ];
         message = "services.music.musicDirs: ${
-          lib.concatMapStringsSep ", " (mount: mount.path) relativePaths
-        } must be absolute paths.";
+          lib.concatMapStringsSep ", " (mount: mount.path) badPaths
+        } must be absolute paths without a colon.";
       }
     ];
 

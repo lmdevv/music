@@ -38,10 +38,11 @@ export default defineConfig({
       env: { VITE_CONVEX_URL: e2eConvexUrl() },
     },
     {
-      // A media service already running there (`pnpm dev`) is used instead.
+      // Never a real media service already on that port (`pnpm dev`): it has no files for the
+      // seeded songs, so playing would fail. Playwright stops with "port already used" instead.
       command: `node e2e/media-stand-in.ts ${String(e2eMediaPort())}`,
       url: `http://127.0.0.1:${String(e2eMediaPort())}/media/health`,
-      reuseExistingServer: true,
+      reuseExistingServer: false,
     },
   ],
 });
