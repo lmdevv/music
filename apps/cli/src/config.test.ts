@@ -1,4 +1,5 @@
 import { Effect, Option, Redacted } from "effect";
+import { assert, integer, property } from "fast-check";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { Credentials, Environment, Session } from "./config";
@@ -10,9 +11,17 @@ import {
   pathsFor,
   saveCredentials,
   saveSession,
+  sendsKeyInCleartext,
   sessionUsable,
 } from "./config";
-import { makeTempDir, permissions, readText, removeDir, writeText } from "./testing/process";
+import {
+  makeDir,
+  makeTempDir,
+  permissions,
+  readText,
+  removeDir,
+  writeText,
+} from "./testing/process";
 
 const credentials: Credentials = {
   server: "https://music.example.com/convex",
@@ -29,6 +38,7 @@ describe("config files", () => {
     paths: pathsFor(home),
     server: overrides.server ?? Option.none(),
     key: overrides.key ?? Option.none(),
+    insecure: false,
   });
 
   beforeEach(async () => {
@@ -36,6 +46,15 @@ describe("config files", () => {
   });
 
   afterEach(() => removeDir(home));
+
+  it("makes an existing config directory private when it writes", async () => {
+    const paths = pathsFor(home);
+
+    await makeDir(paths.dir, 0o755);
+    await Effect.runPromise(saveCredentials(paths, credentials));
+
+    expect(await permissions(paths.dir)).toBe(0o700);
+  });
 
   it("stores credentials readable only by the owner and reads them back", async () => {
     await Effect.runPromise(saveCredentials(pathsFor(home), credentials));
@@ -138,6 +157,31 @@ describe("sessionUsable", () => {
     expect(sessionUsable(session, { ...credentials, server: "https://other" }, 0)).toBe(false);
     expect(sessionUsable(session, { ...credentials, key: Redacted.make("mk_other") }, 0)).toBe(
       false,
+    );
+  });
+});
+
+describe("sendsKeyInCleartext", () => {
+  it("flags plain http to another machine only", () => {
+    expect(sendsKeyInCleartext("http://music.example.com/convex")).toBe(true);
+    expect(sendsKeyInCleartext("http://192.168.1.20:8080/convex")).toBe(true);
+    expect(sendsKeyInCleartext("http://0.0.0.0:8080/convex")).toBe(true);
+    expect(sendsKeyInCleartext("http://localhost.example.com/convex")).toBe(true);
+
+    expect(sendsKeyInCleartext("https://music.example.com/convex")).toBe(false);
+    expect(sendsKeyInCleartext("http://localhost:8080/convex")).toBe(false);
+    expect(sendsKeyInCleartext("http://music.localhost/convex")).toBe(false);
+    expect(sendsKeyInCleartext("http://[::1]:3210")).toBe(false);
+    expect(sendsKeyInCleartext("HTTP://LOCALHOST:3210")).toBe(false);
+  });
+
+  it("treats every 127.0.0.0/8 address as this machine", () => {
+    const octet = integer({ min: 0, max: 255 });
+
+    assert(
+      property(octet, octet, octet, integer({ min: 1, max: 65_535 }), (a, b, c, port) => {
+        expect(sendsKeyInCleartext(`http://127.${a}.${b}.${c}:${port}/convex`)).toBe(false);
+      }),
     );
   });
 });

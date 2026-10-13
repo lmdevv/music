@@ -25,18 +25,21 @@ import {
 } from "./catalog";
 import type { Environment } from "./config";
 import {
+  cleartextError,
   clearAll,
   environment,
   loadCredentials,
   normalizeServer,
   saveCredentials,
   saveSession,
+  sendsKeyInCleartext,
   ServerUrl,
 } from "./config";
 import type { CliError } from "./errors";
 import { ConfigFileError, ExitCode, exitCodeOf, reportOf, UsageError } from "./errors";
 import type { ParsedTokens } from "./flags";
 import { buildArgs, optionsFor, tokenize } from "./flags";
+import { Input } from "./input";
 import { waitForJob } from "./jobs";
 import { Output } from "./output";
 import { renderResult } from "./render";
@@ -218,6 +221,50 @@ const runRegistry = Effect.fn("Cli.runRegistry")(function* (
   return yield* output.out(renderResult(Job, encodeJob(job)));
 });
 
+const nonBlank = (key: Redacted.Redacted): Option.Option<Redacted.Redacted> => {
+  const trimmed = Redacted.value(key).trim();
+
+  return trimmed.length > 0 ? Option.some(Redacted.make(trimmed)) : Option.none();
+};
+
+const missingKey = (message: string): UsageError => new UsageError({ message, command: "login" });
+
+/**
+ * The key `music login` verifies, from the first source given: `--key-stdin`, `--key`,
+ * `MUSIC_API_KEY`, or a prompt when a person is at the terminal. `--key` lands in shell history
+ * and the process list, so the others are what the docs recommend.
+ */
+const loginKey = Effect.fn("Cli.loginKey")(function* (tokens: ParsedTokens, env: Environment) {
+  const input = yield* Input;
+  const flag = stringFlag(tokens, "key");
+
+  if (isTrue(tokens, "key-stdin")) {
+    if (Option.isSome(flag)) return yield* missingKey("Use --key or --key-stdin, not both");
+
+    const piped = nonBlank(yield* input.readAll);
+
+    if (Option.isNone(piped)) return yield* missingKey("--key-stdin read no key from stdin");
+
+    return piped.value;
+  }
+
+  const given = Option.orElse(Option.map(flag, Redacted.make), () => env.key);
+
+  if (Option.isSome(given)) return given.value;
+
+  if (!(yield* input.interactive)) {
+    return yield* missingKey(
+      "login needs an API key: pipe it to --key-stdin, or set MUSIC_API_KEY",
+    );
+  }
+
+  const typed = nonBlank(yield* input.promptSecret("API key: "));
+
+  if (Option.isNone(typed)) return yield* missingKey("No API key entered");
+
+  return typed.value;
+});
+
 const login = Effect.fn("Cli.login")(function* (tokens: ParsedTokens, json: boolean) {
   const output = yield* Output;
   const env = yield* readEnvironment;
@@ -227,13 +274,8 @@ const login = Effect.fn("Cli.login")(function* (tokens: ParsedTokens, json: bool
     () => env.server,
   );
 
-  const key = Option.orElse(Option.map(stringFlag(tokens, "key"), Redacted.make), () => env.key);
-
-  if (Option.isNone(server) || Option.isNone(key)) {
-    return yield* new UsageError({
-      message: "login needs --server <url> and --key <api-key>",
-      command: "login",
-    });
+  if (Option.isNone(server)) {
+    return yield* new UsageError({ message: "login needs --server <url>", command: "login" });
   }
 
   if (Result.isFailure(Schema.decodeResult(ServerUrl)(server.value))) {
@@ -243,7 +285,13 @@ const login = Effect.fn("Cli.login")(function* (tokens: ParsedTokens, json: bool
     });
   }
 
-  const credentials = { server: server.value, key: key.value };
+  // Checked before asking for the key, so nobody types a key that would then go out in cleartext.
+  if (!isTrue(tokens, "insecure") && !env.insecure && sendsKeyInCleartext(server.value)) {
+    return yield* cleartextError(server.value, "--insecure", "login");
+  }
+
+  const key = yield* loginKey(tokens, env);
+  const credentials = { server: server.value, key };
   const fresh = yield* signIn(credentials);
 
   yield* saveCredentials(env.paths, credentials);
@@ -296,7 +344,13 @@ const transport = (
 const builtinOptions = (name: string): ParseArgsOptionsConfig => {
   switch (name) {
     case "login":
-      return { ...commonOptions, server: { type: "string" }, key: { type: "string" } };
+      return {
+        ...commonOptions,
+        server: { type: "string" },
+        key: { type: "string" },
+        "key-stdin": { type: "boolean" },
+        insecure: { type: "boolean" },
+      };
     case "commands":
       return { ...commonOptions, markdown: { type: "boolean" } };
     case "play":
@@ -319,7 +373,7 @@ const songCount = (count: number): string => `${String(count)} song${count === 1
 type BuiltinHandler = (
   tokens: ParsedTokens,
   json: boolean,
-) => Effect.Effect<void, CliError, Output>;
+) => Effect.Effect<void, CliError, Output | Input>;
 
 const playQuery = (tokens: ParsedTokens, json: boolean): Effect.Effect<void, CliError, Output> =>
   Effect.gen(function* () {
@@ -399,7 +453,7 @@ const runBuiltin = Effect.fn("Cli.runBuiltin")(function* (
   return yield* handler(tokens, json);
 });
 
-const program = (argv: ReadonlyArray<string>): Effect.Effect<void, CliError, Output> =>
+const program = (argv: ReadonlyArray<string>): Effect.Effect<void, CliError, Output | Input> =>
   Effect.gen(function* () {
     const output = yield* Output;
     const route = yield* Effect.fromResult(resolve(argv));
@@ -432,7 +486,9 @@ const reportError = (error: CliError, json: boolean): Effect.Effect<void, never,
   });
 
 /** Runs one invocation and returns the process exit code. Never fails. */
-export const runCli = (argv: ReadonlyArray<string>): Effect.Effect<ExitCode, never, Output> => {
+export const runCli = (
+  argv: ReadonlyArray<string>,
+): Effect.Effect<ExitCode, never, Output | Input> => {
   const json = argv.includes("--json");
 
   return program(argv).pipe(

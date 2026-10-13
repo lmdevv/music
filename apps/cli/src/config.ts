@@ -5,14 +5,16 @@
  * - `session.json` caches the JWT the key signs in to, with its expiry, so most commands skip the
  *   sign-in round trip. It is keyed by server and a hash of the key, so switching either drops it.
  *
- * `MUSIC_SERVER` and `MUSIC_API_KEY` override the file field by field.
+ * `MUSIC_SERVER` and `MUSIC_API_KEY` override the file field by field. A plain `http://` server on
+ * another machine would carry the key unencrypted, so `music login` refuses one unless given
+ * `--insecure`, and `MUSIC_SERVER` is refused unless `MUSIC_INSECURE` is set.
  */
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 import { Config, Effect, Option, Redacted, Result, Schema } from "effect";
 
-import { AuthError, ConfigFileError } from "./errors";
+import { AuthError, ConfigFileError, UsageError } from "./errors";
 import { readTextFile, removeFile, writePrivateFile } from "./files";
 
 /** Where the CLI keeps its files. */
@@ -39,16 +41,22 @@ export interface Environment {
   readonly paths: ConfigPaths;
   readonly server: Option.Option<string>;
   readonly key: Option.Option<Redacted.Redacted>;
+  /** `MUSIC_INSECURE`: allow a plain `http://` server on another machine. */
+  readonly insecure: boolean;
 }
 
-/** Reads `XDG_CONFIG_HOME` (or `HOME/.config`), `MUSIC_SERVER`, and `MUSIC_API_KEY`. */
+/**
+ * Reads `XDG_CONFIG_HOME` (or `HOME/.config`), `MUSIC_SERVER`, `MUSIC_API_KEY`, and
+ * `MUSIC_INSECURE`.
+ */
 export const environment: Config.Config<Environment> = Config.all({
   xdg: nonEmpty("XDG_CONFIG_HOME"),
   home: nonEmpty("HOME"),
   server: nonEmpty("MUSIC_SERVER"),
   key: nonEmpty("MUSIC_API_KEY"),
+  insecure: Config.Boolean("MUSIC_INSECURE").pipe(Config.withDefault(false)),
 }).pipe(
-  Config.map(({ xdg, home, server, key }) => ({
+  Config.map(({ xdg, home, server, key, insecure }) => ({
     paths: pathsFor(
       Option.getOrElse(xdg, () =>
         join(
@@ -59,6 +67,7 @@ export const environment: Config.Config<Environment> = Config.all({
     ),
     server: Option.map(server, normalizeServer),
     key: Option.map(key, (value) => Redacted.make(value.trim())),
+    insecure,
   })),
 );
 
@@ -69,6 +78,35 @@ export const normalizeServer = (server: string): string => server.trim().replace
 export const ServerUrl = Schema.String.check(
   Schema.isPattern(/^https?:\/\/[^\s/]+/u, { message: "Expected an http(s) URL" }),
 );
+
+const isLoopbackHost = (host: string): boolean =>
+  host === "localhost" ||
+  host.endsWith(".localhost") ||
+  host === "[::1]" ||
+  /^127(?:\.\d{1,3}){3}$/u.test(host);
+
+/**
+ * Whether talking to `server` would send the API key unencrypted to another machine: a plain
+ * `http://` URL whose host is not this machine's loopback interface.
+ */
+export const sendsKeyInCleartext = (server: string): boolean => {
+  if (!URL.canParse(server)) return false;
+
+  const url = new URL(server);
+
+  return url.protocol === "http:" && !isLoopbackHost(url.hostname);
+};
+
+/** Refuses a cleartext `server`, naming the flag or variable that allows it anyway. */
+export const cleartextError = (
+  server: string,
+  allowWith: string,
+  command: string | null,
+): UsageError =>
+  new UsageError({
+    message: `${server} is plain http:// to another machine, which would send the API key unencrypted. Use https://, or allow it with ${allowWith}`,
+    command,
+  });
 
 /** What `music login` stores. */
 const StoredConfig = Schema.Struct({
@@ -144,8 +182,13 @@ export const loadCredentials = Effect.fn("Config.loadCredentials")(function* (en
     return yield* new AuthError({
       code: "not_logged_in",
       message:
-        "Not logged in. Run music login --server <url> --key <api-key>, or set MUSIC_SERVER and MUSIC_API_KEY",
+        "Not logged in. Run music login --server <url>, or set MUSIC_SERVER and MUSIC_API_KEY",
     });
+  }
+
+  // `music login` vetted a stored server; one from the environment has not been.
+  if (Option.isSome(env.server) && !env.insecure && sendsKeyInCleartext(server)) {
+    return yield* cleartextError(server, "MUSIC_INSECURE=1", null);
   }
 
   const credentials: Credentials = { server, key };
