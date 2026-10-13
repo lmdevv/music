@@ -224,19 +224,33 @@ export const RepeatMode = Schema.Literals(["off", "all", "one"]);
 export type RepeatMode = typeof RepeatMode.Type;
 
 /**
- * The user's playback session. `positionMs` was true at `updatedAt`; while `playing`, the live
- * position is `positionMs + (now - updatedAt)`.
+ * Where the user's playback is. `positionMs` was true at `updatedAt`; while `playing`, the live
+ * position is `positionMs + (now - updatedAt)`. It changes with every position report.
  */
-export const PlaybackState = Schema.Struct({
+export const PlaybackPosition = Schema.Struct({
   activeDevice: Schema.NullOr(Device),
-  queue: Schema.Array(Track),
-  index: Count,
   positionMs: Millis,
   playing: Schema.Boolean,
   updatedAt: Timestamp,
+  volume: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+});
+
+export interface PlaybackPosition extends Schema.Schema.Type<typeof PlaybackPosition> {}
+
+/** The user's queue and play order. It changes when the song or the queue changes. */
+export const PlaybackQueue = Schema.Struct({
+  queue: Schema.Array(Track),
+  index: Count,
   shuffle: Schema.Boolean,
   repeat: RepeatMode,
-  volume: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+});
+
+export interface PlaybackQueue extends Schema.Schema.Type<typeof PlaybackQueue> {}
+
+/** The user's playback session: the position and the queue together. */
+export const PlaybackState = Schema.Struct({
+  ...PlaybackPosition.fields,
+  ...PlaybackQueue.fields,
 });
 
 export interface PlaybackState extends Schema.Schema.Type<typeof PlaybackState> {}

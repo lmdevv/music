@@ -29,6 +29,8 @@ import {
   LibraryVisibility,
   Millis,
   PageArgs,
+  PlaybackPosition,
+  PlaybackQueue,
   PlaybackState,
   Playlist,
   PlaylistDetail,
@@ -135,6 +137,15 @@ export const commands = {
     job: false,
     args: NoArgs,
     result: PlaybackState,
+  }),
+  "playback.position": command({
+    summary: "Show the playing device, position, and volume, without the queue",
+    group: "playback",
+    kind: "query",
+    access: "user",
+    job: false,
+    args: NoArgs,
+    result: PlaybackPosition,
   }),
   "playback.play": command({
     summary: "Replace the queue and start playing",
@@ -257,6 +268,15 @@ export const commands = {
   }),
 
   // Queue
+  "queue.list": command({
+    summary: "Show the queue, the current song's index, shuffle, and repeat",
+    group: "queue",
+    kind: "query",
+    access: "user",
+    job: false,
+    args: NoArgs,
+    result: PlaybackQueue,
+  }),
   "queue.add": command({
     summary: "Add songs to the queue, next or at the end",
     group: "queue",

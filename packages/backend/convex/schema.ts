@@ -184,19 +184,42 @@ export default defineSchema({
     .index("by_user_last_seen", ["userId", "lastSeenAt"])
     .index("by_last_seen", ["lastSeenAt"]),
 
+  /**
+   * Where a user's playback is: the device, the position, and the volume. Players report the
+   * position every few seconds, so these fields live apart from the queue: a report rewrites only
+   * this row, and nothing that reads the queue runs again.
+   */
   playbackSessions: defineTable({
     userId: v.id("users"),
     activeDeviceId: v.optional(v.string()),
+    positionMs: v.number(),
+    playing: v.boolean(),
+    updatedAt: v.number(),
+    volume: v.number(),
+    /**
+     * Queue fields from before the queue had its own row (`playbackQueues`). The next write to a
+     * user's queue, or the `splitPlaybackQueues` migration, moves them there and clears them.
+     */
+    queue: v.optional(v.array(v.id("tracks"))),
+    unshuffled: v.optional(v.array(v.id("tracks"))),
+    index: v.optional(v.number()),
+    shuffle: v.optional(v.boolean()),
+    repeat: v.optional(repeatMode),
+    reportedTrackId: v.optional(v.id("tracks")),
+  })
+    .index("by_user", ["userId"])
+    .index("by_playing", ["playing"]),
+
+  /** A user's queue and play order. It changes when the song changes, not with the position. */
+  playbackQueues: defineTable({
+    userId: v.id("users"),
     queue: v.array(v.id("tracks")),
     /** The queue before shuffle, restored when shuffle turns off. */
     unshuffled: v.optional(v.array(v.id("tracks"))),
     index: v.number(),
-    positionMs: v.number(),
-    playing: v.boolean(),
-    updatedAt: v.number(),
     shuffle: v.boolean(),
     repeat: repeatMode,
-    volume: v.number(),
+    /** The song whose play history last recorded; cleared when a song starts again. */
     reportedTrackId: v.optional(v.id("tracks")),
   }).index("by_user", ["userId"]),
 

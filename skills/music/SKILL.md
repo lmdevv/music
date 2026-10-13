@@ -135,6 +135,7 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 ### playback
 
 - `music playback state`: Show what is playing, where, and the queue.
+- `music playback position`: Show the playing device, position, and volume, without the queue.
 - `music playback play <track-ids...> [--index <int>] [--device-id <id>]`: Replace the queue and start playing.
 - `music playback pause`: Pause playback.
 - `music playback resume`: Resume playback.
@@ -156,6 +157,7 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 
 ### queue
 
+- `music queue list`: Show the queue, the current song's index, shuffle, and repeat.
 - `music queue add <track-ids...> [--next | --no-next]`: Add songs to the queue, next or at the end.
 - `music queue remove <index>`: Remove the queue entry at an index.
 - `music queue clear`: Clear everything after the current song.

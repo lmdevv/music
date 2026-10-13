@@ -1,0 +1,422 @@
+/**
+ * The playback state machine through the real command dispatcher: play, next, previous, jump,
+ * repeat, shuffle, the queue commands, position reports, and history, against convex-test.
+ */
+import { DeviceId } from "@music/commands/ids";
+import type { TrackId } from "@music/commands/ids";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { playbackMutations, playbackQueries } from "../convex/handlers/playback";
+import { loadViewer } from "../convex/lib/viewer";
+import { failureCode } from "./harness";
+import { allTracks, makeBackend, seedLibrary, signUp, trackIds } from "./backend";
+import type { Backend, User } from "./backend";
+
+const DEVICE = DeviceId.make("test-device");
+
+const START = 1_800_000_000_000;
+
+interface Fixture {
+  readonly backend: Backend;
+  readonly admin: User;
+  /** Five songs, `Rock 0001` to `Rock 0005`, in title order. */
+  readonly rock: ReadonlyArray<TrackId>;
+}
+
+const setup = async (): Promise<Fixture> => {
+  const backend = makeBackend();
+  const admin = await signUp(backend, "admin");
+  await seedLibrary(backend, admin, { name: "Rock", count: 5 });
+  await admin.music.run("devices.heartbeat", { deviceId: DEVICE, name: "Laptop", kind: "web" });
+
+  return { backend, admin, rock: trackIds(await allTracks(admin), "Rock") };
+};
+
+const queueIds = async (user: User): Promise<ReadonlyArray<TrackId>> =>
+  (await user.music.read("playback.state", {})).queue.map((track) => track.id);
+
+const current = async (user: User): Promise<TrackId | undefined> => {
+  const { queue, index } = await user.music.read("playback.state", {});
+
+  return queue[index]?.id;
+};
+
+const history = async (user: User): Promise<ReadonlyArray<TrackId>> =>
+  (await user.music.read("history.list", { limit: 200 })).map((entry) => entry.track.id);
+
+const at = (index: number, list: ReadonlyArray<TrackId>): TrackId => {
+  const id = list[index];
+
+  if (id === undefined) throw new Error(`No song at ${index}`);
+
+  return id;
+};
+
+/** Rock and Jazz songs interleaved, playing the third entry (a Jazz song). */
+const mixed = async () => {
+  const fixture = await setup();
+  const { backend, admin, rock } = fixture;
+  const jazzLibrary = await seedLibrary(backend, admin, { name: "Jazz", count: 3 });
+  const jazz = trackIds(await allTracks(admin), "Jazz");
+  const queue = [at(0, rock), at(0, jazz), at(1, rock), at(1, jazz), at(2, rock), at(2, jazz)];
+
+  await admin.music.run("playback.play", { trackIds: queue, index: 3, deviceId: DEVICE });
+  await admin.music.run("libraries.delete", { libraryId: jazzLibrary.libraryId });
+
+  return { ...fixture, jazz };
+};
+
+const report = (user: User, index: number, positionMs: number, playing = true) =>
+  user.music.run("playback.report", { deviceId: DEVICE, index, positionMs, playing });
+
+/** Documents a handler reads, minus those every command spends loading the viewer. */
+const documentsRead = async (
+  user: User,
+  run: (ctx: Parameters<(typeof playbackQueries)["queue.list"]>[0]) => Promise<object>,
+): Promise<number> => {
+  const measure = async (body: typeof run) =>
+    user.as.query(async (ctx) => {
+      await body(ctx);
+
+      return (await ctx.meta.getTransactionMetrics()).documentsRead.used;
+    });
+
+  const viewerOnly = await measure(async (ctx) => loadViewer(ctx));
+
+  return (await measure(run)) - viewerOnly;
+};
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(START);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("play, next, and previous", () => {
+  it("plays a list from an index on the named device", async () => {
+    const { admin, rock } = await setup();
+
+    await admin.music.run("playback.play", { trackIds: [...rock], index: 2, deviceId: DEVICE });
+    const state = await admin.music.read("playback.state", {});
+
+    expect(state.queue.map((track) => track.id)).toEqual(rock);
+    expect(state.index).toBe(2);
+    expect(state.playing).toBe(true);
+    expect(state.positionMs).toBe(0);
+    expect(state.activeDevice?.id).toBe(DEVICE);
+  });
+
+  it("refuses to play on a device that never registered", async () => {
+    const { admin, rock } = await setup();
+
+    expect(
+      await failureCode(
+        admin.music.run("playback.play", {
+          trackIds: [...rock],
+          deviceId: DeviceId.make("never-seen"),
+        }),
+      ),
+    ).toBe("not_found");
+  });
+
+  it("steps forward and stops after the last song when repeat is off", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: [...rock], index: 3, deviceId: DEVICE });
+
+    await admin.music.run("playback.next", {});
+    expect(await current(admin)).toBe(at(4, rock));
+
+    await admin.music.run("playback.next", {});
+    const ended = await admin.music.read("playback.state", {});
+
+    expect(ended.index).toBe(4);
+    expect(ended.playing).toBe(false);
+  });
+
+  it("wraps around both ways when repeat is all", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: [...rock], index: 4, deviceId: DEVICE });
+    await admin.music.run("playback.repeat", { mode: "all" });
+
+    await admin.music.run("playback.next", {});
+    expect(await current(admin)).toBe(at(0, rock));
+
+    await admin.music.run("playback.previous", {});
+    expect(await current(admin)).toBe(at(4, rock));
+    expect((await admin.music.read("queue.list", {})).repeat).toBe("all");
+  });
+
+  it("restarts the song when previous comes more than three seconds in", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: [...rock], index: 2, deviceId: DEVICE });
+
+    vi.setSystemTime(START + 10_000);
+    await admin.music.run("playback.previous", {});
+    const restarted = await admin.music.read("playback.state", {});
+
+    expect(restarted.index).toBe(2);
+    expect(restarted.positionMs).toBe(0);
+
+    await admin.music.run("playback.previous", {});
+    expect(await current(admin)).toBe(at(1, rock));
+  });
+
+  it("jumps to an entry and refuses an index past the end", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: [...rock], deviceId: DEVICE });
+    await admin.music.run("playback.pause", {});
+
+    await admin.music.run("playback.jump", { index: 3 });
+    const state = await admin.music.read("playback.state", {});
+
+    expect(state.queue[state.index]?.id).toBe(at(3, rock));
+    expect(state.playing).toBe(true);
+    expect(await failureCode(admin.music.run("playback.jump", { index: 5 }))).toBe("invalid_args");
+  });
+});
+
+describe("the queue", () => {
+  it("adds songs next or at the end, removes one, and clears what follows", async () => {
+    const { admin, rock } = await setup();
+    const [first, second, third, fourth, fifth] = rock;
+
+    if (fifth === undefined || first === undefined || second === undefined) {
+      throw new Error("Seed missing");
+    }
+
+    await admin.music.run("playback.play", { trackIds: [first, second], deviceId: DEVICE });
+    await admin.music.run("queue.add", { trackIds: [at(2, rock)], next: true });
+    await admin.music.run("queue.add", { trackIds: [at(3, rock)] });
+    expect(await queueIds(admin)).toEqual([first, third, second, fourth]);
+
+    await admin.music.run("playback.jump", { index: 2 });
+    await admin.music.run("queue.remove", { index: 1 });
+    expect(await queueIds(admin)).toEqual([first, second, fourth]);
+    expect(await current(admin)).toBe(second);
+
+    await admin.music.run("queue.add", { trackIds: [fifth] });
+    await admin.music.run("queue.clear", {});
+    expect(await queueIds(admin)).toEqual([first, second]);
+    expect(await failureCode(admin.music.run("queue.remove", { index: 2 }))).toBe("invalid_args");
+  });
+
+  it("removing the current song moves to the next one", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: [...rock], index: 1, deviceId: DEVICE });
+
+    await admin.music.run("queue.remove", { index: 1 });
+    expect(await current(admin)).toBe(at(2, rock));
+    expect((await admin.music.read("playback.state", {})).positionMs).toBe(0);
+  });
+});
+
+describe("shuffle", () => {
+  it("keeps the current song first and restores the order when turned off", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: [...rock], index: 2, deviceId: DEVICE });
+
+    await admin.music.run("playback.shuffle", { on: true });
+    const shuffledQueue = await queueIds(admin);
+
+    expect(shuffledQueue[0]).toBe(at(2, rock));
+    expect(shuffledQueue.toSorted()).toEqual([...rock].toSorted());
+
+    await admin.music.run("playback.next", {});
+    const playing = await current(admin);
+    await admin.music.run("playback.shuffle", { on: false });
+
+    expect(await queueIds(admin)).toEqual(rock);
+    expect(await current(admin)).toBe(playing);
+  });
+
+  it("does not bring back a song removed while shuffled", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: [...rock], deviceId: DEVICE });
+    await admin.music.run("playback.shuffle", { on: true });
+    const removed = at(3, await queueIds(admin));
+
+    await admin.music.run("queue.remove", { index: 3 });
+    await admin.music.run("playback.shuffle", { on: false });
+
+    expect(await queueIds(admin)).toEqual(rock.filter((id) => id !== removed));
+  });
+
+  it("keeps the original order, plus added songs, when turned off after adding", async () => {
+    const { backend, admin, rock } = await setup();
+    await seedLibrary(backend, admin, { name: "Jazz", count: 2 });
+    const jazz = trackIds(await allTracks(admin), "Jazz");
+
+    await admin.music.run("playback.play", { trackIds: [...rock], deviceId: DEVICE });
+    await admin.music.run("playback.shuffle", { on: true });
+    await admin.music.run("queue.add", { trackIds: [at(0, jazz)] });
+    await admin.music.run("queue.add", { trackIds: [at(1, jazz)], next: true });
+    await admin.music.run("playback.shuffle", { on: false });
+
+    expect(await queueIds(admin)).toEqual([
+      at(0, rock),
+      at(1, jazz),
+      ...rock.slice(1),
+      at(0, jazz),
+    ]);
+  });
+
+  it("shuffles a new list as it starts playing while shuffle is on", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.shuffle", { on: true });
+    await admin.music.run("playback.play", { trackIds: [...rock], index: 1, deviceId: DEVICE });
+
+    expect(await current(admin)).toBe(at(1, rock));
+    await admin.music.run("playback.shuffle", { on: false });
+    expect(await queueIds(admin)).toEqual(rock);
+    expect(await current(admin)).toBe(at(1, rock));
+  });
+});
+
+describe("after a library is deleted", () => {
+  it("drops its songs and keeps the index on the same song", async () => {
+    const { admin, rock } = await mixed();
+    const state = await admin.music.read("playback.state", {});
+
+    expect(state.queue.map((track) => track.id)).toEqual(rock.slice(0, 3));
+    // The playing Jazz song is gone; the song after it plays instead.
+    expect(state.index).toBe(2);
+  });
+
+  it("jumps, removes, and reports by the index the client was shown", async () => {
+    const { admin, rock } = await mixed();
+
+    await admin.music.run("playback.jump", { index: 1 });
+    expect(await current(admin)).toBe(at(1, rock));
+
+    await admin.music.run("playback.report", {
+      deviceId: DEVICE,
+      index: 1,
+      positionMs: 1000,
+      playing: true,
+    });
+
+    expect(await history(admin)).toEqual([at(1, rock)]);
+
+    await admin.music.run("queue.remove", { index: 0 });
+    expect(await queueIds(admin)).toEqual([at(1, rock), at(2, rock)]);
+    expect(await current(admin)).toBe(at(1, rock));
+  });
+
+  it("refuses an index that only existed before the songs were dropped", async () => {
+    const { admin } = await mixed();
+
+    expect(await failureCode(admin.music.run("playback.jump", { index: 4 }))).toBe("invalid_args");
+    expect(await failureCode(admin.music.run("queue.remove", { index: 3 }))).toBe("invalid_args");
+  });
+});
+
+describe("position reports and history", () => {
+  it("records a play once per song, and again when the song is played again", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: [...rock], deviceId: DEVICE });
+
+    await report(admin, 0, 500);
+    vi.setSystemTime(START + 15_000);
+    await report(admin, 0, 15_500);
+    expect(await history(admin)).toEqual([at(0, rock)]);
+
+    await admin.music.run("playback.play", { trackIds: [...rock], deviceId: DEVICE });
+    await report(admin, 0, 200);
+    expect(await history(admin)).toEqual([at(0, rock), at(0, rock)]);
+  });
+
+  it("records a song that repeats on its own (repeat one)", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: [...rock], deviceId: DEVICE });
+    await admin.music.run("playback.repeat", { mode: "one" });
+
+    await report(admin, 0, 100);
+    vi.setSystemTime(START + 170_000);
+    await report(admin, 0, 170_100);
+    vi.setSystemTime(START + 181_000);
+    await report(admin, 0, 300);
+
+    expect(await history(admin)).toEqual([at(0, rock), at(0, rock)]);
+  });
+
+  it("records the next song a device advanced to, and ignores other devices", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: [...rock], deviceId: DEVICE });
+
+    await report(admin, 0, 100);
+    await report(admin, 1, 100);
+    await admin.music.run("playback.report", {
+      deviceId: DeviceId.make("someone-else"),
+      index: 3,
+      positionMs: 100,
+      playing: true,
+    });
+
+    expect(await history(admin)).toEqual([at(1, rock), at(0, rock)]);
+    expect(await current(admin)).toBe(at(1, rock));
+  });
+
+  it("counts a pause and resume of the same song as one play", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: [...rock], deviceId: DEVICE });
+
+    await report(admin, 0, 100);
+    await report(admin, 0, 30_000, false);
+    await report(admin, 0, 30_000);
+
+    expect(await history(admin)).toEqual([at(0, rock)]);
+  });
+});
+
+describe("what a position report costs", () => {
+  it("keeps the queue out of the position, and the position out of the queue", async () => {
+    const backend = makeBackend();
+    const admin = await signUp(backend, "admin");
+    await seedLibrary(backend, admin, { name: "Big", count: 1000 });
+    await admin.music.run("devices.heartbeat", { deviceId: DEVICE, name: "Laptop", kind: "web" });
+    const tracks = await allTracks(admin);
+
+    await admin.music.run("playback.play", {
+      trackIds: tracks.map((track) => track.id),
+      deviceId: DEVICE,
+    });
+
+    // The position reads the session and its device, never the queue's songs.
+    expect(
+      await documentsRead(admin, async (ctx) =>
+        playbackQueries["playback.position"](ctx, await loadViewer(ctx)),
+      ),
+    ).toBe(2);
+
+    // The queue reads its own row and its songs, never the session the reports rewrite.
+    expect(
+      await documentsRead(admin, async (ctx) =>
+        playbackQueries["queue.list"](ctx, await loadViewer(ctx)),
+      ),
+    ).toBe(1 + 1000);
+
+    // A periodic report rewrites only the session.
+    await admin.music.run("playback.report", {
+      deviceId: DEVICE,
+      index: 0,
+      positionMs: 100,
+      playing: true,
+    });
+
+    const written = await admin.as.mutation(async (ctx) => {
+      await playbackMutations["playback.report"](ctx, await loadViewer(ctx), {
+        deviceId: DEVICE,
+        index: 0,
+        positionMs: 15_100,
+        playing: true,
+      });
+
+      return (await ctx.meta.getTransactionMetrics()).documentsWritten.used;
+    });
+
+    expect(written).toBe(1);
+  });
+});
