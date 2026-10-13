@@ -1299,7 +1299,7 @@ function PlaylistPreview({
           disabled={detail === undefined || detail.items.length === 0}
           onClick={() => {
             onClose();
-            void play(detail?.items.map((item) => item.track) ?? []);
+            void play(detail?.items.flatMap((item) => (item.available ? [item.track] : [])) ?? []);
           }}
         >
           <PlayIcon fill="currentColor" strokeWidth={0} />

@@ -65,6 +65,16 @@ export const legacyQueue = (session: Doc<"playbackSessions">): StoredQueue => ({
   reportedTrackId: session.reportedTrackId,
 });
 
+/** The queue a `playbackQueues` row holds. */
+export const rowQueue = (row: Doc<"playbackQueues">): StoredQueue => ({
+  queue: row.queue,
+  unshuffled: row.unshuffled,
+  index: row.index,
+  shuffle: row.shuffle,
+  repeat: row.repeat,
+  reportedTrackId: row.reportedTrackId,
+});
+
 /** Clears the legacy queue fields from a session. */
 export const clearedLegacyQueue = {
   queue: undefined,
@@ -82,17 +92,7 @@ export const clearedLegacyQueue = {
 export const storedQueue = async (ctx: ReadCtx, userId: Id<"users">): Promise<StoredQueue> => {
   const row = await findQueueRow(ctx, userId);
 
-  if (row !== null) {
-    return {
-      queue: row.queue,
-      unshuffled: row.unshuffled,
-      index: row.index,
-      shuffle: row.shuffle,
-      repeat: row.repeat,
-      reportedTrackId: row.reportedTrackId,
-    };
-  }
-
+  if (row !== null) return rowQueue(row);
   const session = await findSession(ctx, userId);
 
   return session === null ? EMPTY : legacyQueue(session);

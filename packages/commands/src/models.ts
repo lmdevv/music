@@ -191,7 +191,14 @@ export const PlaylistEntry = Schema.Struct({
   itemId: PlaylistItemId,
   addedAt: Timestamp,
   track: Track,
+  /**
+   * False when the song's file is gone from disk. The entry stays, greyed out, so you can see what
+   * the playlist held and remove it; it comes back if the file does.
+   */
+  available: Schema.Boolean,
 });
+
+export interface PlaylistEntry extends Schema.Schema.Type<typeof PlaylistEntry> {}
 
 export const PlaylistDetail = Schema.Struct({
   playlist: Playlist,

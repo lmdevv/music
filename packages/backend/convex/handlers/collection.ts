@@ -139,7 +139,9 @@ export const collectionQueries = {
 
     const present = makePresenter(ctx, viewer);
 
-    return Promise.all(playlists.map((playlist) => presentPlaylist(ctx, present, playlist)));
+    return Promise.all(
+      playlists.map((playlist) => presentPlaylist(ctx, viewer, present, playlist)),
+    );
   },
 
   "playlists.get": async (ctx, viewer, args) => {
@@ -153,24 +155,24 @@ export const collectionQueries = {
 
     const tracks = await Promise.all(items.map((item) => ctx.db.get(item.trackId)));
 
+    // A song whose file is gone stays as an unavailable entry you can remove. One in a library
+    // you can no longer read stays hidden: listing it would show what that library holds.
     const entries = items.flatMap((item, index) => {
       const track = tracks[index];
 
-      return track === undefined ||
-        track === null ||
-        track.missing ||
-        !canRead(viewer, track.libraryId)
+      return track === undefined || track === null || !canRead(viewer, track.libraryId)
         ? []
         : [{ item, track }];
     });
 
     return {
-      playlist: await presentPlaylist(ctx, present, playlist),
+      playlist: await presentPlaylist(ctx, viewer, present, playlist),
       items: await Promise.all(
         entries.map(async ({ item, track }) => ({
           itemId: item._id,
           addedAt: item._creationTime,
           track: await present.track(track),
+          available: !track.missing,
         })),
       ),
     };

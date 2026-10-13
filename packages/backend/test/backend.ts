@@ -7,6 +7,7 @@ import type { LibraryId, TrackId } from "@music/commands/ids";
 import type { Track } from "@music/commands/models";
 import { makeMusicClient, type MusicClient } from "@music/sdk/client";
 import { convexTest } from "convex-test";
+import { vi } from "vitest";
 
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
@@ -21,10 +22,25 @@ process.env["STREAM_SIGNING_KEY"] = "test-signing-key";
 /** Every function module; convex-test finds the functions root from the `_generated` entries. */
 const modules = import.meta.glob(["../convex/**/*.{ts,js}", "!../convex/**/*.d.ts"]);
 
-/** A fresh backend with Convex's per-transaction limits enforced. */
-export const makeBackend = () => convexTest({ schema, modules, transactionLimits: true });
+/**
+ * A fresh backend with Convex's per-transaction limits enforced, or tighter ones where a test
+ * needs a small catalog to cross them.
+ */
+export const makeBackend = (limits: { readonly documentsWritten?: number } = {}) =>
+  convexTest({ schema, modules, transactionLimits: limits });
 
 export type Backend = ReturnType<typeof makeBackend>;
+
+/** Runs every scheduled function, and those they schedule, to completion. */
+export const drainScheduled = async (backend: Backend): Promise<void> => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+
+  try {
+    await backend.finishAllScheduledFunctions(() => vi.runAllTimers(), 1000);
+  } finally {
+    vi.useRealTimers();
+  }
+};
 
 /** A signed-in user and their typed command client. */
 export interface User {

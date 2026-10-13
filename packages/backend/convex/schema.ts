@@ -157,21 +157,26 @@ export default defineSchema({
     playlistId: v.id("playlists"),
     trackId: v.id("tracks"),
     position: v.number(),
-  }).index("by_playlist", ["playlistId", "position"]),
+  })
+    .index("by_playlist", ["playlistId", "position"])
+    .index("by_track", ["trackId"]),
 
   likes: defineTable({
     userId: v.id("users"),
     trackId: v.id("tracks"),
   })
     .index("by_user_track", ["userId", "trackId"])
-    .index("by_user", ["userId"]),
+    .index("by_user", ["userId"])
+    .index("by_track", ["trackId"]),
 
   history: defineTable({
     userId: v.id("users"),
     trackId: v.id("tracks"),
     albumId: v.id("albums"),
     deviceId: v.string(),
-  }).index("by_user", ["userId"]),
+  })
+    .index("by_user", ["userId"])
+    .index("by_track", ["trackId"]),
 
   devices: defineTable({
     userId: v.id("users"),
