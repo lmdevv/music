@@ -8,7 +8,7 @@
       "entry": [".agents/skills/*/scripts/*.mjs"]
     },
     "apps/web": {
-      "entry": ["e2e-stack/first-audio.ts"]
+      "entry": ["e2e-stack/first-audio.ts", "e2e/media-stand-in.ts"]
     },
     "apps/cli": {
       "entry": ["src/main.ts", "scripts/*.ts"]
