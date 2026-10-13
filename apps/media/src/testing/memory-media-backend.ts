@@ -198,6 +198,7 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
               size: track.scanned.size,
               mtimeMs: track.scanned.mtimeMs,
               missing: track.missing,
+              folderArt: track.scanned.folderArt,
             }));
 
           const page: FingerprintPage = {

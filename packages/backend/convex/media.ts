@@ -33,6 +33,7 @@ const scannedTrack = v.object({
   sampleRate: v.optional(v.number()),
   bitDepth: v.optional(v.number()),
   artHash: v.optional(v.string()),
+  folderArt: v.optional(v.string()),
 });
 
 /** Pending jobs, oldest first. The media service subscribes to this. */
@@ -162,6 +163,7 @@ export const fingerprints = query({
         size: track.size,
         mtimeMs: track.mtimeMs,
         missing: track.missing,
+        folderArt: track.folderArt,
       })),
       cursor: page.continueCursor,
       done: page.isDone,

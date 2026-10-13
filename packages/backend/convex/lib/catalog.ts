@@ -24,7 +24,26 @@ export interface ScannedTrack {
   readonly sampleRate?: number | undefined;
   readonly bitDepth?: number | undefined;
   readonly artHash?: string | undefined;
+  /** The folder artwork file the scan saw beside the file, as `path:size:mtime`. */
+  readonly folderArt?: string | undefined;
 }
+
+/**
+ * The artwork to keep for an album or artist whose art is `current` when one of its tracks moves
+ * from `previous` art to `next`: the track's new art when the old art came from it (a replaced
+ * cover), the track's art when there was none, and otherwise what it has.
+ */
+const followedArt = (
+  current: string | undefined,
+  previous: string | undefined,
+  next: string | undefined,
+): string | undefined => {
+  if (next === undefined) return current;
+
+  if (current === undefined || current === previous) return next;
+
+  return current;
+};
 
 const keyOf = (value: string): string => value.trim().toLowerCase();
 
@@ -121,6 +140,7 @@ const findOrCreateArtist = async (
   libraryId: Id<"libraries">,
   name: string,
   artHash: string | undefined,
+  previousArtHash: string | undefined,
 ): Promise<Doc<"artists">> => {
   const key = keyOf(name);
 
@@ -130,9 +150,9 @@ const findOrCreateArtist = async (
     .unique();
 
   if (existing !== null) {
-    if (existing.artHash === undefined && artHash !== undefined) {
-      await ctx.db.patch(existing._id, { artHash });
-    }
+    const followed = followedArt(existing.artHash, previousArtHash, artHash);
+
+    if (followed !== existing.artHash) await ctx.db.patch(existing._id, { artHash: followed });
 
     return existing;
   }
@@ -158,6 +178,7 @@ const findOrCreateAlbum = async (
   libraryId: Id<"libraries">,
   artist: Doc<"artists">,
   track: ScannedTrack,
+  previousArtHash: string | undefined,
 ): Promise<Doc<"albums">> => {
   const key = keyOf(track.album);
 
@@ -169,13 +190,15 @@ const findOrCreateAlbum = async (
     .unique();
 
   if (existing !== null) {
+    const artHash = followedArt(existing.artHash, previousArtHash, track.artHash);
+
     if (
-      (existing.artHash === undefined && track.artHash !== undefined) ||
+      artHash !== existing.artHash ||
       (existing.year === undefined && track.year !== undefined) ||
       (existing.genre === undefined && track.genre !== undefined)
     ) {
       await ctx.db.patch(existing._id, {
-        artHash: existing.artHash ?? track.artHash,
+        artHash,
         year: existing.year ?? track.year,
         genre: existing.genre ?? track.genre,
       });
@@ -207,20 +230,29 @@ const findOrCreateAlbum = async (
   return created;
 };
 
-/** Inserts or updates one scanned file and its album and artist. */
+/**
+ * Inserts or updates one scanned file and its album and artist. An album or artist whose art
+ * came from this file's old art takes its new art, so a replaced cover shows everywhere.
+ */
 export const upsertScannedTrack = async (
   ctx: MutationCtx,
   libraryId: Id<"libraries">,
   scanned: ScannedTrack,
 ): Promise<void> => {
+  const existing = await ctx.db
+    .query("tracks")
+    .withIndex("by_library_path", (q) => q.eq("libraryId", libraryId).eq("path", scanned.path))
+    .unique();
+
   const artist = await findOrCreateArtist(
     ctx,
     libraryId,
     scanned.albumArtist ?? scanned.artist,
     scanned.artHash,
+    existing?.artHash,
   );
 
-  const album = await findOrCreateAlbum(ctx, libraryId, artist, scanned);
+  const album = await findOrCreateAlbum(ctx, libraryId, artist, scanned, existing?.artHash);
 
   const fields = {
     libraryId,
@@ -242,6 +274,7 @@ export const upsertScannedTrack = async (
     sampleRate: scanned.sampleRate,
     bitDepth: scanned.bitDepth,
     artHash: scanned.artHash,
+    folderArt: scanned.folderArt,
     missing: false,
     searchText: trackSearchText({
       title: scanned.title,
@@ -249,11 +282,6 @@ export const upsertScannedTrack = async (
       albumTitle: scanned.album,
     }),
   };
-
-  const existing = await ctx.db
-    .query("tracks")
-    .withIndex("by_library_path", (q) => q.eq("libraryId", libraryId).eq("path", scanned.path))
-    .unique();
 
   if (existing === null) {
     await ctx.db.insert("tracks", fields);

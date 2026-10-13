@@ -54,6 +54,8 @@ const Fingerprint = Schema.Struct({
   size: Schema.Finite,
   mtimeMs: Schema.Finite,
   missing: Schema.Boolean,
+  /** The folder artwork the last scan saw beside the file (see `ScannedTrack.folderArt`). */
+  folderArt: Schema.optional(Schema.String),
 });
 
 /** What Convex knows about one file, for skipping unchanged files. */
@@ -100,6 +102,11 @@ export interface ScannedTrack {
   readonly sampleRate?: number | undefined;
   readonly bitDepth?: number | undefined;
   readonly artHash?: string | undefined;
+  /**
+   * The folder artwork file beside the file, as `path:size:mtime` (see `folder-art.ts`), whether
+   * or not the file has a picture of its own. A later scan reads the file again when it changes.
+   */
+  readonly folderArt?: string | undefined;
 }
 
 /** Progress of a running job. */

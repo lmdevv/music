@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -211,6 +211,59 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(paths).not.toContain("Elsewhere/secret.flac");
         expect(paths.filter((path) => path.startsWith("Loop/"))).toEqual([]);
         expect((yield* trackAt("Bare/song.m4a"))?.scanned.artHash).toBeUndefined();
+      }),
+    ));
+
+  it("reads songs again when their folder's cover is replaced", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root, scan, trackAt } = yield* setup;
+        const path = "The Sine Waves/Folder Art/01 Brushes.m4a";
+
+        yield* scan;
+        const before = (yield* trackAt(path))?.scanned.artHash;
+
+        // Another JPEG: the art store only checks an image's first bytes.
+        const replaced = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...randomBytes(64)]);
+
+        yield* Files.writeFileAtomic(
+          join(root, "The Sine Waves/Folder Art/cover.jpg"),
+          replaced,
+          "x",
+        );
+        const summary = yield* scan;
+        const after = (yield* trackAt(path))?.scanned.artHash;
+
+        // Both songs of the album, Brushes and Walking Bass.
+        expect(summary).toMatchObject({ updated: 2, missing: 0, failed: 0 });
+        expect(after).toBe(createHash("sha256").update(replaced).digest("hex"));
+        expect(after).not.toBe(before);
+        expect(yield* scan).toMatchObject({ updated: 0 });
+      }),
+    ));
+
+  it("gives songs in disc folders the album folder's cover", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root, scan, trackAt } = yield* setup;
+        const source = join(root, "The Sine Waves/Folder Art");
+        const album = join(root, "Boxed Set");
+
+        for (const folder of ["CD1", "Disc 2", "Extras"]) {
+          yield* Files.makeDirectory(join(album, folder));
+          yield* Files.copyTree(join(source, "01 Brushes.m4a"), join(album, folder, "song.m4a"));
+        }
+
+        yield* Files.copyTree(join(source, "cover.jpg"), join(album, "cover.jpg"));
+        yield* scan;
+
+        const cover = createHash("sha256")
+          .update(yield* Files.readWholeFile(join(album, "cover.jpg")))
+          .digest("hex");
+
+        expect((yield* trackAt("Boxed Set/CD1/song.m4a"))?.scanned.artHash).toBe(cover);
+        expect((yield* trackAt("Boxed Set/Disc 2/song.m4a"))?.scanned.artHash).toBe(cover);
+        expect((yield* trackAt("Boxed Set/Extras/song.m4a"))?.scanned.artHash).toBeUndefined();
       }),
     ));
 
