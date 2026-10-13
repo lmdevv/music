@@ -549,6 +549,16 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
         libraryId,
         paths: ["Open/song.flac"],
       }),
+      visitor.mutation(makeFunctionReference<"mutation">("media:moveTracks"), {
+        secret,
+        libraryId,
+        moves: [],
+      }),
+      visitor.query(makeFunctionReference<"query">("media:artHashes"), {
+        secret,
+        table: "tracks",
+        cursor: null,
+      }),
       visitor.mutation(makeFunctionReference<"mutation">("media:claimJob"), {
         secret,
         jobId: fixture.alpha.jobId,

@@ -72,6 +72,18 @@ const FingerprintPage = Schema.Struct({
   done: Schema.Boolean,
 });
 
+const ArtHashPage = Schema.Struct({
+  hashes: Schema.Array(Schema.String),
+  cursor: Schema.String,
+  done: Schema.Boolean,
+});
+
+/** The artwork hashes one page of a table uses, and the cursor for the next page. */
+export interface ArtHashPage extends Schema.Schema.Type<typeof ArtHashPage> {}
+
+/** The tables whose rows refer to stored artwork by hash. */
+export type ArtworkTable = "tracks" | "albums" | "artists";
+
 const TrackSource = Schema.Struct({
   path: Schema.String,
   libraryPath: Schema.String,
@@ -190,6 +202,11 @@ const functions = {
   trackSource: makeFunctionReference<"query", Secret & { trackId: string }, unknown>(
     "media:trackSource",
   ),
+  artHashes: makeFunctionReference<
+    "query",
+    Secret & { table: ArtworkTable; cursor: string | null },
+    unknown
+  >("media:artHashes"),
   requestScan: makeFunctionReference<"mutation", Secret & { libraryId: string }, unknown>(
     "media:requestScan",
   ),
@@ -238,6 +255,11 @@ export interface Interface {
     libraryId: LibraryId,
     paths: ReadonlyArray<string>,
   ) => Effect.Effect<void, BackendError>;
+  /** The artwork hashes one page of `table` uses; start from a `null` cursor until `done`. */
+  readonly artHashes: (
+    table: ArtworkTable,
+    cursor: string | null,
+  ) => Effect.Effect<ArtHashPage, BackendError>;
   /** Resolves a track to its file; `None` when the track is unknown or missing. */
   readonly trackSource: (
     trackId: TrackId,
@@ -268,6 +290,8 @@ const decodeReport = Schema.decodeUnknownEffect(ReportResult);
 const decodeFingerprints = Schema.decodeUnknownEffect(FingerprintPage);
 
 const decodeTrackSource = Schema.decodeUnknownEffect(Schema.NullOr(TrackSource));
+
+const decodeArtHashes = Schema.decodeUnknownEffect(ArtHashPage);
 
 const call = <A>(operation: string, run: () => Promise<A>): Effect.Effect<A, BackendError> =>
   Effect.tryPromise({ try: run, catch: (cause) => new BackendError({ operation, cause }) }).pipe(
@@ -399,6 +423,17 @@ const make = Effect.gen(function* () {
       yield* call("markMissing", () =>
         client.mutation(functions.markMissing, { secret: secret(), libraryId, paths }),
       );
+    }),
+
+    artHashes: Effect.fn("MediaBackend.artHashes")(function* (
+      table: ArtworkTable,
+      cursor: string | null,
+    ) {
+      const result = yield* call("artHashes", () =>
+        client.query(functions.artHashes, { secret: secret(), table, cursor }),
+      );
+
+      return yield* decodeArtHashes(result).pipe(Effect.mapError(decodeFailure("artHashes")));
     }),
 
     trackSource: Effect.fn("MediaBackend.trackSource")(function* (trackId: TrackId) {

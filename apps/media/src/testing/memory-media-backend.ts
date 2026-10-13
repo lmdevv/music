@@ -3,6 +3,9 @@
  * scans, streams, and the job worker to run without a deployment: fingerprints come from earlier
  * upserts, claims and reports are guarded by worker and status, and scan requests collapse into a
  * library's pending or running job. `MemoryMediaBackendControl` adds libraries and inspects state.
+ *
+ * It keeps tracks only: albums and artists, whose artwork Convex takes from their tracks, list no
+ * artwork of their own.
  */
 import { JobId, LibraryId, TrackId } from "@music/commands/ids";
 import { Context, Effect, Layer, Option, Stream, SubscriptionRef } from "effect";
@@ -14,6 +17,8 @@ import {
   type LibraryFolder,
   MediaBackend,
   type PendingJob,
+  type ArtHashPage,
+  type ArtworkTable,
   type ScannedTrack,
   type TrackMove,
   type TrackSource,
@@ -283,6 +288,23 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
         }),
 
         markMissing,
+
+        artHashes: Effect.fn("MemoryMediaBackend.artHashes")(function* (
+          table: ArtworkTable,
+          cursor: string | null,
+        ) {
+          const current = yield* SubscriptionRef.get(state);
+          const start = cursor === null ? 0 : Number(cursor);
+          const rows = table === "tracks" ? current.tracks.slice(start, start + PAGE) : [];
+
+          const page: ArtHashPage = {
+            hashes: [...new Set(rows.flatMap((track) => track.scanned.artHash ?? []))],
+            cursor: String(start + rows.length),
+            done: rows.length < PAGE,
+          };
+
+          return page;
+        }),
 
         trackSource: Effect.fn("MemoryMediaBackend.trackSource")(function* (trackId: TrackId) {
           const current = yield* SubscriptionRef.get(state);

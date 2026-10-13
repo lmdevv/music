@@ -2,12 +2,15 @@
  * Runs scan jobs from Convex. The worker subscribes to pending jobs, claims one at a time,
  * renews its lease while the scan runs, stops when the job is cancelled, and reports the result.
  * Claims are guarded by Convex and scans are idempotent, so a job that runs twice is harmless.
+ * After a scan that changed songs, it deletes the artwork nothing uses any more; jobs run one at
+ * a time, so no scan of this worker is storing artwork meanwhile.
  */
 import { hostname } from "node:os";
 
 import type { JobId } from "@music/commands/ids";
 import { Cause, Data, Effect, Layer, Option, Ref, Schedule, Stream } from "effect";
 
+import { collectUnusedArt } from "./art-collector.ts";
 import {
   type JobOutcome,
   type JobProgress,
@@ -34,6 +37,9 @@ const outcomeOf = (end: JobEnd): JobOutcome | undefined =>
     Failed: ({ error }): JobOutcome => ({ status: "failed", error }),
     Cancelled: () => undefined,
   });
+
+const changedSongs = (summary: ScanSummary): boolean =>
+  summary.updated + summary.moved + summary.missing > 0;
 
 const runJob = Effect.fn("JobWorker.runJob")(
   function* (jobId: JobId, workerId: string) {
@@ -88,6 +94,16 @@ const runJob = Effect.fn("JobWorker.runJob")(
     yield* reportOnce;
     yield* backend.finishJob(jobId, workerId, outcome);
     yield* Effect.logInfo("JobWorker.finished").pipe(Effect.annotateLogs({ outcome }));
+
+    // Artwork only falls out of use when songs change.
+    if (JobEnd.$is("Finished")(end) && changedSongs(end.summary)) {
+      yield* collectUnusedArt().pipe(
+        Effect.catchTags({
+          BackendError: (error) => Effect.logWarning("JobWorker.art_collection_failed", error),
+          FileError: (error) => Effect.logWarning("JobWorker.art_collection_failed", error),
+        }),
+      );
+    }
   },
   (effect, jobId) => effect.pipe(Effect.annotateLogs({ jobId })),
 );

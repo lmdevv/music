@@ -14,6 +14,8 @@ const LEASE_MS = 60_000;
 
 const FINGERPRINT_PAGE = 1000;
 
+const ART_PAGE = 1000;
+
 const scannedTrack = v.object({
   path: v.string(),
   size: v.number(),
@@ -228,6 +230,28 @@ export const markMissing = mutation({
     await inOrder(paths, (path) => markTrackMissing(ctx, libraryId, path));
 
     return { marked: paths.length };
+  },
+});
+
+/**
+ * The artwork hashes one page of tracks, albums, or artists uses, so the media service can
+ * delete stored artwork nothing uses any more. Walk each table from a `null` cursor until `done`.
+ */
+export const artHashes = query({
+  args: {
+    secret: v.string(),
+    table: v.union(v.literal("tracks"), v.literal("albums"), v.literal("artists")),
+    cursor: v.union(v.string(), v.null()),
+  },
+  handler: async (ctx, { secret, table, cursor }) => {
+    requireService(secret);
+
+    const page = await ctx.db.query(table).paginate({ cursor, numItems: ART_PAGE });
+    const hashes = new Set<string>();
+
+    for (const doc of page.page) if (doc.artHash !== undefined) hashes.add(doc.artHash);
+
+    return { hashes: [...hashes], cursor: page.continueCursor, done: page.isDone };
   },
 });
 

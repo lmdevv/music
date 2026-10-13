@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -18,6 +19,7 @@ import {
   layerMemory,
   MemoryMediaBackendControl,
 } from "./testing/memory-media-backend.ts";
+import { setFileTime } from "./testing/file-times.ts";
 import { runScoped } from "./testing/run.ts";
 
 const untilSettled = (
@@ -102,6 +104,57 @@ describe("JobWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           error: `The folder is empty. Is the drive mounted? (${root})`,
         });
         expect((yield* control.tracks).filter((track) => track.missing)).toEqual([]);
+      }),
+    ));
+
+  it("deletes the artwork nothing uses once a scan changed songs", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root } = yield* fixtureLibrary;
+        const dataDir = yield* temporaryDirectory("data");
+        const art = join(dataDir, "art");
+        const services = Layer.merge(layerMemory, testConfig(dataDir));
+
+        const context = yield* Layer.build(
+          Layer.merge(services, JobWorker.layer.pipe(Layer.provide(services))),
+        );
+
+        const control = yield* MemoryMediaBackendControl.pipe(Effect.provideContext(context));
+        const libraryId = yield* control.addLibrary(root);
+
+        yield* untilSettled(control, yield* control.enqueueScan(libraryId));
+        const before = yield* Files.listNames(art);
+        const cover = join(root, "The Sine Waves/Folder Art/cover.jpg");
+
+        const oldCover = createHash("sha256")
+          .update(yield* Files.readWholeFile(cover))
+          .digest("hex");
+
+        // An hour later, the album's cover is replaced.
+        for (const name of before) {
+          yield* Effect.promise(() => setFileTime(join(art, name), Date.now() - 60 * 60 * 1000));
+        }
+
+        const replaced = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...randomBytes(64)]);
+
+        yield* Files.writeFileAtomic(cover, replaced, "x");
+        yield* untilSettled(control, yield* control.enqueueScan(libraryId));
+
+        const after = yield* Files.listNames(art).pipe(
+          Effect.repeat({
+            schedule: Schedule.spaced("20 millis"),
+            until: (names) => !names.includes(oldCover),
+            times: 100,
+          }),
+        );
+
+        expect(before).toContain(oldCover);
+        expect(after.toSorted()).toEqual(
+          [
+            ...before.filter((name) => name !== oldCover),
+            createHash("sha256").update(replaced).digest("hex"),
+          ].toSorted(),
+        );
       }),
     ));
 
