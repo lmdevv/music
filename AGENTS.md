@@ -13,8 +13,9 @@ included; the repo and packages use `music`.
 - **GPL and AGPL code is read-only.** Navidrome (GPL-3.0) and Immich (AGPL-3.0) may be read for
   ideas and edge cases. Never copy, port, or translate their code into this repo. Effect, OpenCode,
   and Pi are MIT and safe to reference.
-- **Follow the `coding-standards` skill** when writing, reviewing, or refactoring TypeScript. It is
-  in `.agents/skills/coding-standards/`, from `dmmulroy/skills`.
+- **Load the `coding-standards` skill** before writing, reviewing, or refactoring TypeScript. It is
+  in `.agents/skills/coding-standards/`, from `dmmulroy/skills`. Where it conflicts with this file,
+  this file wins: no lint suppressions, even where its examples use them.
 - **No MCP server.** Agents use the CLI and `skills/music/SKILL.md`.
 - **Never commit secret values.** `.env.example` lists configuration names only.
 - **Never weaken a lint rule, add a cast, or add a suppression to pass checks.** Fix the code or
