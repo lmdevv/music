@@ -7,7 +7,7 @@ import { cn } from "@music/ui/lib/utils";
 import { useParams } from "@tanstack/react-router";
 import { Option, Schema } from "effect";
 import { SearchIcon } from "lucide-react";
-import { useDeferredValue, useEffect, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 
 import { useUi } from "@/components/shell/ui-state";
@@ -101,7 +101,33 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
     list.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
   }, [active]);
 
-  const [runPrimary, setRunPrimary] = useState<(() => void) | null>(null);
+  // The shown preview's primary action, tagged with its row so a stale one never runs.
+  const [primary, setPrimary] = useState<{ readonly id: string; readonly run: () => void } | null>(
+    null,
+  );
+
+  // A row clicked while another was selected: it runs once its own preview registers.
+  const [runWhenShown, setRunWhenShown] = useState<string | null>(null);
+  const currentId = current?.id ?? null;
+  const runPrimary = primary !== null && primary.id === currentId ? primary.run : null;
+
+  const registerPrimary = useCallback(
+    (run: (() => void) | null) => {
+      if (currentId === null) return;
+
+      setPrimary((previous) =>
+        run === null ? (previous?.id === currentId ? null : previous) : { id: currentId, run },
+      );
+    },
+    [currentId],
+  );
+
+  useEffect(() => {
+    if (runWhenShown === null || primary?.id !== runWhenShown) return;
+
+    setRunWhenShown(null);
+    primary.run();
+  }, [primary, runWhenShown]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     const key = menuKeyOf(event.nativeEvent);
@@ -192,7 +218,9 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
 
                   if (item.kind === "command" && item.fields.length > 0) setDetail(true);
                   else if (item.kind === "now") setDetail(true);
-                  else runPrimary?.();
+                  // A tap can select and click in one go; the old row's action must not run.
+                  else if (index === active) runPrimary?.();
+                  else setRunWhenShown(item.id);
                 }}
               />
             ))}
@@ -210,7 +238,7 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
                 context={context}
                 onClose={onClose}
                 onBack={() => setDetail(false)}
-                registerPrimary={setRunPrimary}
+                registerPrimary={registerPrimary}
               />
             )}
           </div>

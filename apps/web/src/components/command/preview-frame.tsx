@@ -25,7 +25,7 @@ export const usePrimary = (
   latest.current = run;
 
   useEffect(() => {
-    registerPrimary(() => () => latest.current());
+    registerPrimary(() => latest.current());
 
     return () => registerPrimary(null);
   }, [registerPrimary]);
