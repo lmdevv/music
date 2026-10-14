@@ -75,7 +75,8 @@ first and change the image second:
    its own functions again over the restored data.
 
 To restore without going back to an older image, run only step 1, then `docker restart music` so
-the data migrations run over the restored rows.
+the data migrations run over the restored rows. `scripts/upgrade-e2e.sh` runs this whole round
+trip in CI: 0.1.0, an upgrade to the new image, a restore, and back to 0.1.0.
 
 The same import restores a backup into a new install: start the image on an empty volume, wait
 for it to report healthy, and import. People sign in again; their API keys keep working.
@@ -101,14 +102,14 @@ first, so upgrading (or going back) is: change the tag, then recreate the contai
 
 ```sh
 docker pull ghcr.io/lmdevv/music:0.2.0
-docker rm -f music
+docker stop music && docker rm music   # stop lets the database shut down cleanly
 docker run -d --name music -p 8080:8080 -v music-data:/data -v /path/to/music:/music:ro \
   -e PUBLIC_URL=https://music.example.com ghcr.io/lmdevv/music:0.2.0
 ```
 
 ### Docker Compose
 
-Set the tag in `compose.yaml` (`image: ghcr.io/lmdevv/music:0.2.0`), then:
+Set the tag (`MUSIC_VERSION=0.2.0` in the `.env` next to `compose.yaml`), then:
 
 ```sh
 docker compose pull && docker compose up -d
@@ -119,27 +120,27 @@ starts the new image.
 
 ### NixOS
 
-The module runs the image with `virtualisation.oci-containers`, which pulls an image once and
-keeps using that copy: a moving tag such as `main` does **not** update on its own. Either pin a
-release and change it to upgrade:
+By default the module runs the release its flake revision was cut for
+(`ghcr.io/lmdevv/music:<version>`), so updating the flake input and rebuilding is the upgrade:
 
-```nix
-services.music.image = "ghcr.io/lmdevv/music:0.2.0";
+```sh
+nix flake update music && sudo nixos-rebuild switch
 ```
 
-or keep a moving tag and have it pulled on every service start, then restart the service (named
-`podman-music` or `docker-music`, after `virtualisation.oci-containers.backend`):
+The module runs the image with `virtualisation.oci-containers`, which pulls an image once and
+keeps using that copy: a moving tag such as `latest` or `main` does **not** update on its own.
+To follow one, have it pulled on every service start, or let a timer check for you:
 
 ```nix
 services.music = {
   image = "ghcr.io/lmdevv/music:latest";
-  pull = "newer"; # or "always"
+  pull = "newer";           # on every start of podman-music (or docker-music) ...
+  autoUpdate.enable = true; # ... and daily: pull, and restart only if the image changed
 };
 ```
 
-```sh
-sudo systemctl restart podman-music
-```
+`imageFile` loads an image archive from the Nix store instead of pulling, for example a
+`dockerTools.pullImage` pinned by digest; its name and tag must equal `image`.
 
 ## Health
 
