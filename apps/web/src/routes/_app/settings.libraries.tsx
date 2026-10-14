@@ -294,7 +294,7 @@ function LibraryCard({
           <AccessForm
             library={library}
             owner={owner}
-            mine={library.ownerId === myId}
+            editable={library.accessEditable}
             serverOwner={can(me.role, "owner")}
             removable={removable}
             onDone={() => setEditing(null)}
@@ -403,7 +403,7 @@ const stillCan = (library: Library, removable: boolean): string => {
 function AccessForm({
   library,
   owner,
-  mine,
+  editable,
   serverOwner,
   removable,
   onDone,
@@ -411,8 +411,11 @@ function AccessForm({
   readonly library: Library;
   /** How to name the owner: "you", or their name. */
   readonly owner: string;
-  /** Whether the viewer owns the library, the only one who may change who listens. */
-  readonly mine: boolean;
+  /**
+   * Whether the viewer may change who listens: the library's owner while an admin, else the
+   * server's owner (`canChangeLibraryAccess`).
+   */
+  readonly editable: boolean;
   /** Whether the viewer owns the server, and so manages every library. */
   readonly serverOwner: boolean;
   /** Whether the viewer may remove the library (`canRemoveLibrary`). */
@@ -423,8 +426,8 @@ function AccessForm({
   const grant = useRun("libraries.grant");
   const revoke = useRun("libraries.revoke");
   // Only a library's managers may read its access list (anyone else gets not_found, which would
-  // take the whole screen down), and only its owner adds people.
-  const people = useRead("people.list", mine ? {} : "skip");
+  // take the whole screen down), and only who may change access adds people.
+  const people = useRead("people.list", editable ? {} : "skip");
 
   const added = useRead(
     "libraries.people",
@@ -458,7 +461,7 @@ function AccessForm({
             <Chip
               key={option}
               selected={visibility === option}
-              disabled={changing || !mine}
+              disabled={changing || !editable}
               onClick={() => (option === visibility ? undefined : void setVisibility(option))}
             >
               {visibilityLabel(option, owner)}
@@ -466,7 +469,7 @@ function AccessForm({
           ))}
         </div>
         <FieldHint>{VISIBILITY_HINTS[visibility](owner, serverOwner)}</FieldHint>
-        {mine ? null : (
+        {editable ? null : (
           <FieldHint>
             Only {owner} can change who listens to this folder. {stillCan(library, removable)}
           </FieldHint>
@@ -499,7 +502,7 @@ function AccessForm({
                   </span>
                   <button
                     type="button"
-                    disabled={!mine}
+                    disabled={!editable}
                     aria-label={`Remove ${person.name ?? person.email}`}
                     onClick={() => void remove(person.id)}
                     className="font-sans text-sm/xs font-medium text-danger hover:underline disabled:cursor-not-allowed disabled:opacity-(--opacity-disabled) disabled:no-underline"
@@ -510,7 +513,7 @@ function AccessForm({
               ))}
             </ul>
           )}
-          {candidates.length === 0 || !mine ? null : (
+          {candidates.length === 0 || !editable ? null : (
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={<Button variant="secondary" size="sm" className="w-fit" pending={adding} />}

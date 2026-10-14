@@ -77,14 +77,23 @@ export const canRemoveLibrary = (
   can(actor.role, "owner") || (can(actor.role, "admin") && library.ownerId === actor.id);
 
 /**
- * Whether `actor` may change who listens to a library: its visibility and its access list. Only
- * the library's own owner may, so no admin can let themselves or anyone else into a library that
- * is not theirs. A library whose owner is removed moves to the server's owner, who then decides.
+ * Whether `actor` may change who listens to a library: its visibility and its access list. A
+ * library's own owner may while they run libraries (an admin), so no admin can let themselves or
+ * anyone else into a library that is not theirs. Once its owner can't (demoted to member or
+ * guest, or gone), the server's owner may, as they manage every library; a library whose owner is
+ * removed moves to the server's owner anyway.
  */
 export const canChangeLibraryAccess = (
   actor: PersonRef,
-  library: { readonly ownerId: string },
-): boolean => can(actor.role, "admin") && library.ownerId === actor.id;
+  library: {
+    readonly ownerId: string;
+    /** The library owner's role now; null when their account is gone. */
+    readonly ownerRole: Role | null;
+  },
+): boolean =>
+  can(actor.role, "admin") &&
+  (library.ownerId === actor.id ||
+    (can(actor.role, "owner") && (library.ownerRole === null || !can(library.ownerRole, "admin"))));
 
 /** Whether `actor` may make `target` the owner: only the owner, and only to an admin. */
 export const canTransferOwnership = (

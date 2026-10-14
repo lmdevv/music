@@ -1350,7 +1350,7 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     await expectReadFailure(person, "people.list", {}, "forbidden");
   });
 
-  it("takes an admin's invites when they step down, and leaves their private library theirs", async () => {
+  it("takes an admin's invites when they step down, and leaves their private library theirs to hear", async () => {
     const { adminA, adminB } = fixture;
     const keeper = await invite(adminA, `keeper-${id}@music.test`, "admin");
     const { id: keeperId } = await keeper.music.read("account.me", {});
@@ -1386,8 +1386,8 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       state: "invalid",
     });
 
-    // Their private library is still theirs to hear. Another admin can't touch it; the server's
-    // owner manages it but can't open it up.
+    // Their private library is still theirs to hear. Another admin can't touch it. A member can't
+    // run libraries, so the server's owner, who manages it, now decides who listens too.
     expect(await listed()).toMatchObject({ readable: false, path: null });
     await expectRunFailure(
       adminB,
@@ -1399,12 +1399,18 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       libraryId: vault.libraryId,
       name: `Vault kept ${id}`,
     });
-    await expectRunFailure(
-      adminA,
-      "libraries.update",
-      { libraryId: vault.libraryId, visibility: "shared" },
-      "forbidden",
-    );
+    expect(
+      await failureCode(
+        adminA.music.run("libraries.update", {
+          libraryId: vault.libraryId,
+          visibility: "restricted",
+        }),
+      ),
+    ).toBe("succeeded");
+    await adminA.music.run("libraries.update", {
+      libraryId: vault.libraryId,
+      visibility: "private",
+    });
     expect((await keeper.music.read("libraries.list", {})).map((library) => library.id)).toContain(
       vault.libraryId,
     );

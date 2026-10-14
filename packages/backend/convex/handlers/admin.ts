@@ -83,9 +83,22 @@ const managedLibrary = async (
   return library;
 };
 
-/** Fails unless the viewer may change who listens to `library`: only its owner may. */
-const checkAccessOwner = (viewer: Viewer, library: Doc<"libraries">): void => {
-  if (!canChangeLibraryAccess(viewer, library)) {
+/** What `canChangeLibraryAccess` reads of a library and its owner. */
+const accessOf = (library: Doc<"libraries">, owner: Doc<"users"> | null) => ({
+  ownerId: library.ownerId,
+  ownerRole: owner === null ? null : roleOf(owner),
+});
+
+/**
+ * Fails unless the viewer may change who listens to `library`: its owner while they are an
+ * admin, else the server's owner.
+ */
+const checkAccessOwner = async (
+  ctx: QueryCtx,
+  viewer: Viewer,
+  library: Doc<"libraries">,
+): Promise<void> => {
+  if (!canChangeLibraryAccess(viewer, accessOf(library, await ctx.db.get(library.ownerId)))) {
     fail("forbidden", "Only the library's owner can change who listens to it");
   }
 };
@@ -160,15 +173,18 @@ export const adminQueries = {
       : viewer.libraries;
 
     return Promise.all(
-      listed.map(async (library) =>
-        presentLibrary(
+      listed.map(async (library) => {
+        const owner = await ctx.db.get(library.ownerId);
+
+        return presentLibrary(
           library,
-          ownerLabel(await ctx.db.get(library.ownerId), viewer.role),
+          ownerLabel(owner, viewer.role),
           canRead(viewer, library._id),
           canManage(viewer, library),
+          canChangeLibraryAccess(viewer, accessOf(library, owner)),
           (await activeJob(ctx, library._id)) !== null,
-        ),
-      ),
+        );
+      }),
     );
   },
 
@@ -285,7 +301,7 @@ export const adminMutations = {
     if (args.name !== undefined) patch.name = args.name;
 
     if (args.visibility !== undefined && args.visibility !== library.visibility) {
-      checkAccessOwner(viewer, library);
+      await checkAccessOwner(ctx, viewer, library);
       patch.visibility = args.visibility;
     }
 
@@ -297,7 +313,7 @@ export const adminMutations = {
   "libraries.grant": async (ctx, viewer, args) => {
     const library = await managedLibrary(ctx, viewer, args.libraryId);
 
-    checkAccessOwner(viewer, library);
+    await checkAccessOwner(ctx, viewer, library);
     const user = await loadPerson(ctx, args.userId);
 
     if (library.visibility === "private") {
@@ -323,7 +339,7 @@ export const adminMutations = {
   "libraries.revoke": async (ctx, viewer, args) => {
     const library = await managedLibrary(ctx, viewer, args.libraryId);
 
-    checkAccessOwner(viewer, library);
+    await checkAccessOwner(ctx, viewer, library);
     const grant = await grantOf(ctx, library._id, tableId(ctx, "users", args.userId));
 
     if (grant !== null) await ctx.db.delete(grant._id);

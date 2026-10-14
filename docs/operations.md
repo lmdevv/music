@@ -202,7 +202,8 @@ Every service runs as its own unprivileged user; only the start-up script runs a
   to; the server's owner manages every library. Only a library's own owner, or the
   server's owner, removes it. Admins see that the other libraries exist (name, owner,
   visibility, song count) but not their folders. Only a library's own owner changes who listens
-  to it. When someone is removed, their libraries move to the server's owner.
+  to it, while they are an admin; once they are demoted, the server's owner does. When someone is
+  removed, their libraries move to the server's owner.
 - **Library folders (`MUSIC_ROOTS`).** Before every scan the media service resolves a library's
   folder through links and claims it, with the device and inode of the folder and of each folder
   above it, which a bind mount can't change. A folder that is, sits inside, or holds another

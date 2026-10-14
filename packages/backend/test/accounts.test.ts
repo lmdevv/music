@@ -10,7 +10,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { api, internal } from "../convex/_generated/api";
 import { enableAuth, joinWithPassword, passwordFlow } from "./auth";
-import { makeBackend, signUp, upsertFiles } from "./backend";
+import { drainScheduled, makeBackend, signUp, upsertFiles } from "./backend";
 import type { Backend, User } from "./backend";
 import { failure, failureCode } from "./harness";
 
@@ -143,9 +143,16 @@ describe("password reset links", () => {
   });
 
   it("show as unusable, not as a form, for a suspended person", async () => {
-    const { backend, owner, member } = await household();
+    const { backend, owner, admin, member } = await household();
+    const made = await admin.music.run("people.reset", { userId: member.userId });
 
     await owner.music.run("people.suspend", { userId: member.userId });
+
+    // A link made before the suspension, by an admin.
+    expect(await backend.query(api.setup.passwordReset, { token: made.token })).toEqual({
+      state: "invalid",
+    });
+    expect(await failureCode(redeem(backend, made.token))).toBe("invalid_args");
 
     // An operator's link (`createForEmail`) for someone already suspended.
     const { path } = await backend.mutation(internal.passwordResets.createForEmail, {
@@ -225,6 +232,111 @@ describe("password resets around library access", () => {
     expect(await failureCode(admin.music.run("people.reset", { userId: keeper.userId }))).toBe(
       "forbidden",
     );
+  });
+});
+
+/** How each kind of account from before owners is stored. */
+const LEGACY_ROWS = {
+  admin: { role: "admin" },
+  "suspended admin": { role: "admin", suspendedAt: 1 },
+  member: { role: "member" },
+} as const;
+
+/**
+ * A server from before owners, with accounts of `kinds` in creation order, after its migrations
+ * ran: each account's role and whether it is suspended.
+ */
+const migrateLegacy = async (kinds: ReadonlyArray<keyof typeof LEGACY_ROWS>) => {
+  const backend = makeBackend();
+
+  // Inserted in one transaction, in order, so creation order follows `kinds`.
+  const ids = await backend.run(async (ctx) =>
+    Promise.all(
+      kinds.map(async (kind, index) =>
+        ctx.db.insert("users", {
+          email: `legacy-${String(index)}@music.test`,
+          ...LEGACY_ROWS[kind],
+        }),
+      ),
+    ),
+  );
+
+  await backend.mutation(internal.migrations.run, {});
+  await drainScheduled(backend);
+
+  const after = await backend.run(async (ctx) =>
+    Promise.all(ids.map(async (id) => ctx.db.get(id))),
+  );
+
+  return after.map((user) => [user?.role, user?.suspendedAt !== undefined]);
+};
+
+describe("the promoteOwner migration", () => {
+  it("never picks a suspended admin, nor lifts a suspension", async () => {
+    expect(await migrateLegacy(["suspended admin", "admin", "member"])).toEqual([
+      ["admin", true],
+      ["owner", false],
+      ["member", false],
+    ]);
+  });
+
+  it("leaves a server whose only admins are suspended without an owner", async () => {
+    expect(await migrateLegacy(["suspended admin", "member"])).toEqual([
+      ["admin", true],
+      ["member", false],
+    ]);
+  });
+});
+
+describe("access to a demoted admin's libraries", () => {
+  it("passes to the server's owner, while other admins still can't change it", async () => {
+    const { owner, admin } = await household();
+
+    const { libraryId } = await admin.music.run("libraries.create", {
+      name: "Theirs",
+      path: "/music/theirs",
+      visibility: "restricted",
+    });
+
+    const listed = async (user: User) =>
+      (await user.music.read("libraries.list", {})).find((library) => library.id === libraryId);
+
+    // While its owner is an admin, only they change who listens.
+    expect((await listed(owner))?.accessEditable).toBe(false);
+    expect(
+      await failureCode(owner.music.run("libraries.update", { libraryId, visibility: "shared" })),
+    ).toBe("forbidden");
+
+    await owner.music.run("people.role", { userId: UserId.make(admin.id), role: "member" });
+
+    // A member can't run libraries, so the server's owner now decides.
+    expect((await listed(owner))?.accessEditable).toBe(true);
+    expect(
+      await failureCode(owner.music.run("libraries.update", { libraryId, visibility: "shared" })),
+    ).toBe("succeeded");
+    expect(
+      await failureCode(
+        owner.music.run("libraries.grant", { libraryId, userId: UserId.make(admin.id) }),
+      ),
+    ).toBe("succeeded");
+  });
+
+  it("stays with the library's own owner over other admins", async () => {
+    const { backend, owner, admin } = await household();
+    const other = await signUp(backend, "admin");
+
+    const { libraryId } = await admin.music.run("libraries.create", {
+      name: "Theirs",
+      path: "/music/theirs",
+      visibility: "shared",
+    });
+
+    await owner.music.run("people.role", { userId: UserId.make(admin.id), role: "member" });
+
+    // Another admin hears it (shared) and manages it, but doesn't decide who listens.
+    expect(
+      await failureCode(other.music.run("libraries.update", { libraryId, visibility: "private" })),
+    ).toBe("forbidden");
   });
 });
 

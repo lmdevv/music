@@ -321,6 +321,8 @@ export const Library = Schema.Struct({
   path: Schema.NullOr(Schema.String),
   /** Whether you can rename, rescan, or remove it (`canManageLibrary`). */
   manageable: Schema.Boolean,
+  /** Whether you can change who listens to it (`canChangeLibraryAccess`). */
+  accessEditable: Schema.Boolean,
   visibility: LibraryVisibility,
   ownerId: UserId,
   /** Null when the owner's account is gone or has no name. */
