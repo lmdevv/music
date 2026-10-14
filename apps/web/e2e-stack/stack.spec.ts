@@ -614,10 +614,13 @@ test("the last song in the queue stops at its end instead of starting over", asy
 test("the command menu rescans the only library folder with Enter", async ({ page }) => {
   await signIn(page);
   await page.keyboard.press("Control+k");
-  await page.getByRole("combobox").fill("Rescan a library folder");
+  // A query no song, album, or artist matches, so the command is the top row once results settle.
+  await page.getByRole("combobox").fill("Rescan");
 
   const menu = page.getByRole("dialog");
 
+  // Enter waits while results load (the rows would still be the previous query's).
+  await expect(menu.getByRole("img", { name: "Searching" })).toHaveCount(0);
   // The only folder is already picked, so Enter runs the command.
   await expect(
     menu.getByRole("option", { name: /^Rescan a library folder/, selected: true }),
