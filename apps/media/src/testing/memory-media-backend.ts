@@ -52,6 +52,8 @@ interface State {
 /** Test controls over the in-memory backend. */
 export interface ControlInterface {
   readonly addLibrary: (path: string) => Effect.Effect<LibraryId>;
+  /** Deletes a library and its songs, as `libraries.delete` and the purge after it do. */
+  readonly deleteLibrary: (libraryId: LibraryId) => Effect.Effect<void>;
   /** Enqueues a scan the way `libraries.create` and `libraries.scan` do. */
   readonly enqueueScan: (libraryId: LibraryId) => Effect.Effect<JobId>;
   readonly cancelJob: (jobId: JobId) => Effect.Effect<void>;
@@ -348,6 +350,15 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
           }));
 
           return id;
+        }),
+        deleteLibrary: Effect.fn("MemoryMediaBackend.deleteLibrary")(function* (
+          libraryId: LibraryId,
+        ) {
+          yield* SubscriptionRef.update(state, (current) => ({
+            ...current,
+            libraries: current.libraries.filter((library) => library.id !== libraryId),
+            tracks: current.tracks.filter((track) => track.libraryId !== libraryId),
+          }));
         }),
         enqueueScan,
         cancelJob: Effect.fn("MemoryMediaBackend.cancelJob")(function* (jobId: JobId) {

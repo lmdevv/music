@@ -2,7 +2,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Schedule } from "effect";
+import { Clock, Effect, Layer, Schedule } from "effect";
+import { TestClock } from "effect/testing";
 
 import * as Files from "./files.ts";
 import * as JobWorker from "./job-worker.ts";
@@ -199,6 +200,74 @@ describe("JobWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         );
 
         expect(after.toSorted()).toEqual(kept.toSorted());
+      }),
+    ));
+
+  it("deletes a deleted library's artwork once Convex has had time to purge it", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const clock = yield* TestClock.make();
+        const { root } = yield* fixtureLibrary;
+
+        // Stored artwork carries real file times, which the collector compares with the clock.
+        yield* clock.setTime(Date.now());
+        const other = yield* temporaryDirectory("other");
+        const dataDir = yield* temporaryDirectory("data");
+        const art = join(dataDir, "art");
+        const services = Layer.merge(layerMemory, testConfig(dataDir));
+
+        // A second library keeps a cover of its own in use.
+        yield* Files.copyTree(
+          join(root, "The Sine Waves/Folder Art/01 Brushes.m4a"),
+          join(other, "song.m4a"),
+        );
+        yield* Files.writeFileAtomic(
+          join(other, "cover.jpg"),
+          new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...randomBytes(64)]),
+          "w",
+        );
+
+        yield* Effect.gen(function* () {
+          const context = yield* Layer.build(
+            Layer.merge(services, JobWorker.layer.pipe(Layer.provide(services))),
+          );
+
+          const control = yield* MemoryMediaBackendControl.pipe(Effect.provideContext(context));
+
+          const settled = (jobId: Parameters<typeof jobById>[1]) =>
+            clock.withLive(untilSettled(control, jobId));
+
+          const deleted = yield* control.addLibrary(root);
+
+          yield* settled(yield* control.enqueueScan(deleted));
+          yield* settled(yield* control.enqueueScan(yield* control.addLibrary(other)));
+
+          const kept = (yield* control.tracks)
+            .filter((track) => track.libraryId !== deleted)
+            .flatMap((track) => track.scanned.artHash ?? []);
+
+          for (const name of yield* Files.listNames(art)) {
+            yield* Effect.promise(() => setFileTime(join(art, name), Date.now() - 60 * 60 * 1000));
+          }
+
+          yield* control.deleteLibrary(deleted);
+          yield* clock.withLive(Effect.sleep("100 millis"));
+          expect((yield* Files.listNames(art)).length).toBeGreaterThan(kept.length);
+
+          yield* clock.adjust("5 minutes");
+
+          const after = yield* clock.withLive(
+            Files.listNames(art).pipe(
+              Effect.repeat({
+                schedule: Schedule.spaced("20 millis"),
+                until: (names) => names.length === kept.length,
+                times: 100,
+              }),
+            ),
+          );
+
+          expect(after.toSorted()).toEqual([...new Set(kept)].toSorted());
+        }).pipe(Effect.provideService(Clock.Clock, clock));
       }),
     ));
 
