@@ -17,6 +17,13 @@ if [ -z "$backup" ] || [ ! -s "$backup" ]; then
   exit 2
 fi
 
+# The media service writes to Convex on its own (folder claims, scan jobs): stop it first, so
+# nothing this image writes lands on the restored data before the container restarts. It stays
+# down until then.
+if [ -d /run/service/media ]; then
+  /command/s6-svc -wD -T 30000 -d /run/service/media || echo "[restore] the media service did not stop; restoring anyway" >&2
+fi
+
 cd /app/backend
 CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210 \
   CONVEX_SELF_HOSTED_ADMIN_KEY="$(cat "$data/secrets/admin_key")" \
@@ -27,7 +34,7 @@ from="$(basename "$backup" | sed -n 's/^pre-.*-from-\([0-9][0-9A-Za-z.+-]*\)-[0-
 if [ -n "$from" ]; then
   # Newer than /data/build, so the next start of any build-aware image backs up and redeploys.
   printf '%s\n' "$from" > "$data/version"
-  echo "[restore] restored $backup; the data is from version $from. Start that version (or newer) now."
+  echo "[restore] restored $backup; the data is from version $from. Start that version (or newer) now; the media service stays stopped until then."
 else
-  echo "[restore] restored $backup. Restart the container so every service starts from it."
+  echo "[restore] restored $backup. Restart the container so every service starts from it; the media service stays stopped until then."
 fi

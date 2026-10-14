@@ -67,8 +67,10 @@ image second:
    ```
 
    It replaces every table in the backup, including accounts and sessions, with its contents,
-   and records in `/data/version` that the data is now 0.2.0's. A file from outside the container
-   must be copied in first: `docker cp ./backup.zip music:/data/backups/`.
+   and records in `/data/version` that the data is now 0.2.0's. It stops the media service
+   first, so nothing the current image writes (a folder claim, a scan) lands on the restored data;
+   the media service starts again with the container. A file from outside the container must be
+   copied in first: `docker cp ./backup.zip music:/data/backups/`.
 
 2. Start the previous image on the same volume (see [Pin a version](#pin-a-version)). It deploys
    its own functions again over the restored data.
