@@ -55,31 +55,36 @@ docker start music
 
 ## Restore
 
-A `pre-*.zip` holds the data as the version _before_ the upgrade stored it. Every newer version
-can read data an older one wrote, but not the other way round, so to undo an upgrade, restore
-first and change the image second:
+A `pre-*.zip` holds the data as the version _before_ the upgrade stored it; its name says which
+(`pre-<new version>-<build>-from-<old version>-<time>.zip`). Every newer version can read data an
+older one wrote, but not the other way round, so to undo an upgrade, restore first and change the
+image second:
 
 1. While the current image still runs, replace the database with the backup:
 
    ```sh
-   docker exec music sh -c 'cd /app/backend && CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210 \
-     CONVEX_SELF_HOSTED_ADMIN_KEY="$(cat /data/secrets/admin_key)" \
-     ./node_modules/.bin/convex import --replace-all -y /data/backups/pre-0.2.0-<build>-<time>.zip'
+   docker exec music /app/bin/restore /data/backups/pre-0.3.0-<build>-from-0.2.0-<time>.zip
    ```
 
-   `--replace-all` replaces every table in the backup, including accounts and sessions, with
-   its contents. A file from outside the container must be copied in first:
-   `docker cp ./backup.zip music:/data/backups/`.
+   It replaces every table in the backup, including accounts and sessions, with its contents,
+   and records in `/data/version` that the data is now 0.2.0's. A file from outside the container
+   must be copied in first: `docker cp ./backup.zip music:/data/backups/`.
 
 2. Start the previous image on the same volume (see [Pin a version](#pin-a-version)). It deploys
    its own functions again over the restored data.
 
+An image refuses to start on data a newer version has used, before it exports or deploys
+anything, and says so in its log (`[init] refusing to start: ...`). Starting an older image
+without step 1 therefore stops there; run the newer image again and follow the steps.
+
 To restore without going back to an older image, run only step 1, then `docker restart music` so
 the data migrations run over the restored rows. `scripts/upgrade-e2e.sh` runs this whole round
-trip in CI: 0.1.0, an upgrade to the new image, a restore, and back to 0.1.0.
+trip in CI: 0.1.0, an upgrade to the new image, a refused start on newer data, a restore, and back
+to 0.1.0.
 
-The same import restores a backup into a new install: start the image on an empty volume, wait
-for it to report healthy, and import. People sign in again; their API keys keep working.
+The same command restores any export into a new install: start the image on an empty volume,
+wait for it to report healthy, and run `/app/bin/restore` on the file. People sign in again; their
+API keys keep working.
 
 ## Upgrade
 

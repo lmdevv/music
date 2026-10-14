@@ -149,8 +149,8 @@ again.
 
 Watchtower and similar tools work too; the backup happens on the container's own start.
 
-To go back, restore the backup first, then start the older image. The steps are in
-[`operations.md`](operations.md#restore).
+To go back, restore the backup first, then start the older image; an older image refuses to start on
+data a newer one has migrated. The steps are in [`operations.md`](operations.md#restore).
 
 ## Backups and restore
 
@@ -164,8 +164,8 @@ docker exec music sh -c 'cd /app/backend && CONVEX_SELF_HOSTED_URL=http://127.0.
 docker cp music:/data/backups ./music-backups
 ```
 
-Your music isn't in the backup; back that up as you already do. Restoring is one `convex import`
-command, described with the rest in [`operations.md`](operations.md#restore).
+Your music isn't in the backup; back that up as you already do. Restoring is one command,
+`docker exec music /app/bin/restore <file>`, described with the rest in [`operations.md`](operations.md#restore).
 
 ## Troubleshooting
 

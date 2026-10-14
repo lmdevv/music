@@ -119,7 +119,21 @@
                 ];
               };
               inherit (nixpkgs.lib.importJSON ./package.json) version;
-              backendVersion = (nixpkgs.lib.importJSON ./packages/backend/package.json).version;
+              # Every workspace package (apps/* and packages/*, the CLI included) and its version.
+              workspaceVersions =
+                nixpkgs.lib.concatMap
+                  (
+                    group:
+                    nixpkgs.lib.mapAttrsToList (package: _: {
+                      path = "${group}/${package}/package.json";
+                      inherit (nixpkgs.lib.importJSON (./. + "/${group}/${package}/package.json")) version;
+                    }) (nixpkgs.lib.filterAttrs (_: type: type == "directory") (builtins.readDir (./. + "/${group}")))
+                  )
+                  [
+                    "apps"
+                    "packages"
+                  ];
+              strayVersions = builtins.filter (package: package.version != version) workspaceVersions;
               # The container's Convex and Caddy ids, which init refuses at start.
               reservedUid = evaluate { uid = 901; };
               reservedGid = evaluate { gid = 902; };
@@ -130,10 +144,14 @@
             assert expect (
               refusesReserved reservedUid && refusesReserved reservedGid
             ) "uid or gid 901/902 is not refused: ${toString (failed reservedUid)}";
-            # The image a release is published under is the version the image reports.
-            assert expect (
-              version == backendVersion
-            ) "package.json is ${version} but packages/backend/package.json is ${backendVersion}; bump both";
+            # One release version everywhere: the image is published under it, the image and the CLI
+            # report it, and the module's default image is derived from it.
+            assert expect (builtins.length workspaceVersions >= 9 && strayVersions == [ ])
+              "package.json is ${version} but ${
+                nixpkgs.lib.concatMapStringsSep ", " (
+                  package: "${package.path} is ${package.version}"
+                ) strayVersions
+              }; bump them together";
             assert expect (
               (container listed).image == "ghcr.io/lmdevv/music:${version}"
             ) "the default image is ${(container listed).image}";

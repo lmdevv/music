@@ -11,6 +11,8 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib/stack.sh
+source "$root/scripts/lib/stack.sh"
 port="${PORT:-8090}"
 name="${NAME:-music-stack-e2e}"
 image="${IMAGE:-}"
@@ -252,13 +254,6 @@ media_check
 if [[ -z "$(docker exec "$name" find /data/media/art /data/media/cache -type f -user music)" ]]; then
   fail "the suite left no art or transcodes in /data/media"
 fi
-
-# The number of rows in table $1, through the container's Convex CLI and admin key.
-convex_rows() {
-  docker exec "$name" sh -c 'cd /app/backend && CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210 \
-    CONVEX_SELF_HOSTED_ADMIN_KEY="$(cat /data/secrets/admin_key)" \
-    ./node_modules/.bin/convex data "$1" --limit 10000 --format jsonLines' sh "$1" | grep -c '"_id"' || true
-}
 
 # Stopping and starting the same image keeps the data and takes no new backup.
 users_before="$(convex_rows users)"

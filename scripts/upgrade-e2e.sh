@@ -9,20 +9,26 @@
 #      search, so "doppelganger" only finds "Doppelgänger" once they ran, and stored the queue on
 #      the playback session, which splitPlaybackQueues moves to a row of its own), and keep every
 #      account, song, playlist, and queue, with the same password still signing in.
-#   3. The documented rollback: import the pre-upgrade backup while the new image runs, then go
-#      back to the old image, which must come up healthy with the same data.
+#   3. Going back without restoring is refused: with /data/version newer than the image, init
+#      stops before exporting or deploying anything.
+#   4. The documented rollback: /app/bin/restore puts back the pre-upgrade backup while the new
+#      image runs and records the version that wrote it, then the old image must come up healthy
+#      with the same data.
 #
 #   scripts/upgrade-e2e.sh
-#   OLD_IMAGE=ghcr.io/lmdevv/music:0.1.0 IMAGE=music:dev PORT=8091 scripts/upgrade-e2e.sh
+#   IMAGE=music:dev PORT=8091 scripts/upgrade-e2e.sh
 #
 # Env: OLD_IMAGE, IMAGE, PORT (default 8090), NAME (default music-upgrade-e2e), KEEP=1 to leave
 # the container and volume behind.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib/stack.sh
+source "$root/scripts/lib/stack.sh"
 port="${PORT:-8090}"
 name="${NAME:-music-upgrade-e2e}"
-old_image="${OLD_IMAGE:-ghcr.io/lmdevv/music:0.1.0}"
+# The 0.1.0 release, pinned by digest like nix/vm-test.nix.
+old_image="${OLD_IMAGE:-ghcr.io/lmdevv/music:0.1.0@sha256:8eeaa3b3808b72ab97ac787cf547b69359bd214f0dd5cc86b216cc76f9c152eb}"
 image="${IMAGE:-}"
 url="http://localhost:${port}"
 email="upgrade@music.test"
@@ -94,21 +100,11 @@ sign_in() {
 
 run_command() { call "$1" "commands:$2" "{\"name\":\"$3\",\"args\":$4}"; }
 
-convex_rows() {
-  docker exec "$name" sh -c 'cd /app/backend && CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210 \
-    CONVEX_SELF_HOSTED_ADMIN_KEY="$(cat /data/secrets/admin_key)" \
-    ./node_modules/.bin/convex data "$1" --limit 10000 --format jsonLines' sh "$1" | grep -c '"_id"' || true
-}
 
 snapshot() {
   echo "users=$(convex_rows users) tracks=$(convex_rows tracks) albums=$(convex_rows albums) playlists=$(convex_rows playlists) playlistItems=$(convex_rows playlistItems) libraries=$(convex_rows libraries)"
 }
 
-convex_data() {
-  docker exec "$name" sh -c 'cd /app/backend && CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210 \
-    CONVEX_SELF_HOSTED_ADMIN_KEY="$(cat /data/secrets/admin_key)" \
-    ./node_modules/.bin/convex data "$1" --limit 10000 --format jsonLines' sh "$1"
-}
 
 # The signed-in user's queue as `<track ids>@<index>`, the same in every version's playback.state.
 queue_of() {
@@ -182,10 +178,36 @@ queue_after="$(queue_of)"
 echo "queue after the upgrade: $queue_after"
 [[ "$queue_after" == "$queue_before" ]] || fail "the queue changed in the upgrade: $queue_after"
 
-# 3. Roll back: restore the pre-upgrade backup, then run the old image again.
-docker exec "$name" sh -c 'cd /app/backend && CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210 \
-  CONVEX_SELF_HOSTED_ADMIN_KEY="$(cat /data/secrets/admin_key)" \
-  ./node_modules/.bin/convex import --replace-all -y "/data/backups/$1"' sh "${backups[0]}" >/dev/null
+new_version="$(docker exec "$name" cat /data/version)"
+[[ "${backups[0]}" == *"-from-0.1.0-"* ]] || fail "the backup does not record the version it came from"
+
+# 3. Older code over newer data is refused. A newer release than this image is emulated by
+#    writing its version, as starting it would; init must stop before it exports or deploys.
+docker exec "$name" sh -c 'echo 99.0.0 > /data/version'
+docker restart "$name" >/dev/null
+for _ in $(seq 1 60); do
+  [[ "$(docker inspect -f '{{.State.Running}}' "$name")" == "false" ]] && break
+  sleep 2
+done
+[[ "$(docker inspect -f '{{.State.Running}}' "$name")" == "false" ]] ||
+  fail "the image started on data from a newer version"
+refused_backups="$(docker run --rm -v "$name-data:/data" --entrypoint sh "$image" -c \
+  'ls /data/backups | grep -c "^pre-.*\.zip$"; cat /data/version')"
+echo "after starting on newer data: container stopped; backups and /data/version: $(echo $refused_backups)"
+[[ "$refused_backups" == $'1\n99.0.0' ]] || fail "the refused start changed /data: $refused_backups"
+if docker logs "$name" 2>&1 | grep -q "refusing to start"; then
+  docker logs "$name" 2>&1 | grep "refusing to start" | tail -n 1
+fi
+# The newer release starting again (emulated) puts its version back, and this image, which
+# equals it, starts.
+docker run --rm -v "$name-data:/data" --entrypoint sh "$image" -c "echo $new_version > /data/version"
+start "$image"
+
+# 4. Roll back as documented: restore the pre-upgrade backup while the new image runs, which
+#    also records that its data is 0.1.0's, then run the old image again.
+docker exec "$name" /app/bin/restore "/data/backups/${backups[0]}" | grep "\[restore\]"
+[[ "$(docker exec "$name" cat /data/version)" == "0.1.0" ]] ||
+  fail "restore did not record the backup's version"
 start "$old_image"
 rolled_back="$(snapshot)"
 echo "after the rollback: $rolled_back"
