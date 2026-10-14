@@ -24,6 +24,7 @@ import {
   perform,
   useIsRemote,
 } from "./controls";
+import { barTools } from "./bar-tools";
 import { DeviceList, useDevices } from "./devices";
 
 /**
@@ -39,9 +40,10 @@ export function PlayerBar() {
 
   if (track === null) return null;
 
-  const offline = !player.mediaOnline && !remote;
-  const failed = player.status === "error" && !offline;
-  const buffering = player.status === "buffering" || player.status === "loading";
+  const tools = barTools({ status: player.status, mediaOnline: player.mediaOnline, remote });
+  const offline = tools === "offline";
+  const failed = tools === "error";
+  const buffering = tools === "buffering";
 
   return (
     <div className="hidden shrink-0 flex-col lg:flex">
