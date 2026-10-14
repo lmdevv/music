@@ -312,6 +312,47 @@ test("Try again subscribes again after a screen's data failed to load", async ({
   await expect(page.getByRole("heading", { level: 1, name: "Blue Lines" }).first()).toBeVisible();
 });
 
+test("removing a queue row from the keyboard keeps focus in the queue", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/albums");
+  await page.getByRole("link", { name: "Mezzanine" }).first().click();
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+
+  const bar = page.getByRole("region", { name: "Player" });
+
+  await expect(bar.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  await bar.getByRole("button", { name: "Queue" }).click();
+
+  const remove = page
+    .getByRole("complementary", { name: "Queue" })
+    .getByRole("button", { name: /^Remove .* from the queue$/ });
+
+  const second = (await remove.nth(1).getAttribute("aria-label")) ?? "";
+
+  await remove.first().focus();
+  await page.keyboard.press("Enter");
+  // ADS-107: focus moves to the row that took the removed one's place, not to the page.
+  await expect(page.getByRole("button", { name: second, exact: true })).toBeFocused();
+  await bar.getByRole("button", { name: "Pause", exact: true }).click();
+});
+
+test("the phone Now Playing opens the one shared Play on sheet", async ({ browser }) => {
+  const phone = await browser.newContext({ hasTouch: true });
+  const page = await phone.newPage();
+
+  // Sign in at desktop width (the helper waits for the sidebar), then use the phone layout.
+  await signIn(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: /^Open Now Playing/ }).click();
+  await page.getByRole("button", { name: /^Play on another device\. Now:/ }).click();
+  await expect(page.getByRole("dialog", { name: "Play on" })).toHaveCount(1);
+  await page.keyboard.press("d");
+  await expect(page.getByRole("dialog", { name: "Play on" })).toHaveCount(0);
+  await page.keyboard.press("d");
+  await expect(page.getByRole("dialog", { name: "Play on" })).toHaveCount(1);
+  await phone.close();
+});
+
 test("like a song and find it in Liked songs", async ({ page }) => {
   await signIn(page);
   await page.goto("/albums");

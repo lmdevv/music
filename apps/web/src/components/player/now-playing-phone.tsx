@@ -1,23 +1,20 @@
 import type { Track } from "@music/commands/models";
 import { usePlayer } from "@music/player/react";
 import { DialogClose } from "@music/ui/components/dialog";
-import { Sheet, SheetContent } from "@music/ui/components/sheet";
 import { cn } from "@music/ui/lib/utils";
 import { ListMusicIcon, MessageCircleIcon, MoreHorizontalIcon } from "lucide-react";
-import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { Artwork } from "@/components/library/artwork";
 import { LikeButton } from "@/components/library/like-button";
 import { TrackMenu } from "@/components/playlists/track-menu";
 import { PhonePauseGlyph, PhonePlayGlyph, PhoneSkipGlyph } from "@/components/shell/phone-chrome";
+import { useUi } from "@/components/shell/ui-state";
 import type { NowPlayingView } from "@/components/shell/ui-state";
 import { formatQuality } from "@/lib/format";
 import { useArtColors } from "@/lib/use-art-colors";
-import { useIsDesktop } from "@/lib/use-media";
 
 import { NEXT_REPEAT, Progress, Volume, perform, useIsRemote } from "./controls";
-import { DeviceList } from "./devices";
 import { nowPlayingBackground } from "./now-playing-background";
 import { AirPlayGlyph, RepeatGlyph, ShuffleGlyph } from "./now-playing-glyphs";
 import { RemotePill } from "./now-playing-remote-pill";
@@ -169,7 +166,7 @@ export function PhoneNowPlaying({ track, view, onView }: PhoneNowPlayingProps) {
             <MessageCircleIcon className="size-6" />
           </button>
         </span>
-        <PlayOnButton track={track} deviceName={deviceName} showName={!queue} />
+        <PlayOnButton deviceName={deviceName} showName={!queue} />
         <button
           type="button"
           aria-label={queue ? "Hide queue" : "Queue"}
@@ -188,44 +185,30 @@ export function PhoneNowPlaying({ track, view, onView }: PhoneNowPlayingProps) {
   );
 }
 
-/** The AirPlay-style button and the Play on sheet it opens. */
+/** The AirPlay-style button; it opens the shared "Play on" sheet (`DeviceSheet`). */
 function PlayOnButton({
-  track,
   deviceName,
   showName,
 }: {
-  readonly track: Track;
   readonly deviceName: string;
   readonly showName: boolean;
 }) {
-  const [open, setOpen] = useState(false);
-  // Now Playing keeps this view mounted (CSS-hidden) at desktop width, so the sheet closes when
-  // the window widens, and stays closed if it narrows again (ADS-106).
-  const desktop = useIsDesktop();
-
-  if (desktop && open) setOpen(false);
+  const { openPlayOn } = useUi();
 
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="flex flex-col items-center gap-0.75 text-text/75 outline-none"
-        aria-label={`Play on another device. Now: ${deviceName}`}
-      >
-        <AirPlayGlyph />
-        {showName ? (
-          <span className="font-sans text-2xs leading-3.5 font-medium text-text/60">
-            {deviceName}
-          </span>
-        ) : null}
-      </button>
-      <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent title="Play on" description={`${track.title} · ${track.artist}`}>
-          <DeviceList touch />
-        </SheetContent>
-      </Sheet>
-    </>
+    <button
+      type="button"
+      onClick={openPlayOn}
+      className="flex flex-col items-center gap-0.75 text-text/75 outline-none"
+      aria-label={`Play on another device. Now: ${deviceName}`}
+    >
+      <AirPlayGlyph />
+      {showName ? (
+        <span className="font-sans text-2xs leading-3.5 font-medium text-text/60">
+          {deviceName}
+        </span>
+      ) : null}
+    </button>
   );
 }
 

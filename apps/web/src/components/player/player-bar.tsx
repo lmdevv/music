@@ -6,7 +6,7 @@ import { Tooltip } from "@music/ui/components/tooltip";
 import { cn } from "@music/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { ListMusicIcon, SpeakerIcon } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 
 import { Artwork } from "@/components/library/artwork";
 import { LikeButton } from "@/components/library/like-button";
@@ -27,6 +27,7 @@ import {
 } from "./controls";
 import { barTools } from "./bar-tools";
 import { DeviceList, useDevices } from "./devices";
+import { shownSurface } from "./play-on";
 
 /**
  * The desktop player bar from Paper: the song on the left, transport and progress in the middle,
@@ -168,33 +169,29 @@ export function PlayerBar() {
 }
 
 /**
- * The speaker button that opens the "Play on" popover. Below the desktop width the player bar is
- * hidden and `DeviceSheet` shows the same open state, so the popover closes there (ADS-106).
- *
- * While it is mounted it tells `DeviceSheet` that desktop has a popover. When it goes away (the
- * queue empties) it closes "Play on" if the popover was the one showing, so nothing opens by
- * itself when a song loads later.
+ * The speaker button and its "Play on" popover. Below the desktop width the player bar is hidden
+ * and `DeviceSheet` shows "Play on" instead (ADS-106). While mounted it lets "Play on" open here;
+ * when it goes away (the queue empties) an open popover closes, so nothing reopens by itself.
  */
 function DevicePickerButton() {
-  const { devicesOpen, setDevicesOpen, setDevicePopoverMounted } = useUi();
+  const { playOn, openPlayOn, closePlayOn, playOnPopoverMounted, setPlayOnPopoverMounted } =
+    useUi();
+
   const { onlineCount } = useDevices();
   const desktop = useIsDesktop();
-  const showing = useRef(false);
-
-  showing.current = devicesOpen && desktop;
+  const shown = shownSurface(playOn, { desktop, popoverMounted: playOnPopoverMounted });
 
   useEffect(() => {
-    setDevicePopoverMounted(true);
+    setPlayOnPopoverMounted(true);
 
-    return () => {
-      setDevicePopoverMounted(false);
-
-      if (showing.current) setDevicesOpen(false);
-    };
-  }, [setDevicePopoverMounted, setDevicesOpen]);
+    return () => setPlayOnPopoverMounted(false);
+  }, [setPlayOnPopoverMounted]);
 
   return (
-    <Popover open={devicesOpen && desktop} onOpenChange={setDevicesOpen}>
+    <Popover
+      open={shown === "popover"}
+      onOpenChange={(open) => (open ? openPlayOn() : closePlayOn())}
+    >
       <Tooltip label="Play on another device" shortcut="D">
         <PopoverTrigger
           aria-label="Play on another device"

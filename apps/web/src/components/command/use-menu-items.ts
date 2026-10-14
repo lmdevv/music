@@ -140,7 +140,7 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
         label: "Choose",
         run: () => {
           onClose();
-          ui.setDevicesOpen(true);
+          ui.openPlayOn();
         },
       },
       {
