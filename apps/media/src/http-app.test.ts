@@ -97,6 +97,23 @@ const abandonedGet = (port: number, path: string, afterMs: number): Effect.Effec
     request.on("error", leave);
   });
 
+/** A `GET` whose client goes away once the first piece of the body has arrived. */
+const abandonedMidBody = (port: number, path: string): Effect.Effect<void> =>
+  Effect.callback<void>((resume) => {
+    const request = get({ host: "127.0.0.1", port, path });
+
+    const leave = () => {
+      request.destroy();
+      resume(Effect.void);
+    };
+
+    request.on("response", (response) => {
+      response.once("data", leave);
+      response.once("end", leave);
+    });
+    request.on("error", leave);
+  });
+
 /** The whole body of a `GET` through a real socket. */
 const fetchWhole = (port: number, path: string): Effect.Effect<Uint8Array> =>
   Effect.promise(async () => {
@@ -868,6 +885,13 @@ describe("media HTTP server", { timeout: MEDIA_TEST_TIMEOUT }, () => {
               [0, 1, 2, 5, 10, 50].map((afterMs) => ({ url, afterMs })),
             ),
             ({ url, afterMs }) => abandonedGet(port, url, afterMs),
+            { concurrency: "unbounded" },
+          );
+
+          // And some while the body streams, after its first bytes.
+          yield* Effect.forEach(
+            [original, finished, original, finished],
+            (url) => abandonedMidBody(port, url),
             { concurrency: "unbounded" },
           );
 
