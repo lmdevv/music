@@ -206,19 +206,20 @@ export const playbackMutations = {
     const playable = await playableTracks(ctx, viewer, args.trackIds, args.index);
     let queue = playable.ids;
     let { index } = playable;
-
-    if (queue.length > MAX_QUEUE) {
-      queue = queue.slice(index, index + MAX_QUEUE);
-      index = 0;
-    }
-
     let unshuffled: Array<Id<"tracks">> | undefined;
 
     if (stored.shuffle) {
+      // Shuffle the whole list, then keep `MAX_QUEUE` of it: a long list shuffled from a random
+      // song near its end still fills the queue.
       const current = queue[index];
-      unshuffled = queue;
       const rest = shuffled(queue.filter((_, position) => position !== index));
-      queue = current === undefined ? rest : [current, ...rest];
+      const order = current === undefined ? rest : [current, ...rest];
+      const kept = order.slice(0, MAX_QUEUE);
+      unshuffled = restrictTo(queue, kept);
+      queue = kept;
+      index = 0;
+    } else if (queue.length > MAX_QUEUE) {
+      queue = queue.slice(index, index + MAX_QUEUE);
       index = 0;
     }
 

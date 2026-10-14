@@ -308,6 +308,22 @@ describe("shuffle", () => {
     ]);
   });
 
+  it("fills the queue from a long list shuffled from a song near its end", async () => {
+    const backend = makeBackend();
+    const admin = await signUp(backend, "admin");
+    await seedLibrary(backend, admin, { name: "Long", count: 1200 });
+    await admin.music.run("devices.heartbeat", { deviceId: DEVICE, name: "Laptop", kind: "web" });
+    const long = trackIds(await allTracks(admin), "Long");
+
+    await admin.music.run("playback.shuffle", { on: true });
+    await admin.music.run("playback.play", { trackIds: [...long], index: 1199, deviceId: DEVICE });
+    const queue = await queueIds(admin);
+
+    expect(queue).toHaveLength(1000);
+    expect(queue[0]).toBe(at(1199, long));
+    expect(new Set(queue).size).toBe(1000);
+  }, 60_000);
+
   it("shuffles a new list as it starts playing while shuffle is on", async () => {
     const { admin, rock } = await setup();
     await admin.music.run("playback.shuffle", { on: true });

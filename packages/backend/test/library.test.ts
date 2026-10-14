@@ -214,6 +214,23 @@ describe("deleting a library", () => {
     });
   });
 
+  it("stops playback when deleting a library empties the queue", async () => {
+    const backend = makeBackend();
+    const admin = await signUp(backend, "admin");
+    const { libraryId } = await seedLibrary(backend, admin, { name: "Only", count: 2 });
+    const only = trackIds(await allTracks(admin), "Only");
+
+    await admin.music.run("devices.heartbeat", { deviceId: DEVICE, name: "Phone", kind: "web" });
+    await admin.music.run("playback.play", { trackIds: [...only], deviceId: DEVICE });
+    await admin.music.run("libraries.delete", { libraryId });
+    await drainScheduled(backend);
+
+    const state = await admin.music.read("playback.state", {});
+
+    expect(state.queue).toEqual([]);
+    expect(state.playing).toBe(false);
+  });
+
   it(
     "deletes a large catalog in batches that stay inside Convex's limits",
     { timeout: 60_000 },

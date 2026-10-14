@@ -159,8 +159,13 @@ const purgeQueues = async (ctx: MutationCtx, cursor: string | null): Promise<str
       if (queue.queue[queue.index] !== stored.queue[stored.index]) {
         const session = await findSession(ctx, row.userId);
 
+        // With nothing left to play, playback stops.
         if (session !== null) {
-          await ctx.db.patch(session._id, { positionMs: 0, updatedAt: Date.now() });
+          await ctx.db.patch(session._id, {
+            positionMs: 0,
+            playing: session.playing && queue.queue.length > 0,
+            updatedAt: Date.now(),
+          });
         }
       }
     }),
