@@ -383,7 +383,15 @@ test("the phone Now Playing opens the one shared Play on sheet", async ({ browse
   await page.keyboard.press("d");
   await expect(page.getByRole("dialog", { name: "Play on" })).toHaveCount(0);
   await page.keyboard.press("d");
-  await expect(page.getByRole("dialog", { name: "Play on" })).toHaveCount(1);
+
+  const sheet = page.getByRole("dialog", { name: "Play on" });
+
+  await expect(sheet).toHaveCount(1);
+  // A tap inside the sheet is not an outside press for Now Playing underneath, which stays open.
+  await sheet.getByRole("menuitemradio").nth(1).tap();
+  await page.keyboard.press("Escape");
+  await expect(sheet).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Now Playing" })).toBeVisible();
   await phone.close();
 });
 

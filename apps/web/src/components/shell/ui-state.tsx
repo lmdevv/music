@@ -38,7 +38,7 @@ const UiContext = createContext<UiState | null>(null);
 
 /** Holds {@link UiState} for the signed-in app. */
 export function UiStateProvider({ children }: { readonly children: ReactNode }) {
-  const [nowPlaying, setNowPlaying] = useState<NowPlayingView | null>(null);
+  const [nowPlaying, setNowPlayingView] = useState<NowPlayingView | null>(null);
   const [queueOpen, setQueueOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [playOn, setPlayOn] = useState<PlayOnSurface | null>(null);
@@ -50,6 +50,13 @@ export function UiStateProvider({ children }: { readonly children: ReactNode }) 
     setPopoverMounted(mounted);
 
     if (!mounted) setPlayOn((opened) => (opened === "popover" ? null : opened));
+  }, []);
+
+  // Now Playing covers the player bar on desktop, so a "Play on" popover open under it closes.
+  const setNowPlaying = useCallback((view: NowPlayingView | null) => {
+    setNowPlayingView(view);
+
+    if (view !== null) setPlayOn((opened) => (opened === "popover" ? null : opened));
   }, []);
 
   const value = useMemo(
@@ -82,6 +89,7 @@ export function UiStateProvider({ children }: { readonly children: ReactNode }) 
       playOn,
       playOnPopoverMounted,
       setPlayOnPopoverMounted,
+      setNowPlaying,
       newPlaylist,
     ],
   );

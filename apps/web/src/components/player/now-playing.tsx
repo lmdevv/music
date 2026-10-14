@@ -5,6 +5,7 @@ import { useEffect } from "react";
 
 import { useUi } from "@/components/shell/ui-state";
 
+import { PlayOnSurfaces } from "./device-sheet";
 import { DesktopNowPlaying } from "./now-playing-desktop";
 import { PhoneNowPlaying } from "./now-playing-phone";
 
@@ -39,6 +40,7 @@ export function NowPlaying() {
               <div className="h-full lg:hidden">
                 <PhoneNowPlaying track={player.track} view={nowPlaying} onView={setNowPlaying} />
               </div>
+              <PlayOnSurfaces />
             </>
           ) : null}
         </DialogPopup>
