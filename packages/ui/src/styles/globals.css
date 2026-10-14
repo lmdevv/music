@@ -119,6 +119,8 @@
   --spacing-safe-bottom-lg: max(30px, env(safe-area-inset-bottom));
   --spacing-dvh-inset: calc(100dvh - 2rem);
   --spacing-dvh-inset-sm: calc(100dvh - 1rem);
+  --spacing-dvh-sheet: 85dvh;
+  --spacing-dvh-message: 60dvh;
   --container-vw-inset: calc(100vw - 2rem);
   --shadow-dialog: 0 32px 80px color-mix(in oklab, var(--color-shadow) 24%, transparent);
   --shadow-popover: 0 24px 64px color-mix(in oklab, var(--color-shadow) 16%, transparent);

@@ -23,7 +23,7 @@ export function SheetContent({
       <SheetPrimitive.Backdrop className="fixed inset-0 z-50 bg-dark-canvas/45 transition-opacity duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0" />
       <SheetPrimitive.Popup
         className={cn(
-          "fixed inset-x-0 bottom-0 z-50 flex max-h-[85dvh] flex-col gap-1 overflow-y-auto rounded-t-sheet bg-bg px-4 pt-2.5 pb-row text-text transition-transform duration-200 ease-out outline-none data-ending-style:translate-y-full data-starting-style:translate-y-full",
+          "fixed inset-x-0 bottom-0 z-50 flex max-h-dvh-sheet flex-col gap-1 overflow-y-auto rounded-t-sheet bg-bg px-4 pt-2.5 pb-row text-text transition-transform duration-200 ease-out outline-none data-ending-style:translate-y-full data-starting-style:translate-y-full",
           className,
         )}
         {...props}

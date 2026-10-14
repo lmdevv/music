@@ -48,6 +48,8 @@ export const cn = createCn({
         "safe-bottom-lg",
         "dvh-inset",
         "dvh-inset-sm",
+        "dvh-sheet",
+        "dvh-message",
       ],
       container: ["sidebar", "dialog", "content", "vw-inset"],
       blur: ["scrim"],
