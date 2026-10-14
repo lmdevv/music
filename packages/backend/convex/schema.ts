@@ -108,6 +108,13 @@ export default defineSchema({
      * the first scan after the library was added or this field was.
      */
     realPath: v.optional(v.string()),
+    /**
+     * The claimed folder's identity and its parents' up to `/` (`<device>:<inode>`, see
+     * `@music/commands/folder-ids`), which a bind mount can't disguise. Missing on claims made
+     * before it was recorded; the next scan fills it in. Cleared with `realPath` when a claim is
+     * refused, so nothing of the library streams until a scan claims it again.
+     */
+    rootIds: v.optional(v.array(v.string())),
     visibility,
     ownerId: v.id("users"),
     lastScanAt: v.optional(v.number()),

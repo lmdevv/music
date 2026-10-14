@@ -106,6 +106,10 @@ export const walkTree = (
 export const realPath = (path: string): Effect.Effect<string, FileError> =>
   attempt("realpath", path, () => NodeFiles.realPath(path));
 
+/** A folder's identity and its parents' up to `/`, the folder first (`NodeFiles.folderIds`). */
+export const folderIds = (path: string): Effect.Effect<ReadonlyArray<string>, FileError> =>
+  attempt("stat", path, () => NodeFiles.folderIds(path));
+
 /**
  * The canonical path of `path` when it resolves, through any symlinks, to somewhere inside the
  * canonical `root`; `None` when it escapes. Fails with `FileError` when either does not exist.

@@ -202,14 +202,21 @@ Every service runs as its own unprivileged user; only the start-up script runs a
   visibility, song count) but not their folders. Only a library's own owner changes who listens
   to it. When someone is removed, their libraries move to the server's owner.
 - **Library folders (`MUSIC_ROOTS`).** Before every scan the media service resolves a library's
-  folder through links and mounts and claims the real folder; a folder that is, sits inside, or
-  holds another library's real folder is not scanned, and the job says so without naming the
-  other folder. Library folders must also be inside `MUSIC_ROOTS` (comma-separated absolute
+  folder through links and claims it, with the device and inode of the folder and of each folder
+  above it, which a bind mount can't change. A folder that is, sits inside, or holds another
+  library's folder, by path or by identity, is not scanned, and the job says so without naming
+  the other folder. Library folders must also be inside `MUSIC_ROOTS` (comma-separated absolute
   folders): the image sets `/music`, where Docker, Compose, and the NixOS module mount your music,
   so a folder elsewhere (or a link out of `/music`) is refused. Set `MUSIC_ROOTS` on the container
   to allow others; outside the image (development) it is unset and every folder is allowed.
-  `/proc`, `/sys`, and `/dev` are always refused. Libraries added before this check claim their
-  folder at their next scan, which an upgrade starts for each of them.
+  `/proc`, `/sys`, and `/dev` are always refused. A library whose folder is refused stops
+  streaming until a scan claims it again; its songs stay listed. Libraries from before this check
+  stream nothing until they claim their folder at their next scan, which an upgrade starts for
+  each of them right away.
+- **Known limit: two names for one folder.** When two libraries name the same folder (one through
+  a bind mount, which only a path check can't see), the library added first keeps it, even if the
+  newer one's scan claimed it first: the newer one stops streaming and its scans fail. Songs the
+  newer library indexed before that stay listed in it until it is removed, so remove it.
 - **Suspend and remove** end the person's sessions and API key sign-ins at once.
 - **Password reset without email.** An admin makes a one-time link in Settings → People (or
   `music people reset <user-id>`); it lasts 24 hours, and stops working if its maker loses the

@@ -78,8 +78,14 @@ const pendingJobs = makeFunctionReference<
 const claimJob = makeFunctionReference<
   "mutation",
   { secret: string; jobId: string; workerId: string },
-  { jobId: string; library: { id: string } } | null
+  { jobId: string; library: { id: string; path: string } } | null
 >("media:claimJob");
+
+const claimRoot = makeFunctionReference<
+  "mutation",
+  { secret: string; libraryId: string; realPath: string; rootIds: ReadonlyArray<string> },
+  { ok: boolean }
+>("media:claimRoot");
 
 const reportJob = makeFunctionReference<
   "mutation",
@@ -158,6 +164,16 @@ const completeNextScan = async (url: string, secret: string): Promise<void> => {
   if (claimed === null) throw new Error("The fake media service lost the job");
 
   const progress = { secret, jobId, workerId, total: catalogTracks.length };
+
+  // The real service claims the library's folder before reading it; the identity is made up.
+  const root = await client.mutation(claimRoot, {
+    secret,
+    libraryId: claimed.library.id,
+    realPath: claimed.library.path,
+    rootIds: [`e2e:${claimed.library.id}`],
+  });
+
+  if (!root.ok) throw new Error("The fake media service's folder claim was refused");
 
   await client.mutation(reportJob, { ...progress, done: 0, message: "reading tags" });
 

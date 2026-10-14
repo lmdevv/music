@@ -2,6 +2,7 @@
  * The media service's view of Convex: the `media:*` functions, called with the shared service
  * secret. Convex owns all product state; this module only moves data in and out.
  */
+import type { FolderChain } from "@music/commands/folder-ids";
 import { JobId, LibraryId, type TrackId } from "@music/commands/ids";
 import { ConvexClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
@@ -164,9 +165,12 @@ const functions = {
   libraries: makeFunctionReference<"query", Secret, unknown>("media:libraries"),
   claimRoot: makeFunctionReference<
     "mutation",
-    Secret & { libraryId: string; realPath: string },
+    Secret & { libraryId: string; realPath: string; rootIds: ReadonlyArray<string> },
     unknown
   >("media:claimRoot"),
+  refuseRoot: makeFunctionReference<"mutation", Secret & { libraryId: string }, unknown>(
+    "media:refuseRoot",
+  ),
   claimJob: makeFunctionReference<
     "mutation",
     Secret & { jobId: string; workerId: string },
@@ -239,13 +243,21 @@ export interface Interface {
     workerId: string,
   ) => Effect.Effect<Option.Option<ClaimedJob>, BackendError>;
   /**
-   * Claims the real folder a library's path resolves to before it is scanned. Refused when it
-   * overlaps another library's folder; the error names no other folder.
+   * Claims the real folder a library's path resolves to before it is scanned, with the folder's
+   * identity and its parents' (`FolderChain`). Refused when it is, is inside, or holds another
+   * library's folder by path or by identity; the error names no other folder. A refusal drops
+   * the library's earlier claim, so it stops streaming.
    */
   readonly claimRoot: (
     libraryId: LibraryId,
     realPath: string,
+    rootIds: FolderChain,
   ) => Effect.Effect<RootClaim, BackendError>;
+  /**
+   * Drops a library's claim after the service refused its folder itself (outside `MUSIC_ROOTS`,
+   * or a system folder), so it stops streaming.
+   */
+  readonly refuseRoot: (libraryId: LibraryId) => Effect.Effect<void, BackendError>;
   /** Reports progress and renews the lease. Returns true when the job was cancelled. */
   readonly reportJob: (
     jobId: JobId,
@@ -392,12 +404,19 @@ const make = Effect.gen(function* () {
     claimRoot: Effect.fn("MediaBackend.claimRoot")(function* (
       libraryId: LibraryId,
       realPath: string,
+      rootIds: FolderChain,
     ) {
       const result = yield* call("claimRoot", () =>
-        client.mutation(functions.claimRoot, { secret: secret(), libraryId, realPath }),
+        client.mutation(functions.claimRoot, { secret: secret(), libraryId, realPath, rootIds }),
       );
 
       return yield* decodeRootClaim(result).pipe(Effect.mapError(decodeFailure("claimRoot")));
+    }),
+
+    refuseRoot: Effect.fn("MediaBackend.refuseRoot")(function* (libraryId: LibraryId) {
+      yield* call("refuseRoot", () =>
+        client.mutation(functions.refuseRoot, { secret: secret(), libraryId }),
+      );
     }),
 
     reportJob: Effect.fn("MediaBackend.reportJob")(function* (

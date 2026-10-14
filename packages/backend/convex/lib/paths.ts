@@ -49,9 +49,19 @@ interface Rooted {
 }
 
 /**
+ * Whether the media service has claimed a library's folder (`media:claimRoot`), so its files may
+ * be read. A library from before claims, or one whose claim was refused, streams nothing.
+ */
+export const isClaimed = <Library extends Rooted>(
+  library: Library | null,
+): library is Library & { readonly realPath: string } =>
+  library !== null && library.realPath !== undefined;
+
+/**
  * The first library in `libraries` whose folder overlaps `path` (normalised), and how. A library
  * is compared by the path it was added with and, once the media service has resolved it, by its
- * real path too: a link or a bind mount can name the same files under a different path.
+ * real path too: a link can name the same files under a different path. A bind mount can too,
+ * which paths can't see; `media:claimRoot` compares folder identities for that.
  */
 export const firstOverlap = <Library extends Rooted>(
   libraries: ReadonlyArray<Library>,

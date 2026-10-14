@@ -94,15 +94,16 @@ const MIGRATIONS = {
     return page;
   },
   /**
-   * Libraries from before real folders were claimed (`media:claimRoot`) have none; a scan for
-   * each makes the media service claim it now rather than at its next periodic scan.
+   * Libraries from before real folders were claimed (`media:claimRoot`) have no claim, or one
+   * without folder identities, and stream nothing until claimed; a scan for each makes the media
+   * service claim it now rather than at its next periodic scan.
    */
   claimLibraryRoots: async (ctx, cursor) => {
     const page = await ctx.db.query("libraries").paginate({ cursor, numItems: BATCH });
 
     await Promise.all(
       page.page
-        .filter((library) => library.realPath === undefined)
+        .filter((library) => library.rootIds === undefined)
         .map((library) => enqueueScan(ctx, library._id, library.ownerId)),
     );
 

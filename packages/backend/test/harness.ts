@@ -58,6 +58,18 @@ const upsertTracksMutation = makeFunctionReference<
   { upserted: number }
 >("media:upsertTracks");
 
+const librariesQuery = makeFunctionReference<
+  "query",
+  { secret: string },
+  ReadonlyArray<{ id: string; path: string }>
+>("media:libraries");
+
+const claimRootMutation = makeFunctionReference<
+  "mutation",
+  { secret: string; libraryId: string; realPath: string; rootIds: ReadonlyArray<string> },
+  { ok: true } | { ok: false; error: string }
+>("media:claimRoot");
+
 /** A Convex connection, optionally signed in, with the typed command client on top. */
 export interface Session {
   readonly convex: ConvexHttpClient;
@@ -140,13 +152,36 @@ export const resetPassword = async (
   return withTokens(url, tokens);
 };
 
-/** Upserts tracks into a library as the media service does. */
+/**
+ * Claims a library's folder as the media service does before a scan: at the path it was added
+ * with, under a made-up identity no other library shares.
+ */
+const claimFolder = async (url: string, secret: string, libraryId: string) => {
+  const { convex } = anonymous(url);
+  const libraries = await convex.query(librariesQuery, { secret });
+  const library = libraries.find((candidate) => candidate.id === libraryId);
+
+  if (library === undefined) throw new Error(`${libraryId} is not a library`);
+
+  const claim = await convex.mutation(claimRootMutation, {
+    secret,
+    libraryId,
+    realPath: library.path,
+    rootIds: [`test:${libraryId}`],
+  });
+
+  if (!claim.ok) throw new Error(`The claim on ${library.path} was refused: ${claim.error}`);
+};
+
+/** Upserts tracks into a library as the media service does, claiming its folder first. */
 export const upsertTracks = async (
   url: string,
   secret: string,
   libraryId: string,
   tracks: ReadonlyArray<SeedTrack>,
 ): Promise<void> => {
+  await claimFolder(url, secret, libraryId);
+
   await anonymous(url).convex.mutation(upsertTracksMutation, {
     secret,
     libraryId,

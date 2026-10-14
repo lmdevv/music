@@ -92,7 +92,30 @@ export interface SeedFile {
   readonly artHash?: string;
 }
 
-/** Upserts files into a library through `media:upsertTracks`, as a scan does. */
+/**
+ * Claims a library's folder as the media service does before a scan (`media:claimRoot`): at the
+ * path it was added with, under a made-up identity no other library shares.
+ */
+const claimFolder = async (backend: Backend, libraryId: string): Promise<void> => {
+  const library = await backend.run(async (ctx) => {
+    const id = ctx.db.normalizeId("libraries", libraryId);
+
+    return id === null ? null : ctx.db.get(id);
+  });
+
+  if (library === null) throw new Error(`${libraryId} is not a library`);
+
+  const claim = await backend.mutation(api.media.claimRoot, {
+    secret: MEDIA_SECRET,
+    libraryId: library._id,
+    realPath: library.path,
+    rootIds: [`test:${library._id}`],
+  });
+
+  if (!claim.ok) throw new Error(`The claim on ${library.path} was refused: ${claim.error}`);
+};
+
+/** Upserts files into a library through `media:upsertTracks`, as a scan does, claiming first. */
 export const upsertFiles = async (
   backend: Backend,
   libraryId: string,
@@ -101,6 +124,8 @@ export const upsertFiles = async (
   const id = await backend.run(async (ctx) => ctx.db.normalizeId("libraries", libraryId));
 
   if (id === null) throw new Error(`${libraryId} is not a library ID`);
+
+  await claimFolder(backend, id);
 
   await backend.mutation(api.media.upsertTracks, {
     secret: MEDIA_SECRET,

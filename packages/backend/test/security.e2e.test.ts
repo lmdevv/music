@@ -385,15 +385,18 @@ const expectInvisible = async (
   await expectReadFailure(viewer, "jobs.get", { jobId: hidden.jobId }, "not_found");
 };
 
-/** Claims a library's real folder, as the media service does before every scan. */
-const claimRoot = (libraryId: string, realPath: string) =>
+/**
+ * Claims a library's real folder, as the media service does before every scan, with the folder's
+ * identity and its parents' (made up here; the media service reads them with `stat`).
+ */
+const claimRoot = (libraryId: string, realPath: string, rootIds: ReadonlyArray<string>) =>
   anonymous(server).convex.mutation(
     makeFunctionReference<
       "mutation",
-      { secret: string; libraryId: string; realPath: string },
+      { secret: string; libraryId: string; realPath: string; rootIds: ReadonlyArray<string> },
       { ok: boolean; error?: string }
     >("media:claimRoot"),
-    { secret: mediaSecret, libraryId, realPath },
+    { secret: mediaSecret, libraryId, realPath, rootIds },
   );
 
 describe.skipIf(server === "" || mediaSecret === "")("backend authorization", () => {
@@ -884,6 +887,11 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
         secret,
         libraryId,
         realPath: "/",
+        rootIds: [],
+      }),
+      visitor.mutation(makeFunctionReference<"mutation">("media:refuseRoot"), {
+        secret,
+        libraryId,
       }),
     ];
 
@@ -1566,7 +1574,9 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     const { adminA, adminB, alpha } = fixture;
 
     // The media service resolves each library's folder before a scan and claims it.
-    expect(await claimRoot(alpha.libraryId, `/security-${id}/alpha`)).toEqual({ ok: true });
+    expect(
+      await claimRoot(alpha.libraryId, `/security-${id}/alpha`, [`${id}:alpha`, `${id}:top`]),
+    ).toEqual({ ok: true });
 
     // A link (or /proc/self/root, or a bind mount) names the folder around it differently.
     const alias = await adminB.music.run("libraries.create", {
@@ -1574,11 +1584,30 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       path: `/elsewhere-${id}/link`,
     });
 
-    const refused = await claimRoot(alias.libraryId, `/security-${id}`);
+    const refused = await claimRoot(alias.libraryId, `/security-${id}`, [`${id}:top`]);
 
     expect(refused.ok).toBe(false);
     // The refusal is the job's error, which the alias's owner reads: it names no folder.
     expect(refused.error).not.toMatch(/security-/u);
+
+    // A bind mount keeps the folder's identity, so a path that says nothing of it is refused too.
+    expect(
+      await claimRoot(alias.libraryId, `/elsewhere-${id}/link`, [`${id}:alpha`, `${id}:mnt`]),
+    ).toMatchObject({ ok: false });
+
+    // A refused claim stops its library streaming until a claim succeeds again.
+    const play = () =>
+      failureCode(
+        adminA.music.read("stream.url", { trackId: alpha.track.id, profile: "original" }),
+      );
+
+    expect(await play()).toBe("succeeded");
+    expect(await claimRoot(alpha.libraryId, "/proc/1/root", [])).toMatchObject({ ok: false });
+    expect(await play()).toBe("not_found");
+    expect(
+      await claimRoot(alpha.libraryId, `/security-${id}/alpha`, [`${id}:alpha`, `${id}:top`]),
+    ).toEqual({ ok: true });
+    expect(await play()).toBe("succeeded");
 
     // Only a library's own owner or the server's owner removes it: an admin added to it could
     // otherwise remove it and add its folder back as their own.

@@ -7,6 +7,7 @@
  * It keeps tracks only: albums and artists, whose artwork Convex takes from their tracks, list no
  * artwork of their own.
  */
+import { chainsOverlap, type FolderChain } from "@music/commands/folder-ids";
 import { JobId, LibraryId, TrackId } from "@music/commands/ids";
 import { Context, Effect, Layer, Option, Stream, SubscriptionRef } from "effect";
 
@@ -24,7 +25,6 @@ import {
   type TrackMove,
   type TrackSource,
 } from "../media-backend.ts";
-import { isWithin } from "../platform/node-files.ts";
 
 /** A stored track and its generated ID. */
 interface MemoryTrack {
@@ -46,8 +46,11 @@ export interface MemoryJob {
 
 interface State {
   readonly libraries: ReadonlyArray<LibraryFolder>;
-  /** Real folders libraries claimed, as `media:claimRoot` stores them. */
-  readonly roots: ReadonlyMap<LibraryId, string>;
+  /**
+   * The identities of the folders libraries claimed, as `media:claimRoot` stores them. Compared
+   * by identity only, so tests show the service reports identities that catch any overlap.
+   */
+  readonly roots: ReadonlyMap<LibraryId, FolderChain>;
   readonly tracks: ReadonlyArray<MemoryTrack>;
   readonly jobs: ReadonlyArray<MemoryJob>;
   readonly nextId: number;
@@ -197,23 +200,31 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
 
         claimRoot: Effect.fn("MemoryMediaBackend.claimRoot")(function* (
           libraryId: LibraryId,
-          realPath: string,
+          _realPath: string,
+          rootIds: FolderChain,
         ) {
           return yield* SubscriptionRef.modify(state, (current): [RootClaim, State] => {
-            const overlaps = [...current.roots].some(
-              ([other, root]) =>
-                other !== libraryId && (isWithin(root, realPath) || isWithin(realPath, root)),
-            );
+            const others = [...current.roots].filter(([other]) => other !== libraryId);
 
-            if (overlaps) {
-              return [{ ok: false, error: "This folder overlaps another library" }, current];
+            if (others.some(([, root]) => chainsOverlap(root, rootIds))) {
+              return [
+                { ok: false, error: "This folder overlaps another library" },
+                { ...current, roots: new Map(others) },
+              ];
             }
 
             return [
               { ok: true },
-              { ...current, roots: new Map([...current.roots, [libraryId, realPath]]) },
+              { ...current, roots: new Map([...others, [libraryId, rootIds]]) },
             ];
           });
+        }),
+
+        refuseRoot: Effect.fn("MemoryMediaBackend.refuseRoot")(function* (libraryId: LibraryId) {
+          yield* SubscriptionRef.update(state, (current) => ({
+            ...current,
+            roots: new Map([...current.roots].filter(([id]) => id !== libraryId)),
+          }));
         }),
 
         claimJob: Effect.fn("MemoryMediaBackend.claimJob")(function* (

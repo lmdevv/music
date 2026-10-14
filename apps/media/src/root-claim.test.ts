@@ -78,6 +78,49 @@ describe("root claims", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       }),
     ));
 
+  it("tells folders apart by identity, as a bind mount can't hide", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root } = yield* fixtureLibrary;
+        const base = yield* temporaryDirectory("nest");
+        const music = join(base, "music");
+        const inner = join(music, "inner");
+        const beside = join(base, "beside");
+
+        yield* Files.copyTree(root, music);
+        yield* Files.makeDirectory(inner);
+        yield* Files.makeDirectory(beside);
+
+        // Each chain is the folder, then each folder above it up to `/`.
+        const [innerIds, musicIds, topIds] = yield* Effect.all([
+          Files.folderIds(inner),
+          Files.folderIds(music),
+          Files.folderIds("/"),
+        ]);
+
+        expect(innerIds.slice(1)).toEqual(musicIds);
+        expect(innerIds.at(-1)).toBe(topIds[0]);
+
+        // The in-memory backend compares identities only, never paths.
+        const control = yield* worker(yield* temporaryDirectory("data"));
+        const first = yield* scanOf(control, music);
+
+        expect(first.job?.status).toBe("done");
+        expect(first.tracks).toHaveLength(10);
+
+        const nested = yield* scanOf(control, inner);
+
+        expect(nested.job?.outcome).toEqual({
+          status: "failed",
+          error: "This folder overlaps another library",
+        });
+
+        const apart = yield* scanOf(control, beside);
+
+        expect(apart.job?.status).toBe("done");
+      }),
+    ));
+
   it("refuses /proc/self/root, which names the whole file system again", () =>
     runScoped(
       Effect.gen(function* () {
