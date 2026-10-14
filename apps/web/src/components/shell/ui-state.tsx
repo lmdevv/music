@@ -14,8 +14,12 @@ export interface UiState {
   readonly setQueueOpen: (open: boolean) => void;
   readonly commandOpen: boolean;
   readonly setCommandOpen: (open: boolean) => void;
+  /** "Play on" is open: the player bar's popover on desktop, otherwise a sheet or dialog. */
   readonly devicesOpen: boolean;
   readonly setDevicesOpen: (open: boolean) => void;
+  /** The player bar's speaker button is mounted, so desktop shows "Play on" as its popover. */
+  readonly devicePopoverMounted: boolean;
+  readonly setDevicePopoverMounted: (mounted: boolean) => void;
   /** Open with the songs a new playlist starts with; null when the dialog is closed. */
   readonly newPlaylist: { readonly trackIds: ReadonlyArray<TrackId> } | null;
   readonly openNewPlaylist: (trackIds?: ReadonlyArray<TrackId>) => void;
@@ -30,6 +34,7 @@ export function UiStateProvider({ children }: { readonly children: ReactNode }) 
   const [queueOpen, setQueueOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [devicesOpen, setDevicesOpen] = useState(false);
+  const [devicePopoverMounted, setDevicePopoverMounted] = useState(false);
   const [newPlaylist, setNewPlaylist] = useState<UiState["newPlaylist"]>(null);
 
   const value = useMemo(
@@ -42,11 +47,13 @@ export function UiStateProvider({ children }: { readonly children: ReactNode }) 
       setCommandOpen,
       devicesOpen,
       setDevicesOpen,
+      devicePopoverMounted,
+      setDevicePopoverMounted,
       newPlaylist,
       openNewPlaylist: (trackIds = []) => setNewPlaylist({ trackIds }),
       closeNewPlaylist: () => setNewPlaylist(null),
     }),
-    [nowPlaying, queueOpen, commandOpen, devicesOpen, newPlaylist],
+    [nowPlaying, queueOpen, commandOpen, devicesOpen, devicePopoverMounted, newPlaylist],
   );
 
   return <UiContext.Provider value={value}>{children}</UiContext.Provider>;

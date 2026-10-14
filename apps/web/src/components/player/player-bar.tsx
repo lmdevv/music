@@ -6,6 +6,7 @@ import { Tooltip } from "@music/ui/components/tooltip";
 import { cn } from "@music/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { ListMusicIcon, SpeakerIcon } from "lucide-react";
+import { useEffect, useRef } from "react";
 
 import { Artwork } from "@/components/library/artwork";
 import { LikeButton } from "@/components/library/like-button";
@@ -153,10 +154,12 @@ export function PlayerBar() {
                   <ListMusicIcon className="size-5" />
                 </button>
               </Tooltip>
-              <DevicePickerButton />
-              <Volume />
             </>
           )}
+          {/* In every state, and in the same place so it stays mounted: moving playback to
+              another device matters most when this browser can't play. */}
+          <DevicePickerButton />
+          {tools === "tools" ? <Volume /> : null}
         </div>
       </section>
       <RemoteBand />
@@ -167,11 +170,28 @@ export function PlayerBar() {
 /**
  * The speaker button that opens the "Play on" popover. Below the desktop width the player bar is
  * hidden and `DeviceSheet` shows the same open state, so the popover closes there (ADS-106).
+ *
+ * While it is mounted it tells `DeviceSheet` that desktop has a popover. When it goes away (the
+ * queue empties) it closes "Play on" if the popover was the one showing, so nothing opens by
+ * itself when a song loads later.
  */
 function DevicePickerButton() {
-  const { devicesOpen, setDevicesOpen } = useUi();
+  const { devicesOpen, setDevicesOpen, setDevicePopoverMounted } = useUi();
   const { onlineCount } = useDevices();
   const desktop = useIsDesktop();
+  const showing = useRef(false);
+
+  showing.current = devicesOpen && desktop;
+
+  useEffect(() => {
+    setDevicePopoverMounted(true);
+
+    return () => {
+      setDevicePopoverMounted(false);
+
+      if (showing.current) setDevicesOpen(false);
+    };
+  }, [setDevicePopoverMounted, setDevicesOpen]);
 
   return (
     <Popover open={devicesOpen && desktop} onOpenChange={setDevicesOpen}>

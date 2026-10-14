@@ -1,6 +1,32 @@
 import { expect, test } from "@playwright/test";
 
+import { Schema } from "effect";
+
 import { ADMIN, joinAsNewMember, seed, seedDevice, signIn, unique } from "./support";
+
+/** Any other fields, kept so a rewritten message still says everything the server sent. */
+const Rest = [Schema.Record(Schema.String, Schema.Unknown)] as const;
+
+/** One query change in a Convex sync-protocol message. */
+const QueryChange = Schema.StructWithRest(
+  Schema.Struct({
+    type: Schema.String,
+    queryId: Schema.optionalKey(Schema.Finite),
+    args: Schema.optionalKey(Schema.Unknown),
+  }),
+  Rest,
+);
+
+/** The parts of a Convex sync-protocol message the retry test reads. */
+const SocketMessage = Schema.StructWithRest(
+  Schema.Struct({
+    type: Schema.String,
+    modifications: Schema.optionalKey(Schema.Array(QueryChange)),
+  }),
+  Rest,
+);
+
+const decodeSocketMessage = Schema.decodeUnknownSync(Schema.fromJsonString(SocketMessage));
 
 test.describe.configure({ mode: "serial" });
 
@@ -24,18 +50,22 @@ test("a wrong password shows the sign-in error and logs nothing", async ({ page 
   expect(errors).toEqual([]);
 });
 
-test("Play on asked for before any song loads doesn't open by itself later", async ({
+test("Play on opens with nothing loaded, and never pops up by itself later", async ({
   page: admin,
   browser,
 }) => {
-  // A new member has never played anything, so the desktop player bar and its picker are absent.
+  // A new member has never played anything, so the desktop player bar and its speaker are absent.
   const page = await joinAsNewMember(admin, browser);
   const bar = page.getByRole("region", { name: "Player" });
-  const picker = page.getByText(/DEVICES? ONLINE/);
+  const popover = page.getByText(/DEVICES? ONLINE/);
+  const dialog = page.getByRole("dialog", { name: "Play on" });
 
   await expect(bar).toHaveCount(0);
   await page.keyboard.press("d");
-  await expect(picker).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("menuitemradio").first()).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
 
   await page
     .getByRole("navigation", { name: "Library" })
@@ -44,13 +74,41 @@ test("Play on asked for before any song loads doesn't open by itself later", asy
   await page.getByRole("link", { name: "Moon Safari" }).first().click();
   await page.getByRole("button", { name: "Play", exact: true }).first().click();
   await expect(bar.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
-  await expect(picker).toHaveCount(0);
+  await expect(popover).toHaveCount(0);
+  await expect(dialog).toHaveCount(0);
 
   await page.keyboard.press("d");
-  await expect(picker).toBeVisible();
+  await expect(popover).toBeVisible();
   await page.keyboard.press("Escape");
   await bar.getByRole("button", { name: "Pause", exact: true }).click();
   await page.context().close();
+});
+
+test("Play on opens while the media service is unreachable", async ({ page }) => {
+  // This browser can't reach the media service, which is when moving playback elsewhere matters.
+  await page.route(/\/media\/(health|stream)/, (route) => route.abort());
+  await signIn(page);
+  await page
+    .getByRole("navigation", { name: "Library" })
+    .getByRole("link", { name: "Albums" })
+    .click();
+  await page.getByRole("link", { name: "Dummy" }).first().click();
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+
+  const bar = page.getByRole("region", { name: "Player" });
+
+  await expect(bar.getByText("Playback is unavailable", { exact: false })).toBeVisible();
+  await page.keyboard.press("d");
+  await expect(page.getByText(/DEVICES? ONLINE/)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Open the command menu" }).click();
+  await page.keyboard.type("play on another device");
+  await page
+    .getByRole("dialog", { name: "Command menu" })
+    .getByRole("option", { name: /Play on another device/ })
+    .click();
+  await expect(page.getByText(/DEVICES? ONLINE/)).toBeVisible();
+  await page.keyboard.press("Escape");
 });
 
 test("browse to an album and press play", async ({ page }) => {
@@ -176,6 +234,82 @@ test("links to missing screens show a not-found state inside the app", async ({ 
   await expect(page.getByRole("navigation", { name: "Library" })).toBeVisible();
   await page.getByRole("link", { name: "Go to Home" }).click();
   await expect(page).toHaveURL(/\/$/);
+});
+
+test("Try again subscribes again after a screen's data failed to load", async ({ page }) => {
+  // Fails the album screen's results on the Convex socket, as a server error would, until the
+  // test lets them through. The boundary also resets when the route's match changes, so failing
+  // only the first result could let the screen recover before "Try again" is pressed.
+  const albumQueries = new Set<number>();
+  let failing = true;
+
+  await page.routeWebSocket(/\/api\/.*\/sync/, (socket) => {
+    const server = socket.connectToServer();
+
+    socket.onMessage((message) => {
+      const text = String(message);
+      const sent = decodeSocketMessage(text);
+
+      for (const change of sent.modifications ?? []) {
+        if (
+          change.type === "Add" &&
+          change.queryId !== undefined &&
+          JSON.stringify(change.args).includes("albums.get")
+        ) {
+          albumQueries.add(change.queryId);
+        }
+      }
+
+      server.send(text);
+    });
+    server.onMessage((message) => {
+      const text = String(message);
+      const received = decodeSocketMessage(text);
+
+      const target = (received.modifications ?? []).find(
+        (change) =>
+          change.type === "QueryUpdated" &&
+          change.queryId !== undefined &&
+          albumQueries.has(change.queryId),
+      );
+
+      if (!failing || received.type !== "Transition" || target === undefined) {
+        socket.send(text);
+
+        return;
+      }
+
+      socket.send(
+        JSON.stringify({
+          ...received,
+          modifications: (received.modifications ?? []).map((change) =>
+            change === target
+              ? {
+                  type: "QueryFailed",
+                  queryId: change.queryId,
+                  errorMessage: "[Request ID: e2e] Server Error",
+                  logLines: [],
+                  journal: null,
+                }
+              : change,
+          ),
+        }),
+      );
+    });
+  });
+
+  await signIn(page);
+  await page
+    .getByRole("navigation", { name: "Library" })
+    .getByRole("link", { name: "Albums" })
+    .click();
+  await page.getByRole("link", { name: "Blue Lines" }).first().click();
+  await expect(page.getByRole("heading", { name: "This screen didn't load" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Library" })).toBeVisible();
+
+  failing = false;
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Blue Lines" }).first()).toBeVisible();
 });
 
 test("like a song and find it in Liked songs", async ({ page }) => {

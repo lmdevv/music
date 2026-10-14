@@ -1,46 +1,39 @@
 import { usePlayer } from "@music/player/react";
+import { Dialog, DialogContent } from "@music/ui/components/dialog";
 import { Sheet, SheetContent } from "@music/ui/components/sheet";
-import { useEffect } from "react";
 
 import { useUi } from "@/components/shell/ui-state";
 import { useIsDesktop } from "@/lib/use-media";
 
-import { barTools } from "./bar-tools";
-import { useIsRemote } from "./controls";
 import { DeviceList } from "./devices";
 
 /**
- * The phone "Play on" sheet (Paper 07 · 04), opened from the command menu or the `d` key.
- *
- * On desktop the picker is a popover on the player bar's speaker button, which exists only while
- * the bar shows its tools (a song loaded, no buffering, error, or offline state). A request to open
- * "Play on" while there is no button, or one left open when the button goes away, is dropped here;
- * otherwise the popover would open on its own once the button came back.
+ * "Play on" wherever the player bar's popover isn't: the phone sheet (Paper 07 · 04), and on
+ * desktop a dialog while the bar has no speaker button (nothing loaded yet). Opened from the
+ * command menu or the `d` key, so moving playback is always reachable.
  */
 export function DeviceSheet() {
-  const { devicesOpen, setDevicesOpen } = useUi();
+  const { devicesOpen, setDevicesOpen, devicePopoverMounted } = useUi();
   const desktop = useIsDesktop();
   const player = usePlayer();
-  const remote = useIsRemote();
   const track = player.track;
-
-  const pickerShown =
-    !desktop ||
-    (track !== null &&
-      barTools({ status: player.status, mediaOnline: player.mediaOnline, remote }) === "tools");
-
-  useEffect(() => {
-    if (devicesOpen && !pickerShown) setDevicesOpen(false);
-  }, [devicesOpen, pickerShown, setDevicesOpen]);
+  const description = track === null ? undefined : `${track.title} · ${track.artist}`;
 
   return (
-    <Sheet open={devicesOpen && !desktop} onOpenChange={setDevicesOpen}>
-      <SheetContent
-        title="Play on"
-        description={track === null ? undefined : `${track.title} · ${track.artist}`}
-      >
-        <DeviceList touch />
-      </SheetContent>
-    </Sheet>
+    <>
+      <Sheet open={devicesOpen && !desktop} onOpenChange={setDevicesOpen}>
+        <SheetContent title="Play on" description={description}>
+          <DeviceList touch />
+        </SheetContent>
+      </Sheet>
+      <Dialog open={devicesOpen && desktop && !devicePopoverMounted} onOpenChange={setDevicesOpen}>
+        <DialogContent
+          title="Play on"
+          description="Open [music] in any browser while signed in and it shows up here."
+        >
+          <DeviceList />
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
