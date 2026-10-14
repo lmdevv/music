@@ -1224,18 +1224,33 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     const person = await invite(fixture.adminA, `promoted-${id}@music.test`, "member");
     const { id: userId } = await person.music.read("account.me", {});
     const { key } = await person.music.run("keys.create", { name: `CLI ${id}` });
+    const keyTokens = await signIn(server, { provider: "apikey", params: { key } });
+
+    if (keyTokens === null) throw new Error("A fresh API key did not sign in");
+
+    const keySignIn = () =>
+      signIn(server, { provider: "apikey", params: { key } }).catch(() => null);
 
     await adminB.music.run("people.role", { userId, role: "guest" });
 
-    expect((await person.music.read("account.me", {})).role).toBe("guest");
-    await expectReadFailure(person, "keys.list", {}, "forbidden");
-    expect(await signIn(server, { provider: "apikey", params: { key } })).toBeNull();
+    // Becoming a guest ends the sessions their keys opened, and the keys no longer sign in.
+    await expectReadFailure(withTokens(server, keyTokens), "account.me", {}, "unauthenticated");
+    expect(await keySignIn()).toBeNull();
+
+    const asGuest = await passwordSignIn(server, `promoted-${id}@music.test`, PASSWORD);
+
+    expect((await asGuest.music.read("account.me", {})).role).toBe("guest");
+    await expectReadFailure(asGuest, "keys.list", {}, "forbidden");
 
     await adminB.music.run("people.role", { userId, role: "admin" });
-    expect((await person.music.read("people.list", {})).map((found) => found.id)).toContain(userId);
+    expect((await asGuest.music.read("people.list", {})).map((found) => found.id)).toContain(
+      userId,
+    );
+    // Revoked, not just refused: a promotion does not bring the key back.
+    await expect.poll(keySignIn).toBeNull();
 
     await adminB.music.run("people.role", { userId, role: "member" });
-    await expectReadFailure(person, "people.list", {}, "forbidden");
+    await expectReadFailure(asGuest, "people.list", {}, "forbidden");
   });
 
   it("takes an admin's invites and sole say over private libraries when they step down", async () => {

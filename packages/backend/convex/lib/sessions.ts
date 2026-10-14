@@ -27,13 +27,25 @@ export const endSession = async (
  * of times, so deleting them all here could exceed a mutation's limits and block the suspension.
  */
 export const endUserSessions = async (ctx: MutationCtx, userId: Id<"users">): Promise<void> => {
-  const now = Date.now();
+  // Reading the person's newest session puts the end of their session range in this mutation's
+  // read set, so a sign-in committing meanwhile makes it retry rather than slip past the cutoff.
+  // The cutoff then covers every session that exists, including one created this millisecond;
+  // anything created after this commits has a later creation time.
+  const newest = await ctx.db
+    .query("authSessions")
+    .withIndex("userId", (q) => q.eq("userId", userId))
+    .order("desc")
+    .first();
 
-  if ((await ctx.db.get(userId)) !== null) await ctx.db.patch(userId, { sessionsValidAfter: now });
+  const cutoff = Math.max(Date.now(), newest?._creationTime ?? 0);
 
-  await ctx.scheduler.runAfter(0, internal.people.purgeSessions, { userId, before: now });
+  if ((await ctx.db.get(userId)) !== null) {
+    await ctx.db.patch(userId, { sessionsValidAfter: cutoff });
+  }
+
+  await ctx.scheduler.runAfter(0, internal.people.purgeSessions, { userId, before: cutoff });
 };
 
 /** Whether a session was ended by `endUserSessions` but its row is not purged yet. */
 export const isStale = (session: Doc<"authSessions">, user: Doc<"users">): boolean =>
-  user.sessionsValidAfter !== undefined && session._creationTime < user.sessionsValidAfter;
+  user.sessionsValidAfter !== undefined && session._creationTime <= user.sessionsValidAfter;

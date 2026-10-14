@@ -15,8 +15,7 @@ import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { randomToken, sha256Hex } from "../lib/crypto";
 import { fail } from "../lib/errors";
 import { findSession } from "../lib/playback";
-import { inviterStillAllows } from "../lib/invites";
-import { endSession, endUserSessions } from "../lib/sessions";
+import { endUserSessions } from "../lib/sessions";
 import { loadPerson, roleOf } from "../lib/viewer";
 import type { Viewer } from "../lib/viewer";
 import type { MutationHandlers, QueryHandlers } from "./types";
@@ -113,41 +112,14 @@ const keepAnAdmin = async (ctx: QueryCtx, leaving: Doc<"users">): Promise<void> 
 };
 
 /**
- * Revokes the open invites a person made that their role no longer allows, so a demoted or
- * suspended admin's invites stop working (sign-up checks this again, see `inviterStillAllows`).
+ * Tidies the invite list after someone loses the right to their open invites. Sign-up already
+ * refuses those invites (`inviterStillAllows`), so this can run later, in batches.
  */
-const revokeLapsedInvites = async (ctx: MutationCtx, inviter: Doc<"users">): Promise<void> => {
-  const invites = await ctx.db
-    .query("invites")
-    .withIndex("by_creator", (q) => q.eq("createdBy", inviter._id))
-    .collect();
-
-  await Promise.all(
-    invites
-      .filter((invite) => !invite.revoked && invite.acceptedBy === undefined)
-      .filter((invite) => !inviterStillAllows(inviter, invite))
-      .map((invite) => ctx.db.patch(invite._id, { revoked: true })),
-  );
-};
-
-/** Revokes every API key the person has and ends the sessions they opened. */
-const revokeKeys = async (ctx: MutationCtx, userId: Id<"users">): Promise<void> => {
-  const keys = await ctx.db
-    .query("apiKeys")
-    .withIndex("by_user", (q) => q.eq("userId", userId))
-    .collect();
-
-  const now = Date.now();
-
-  await Promise.all(
-    keys
-      .filter((key) => key.revokedAt === undefined)
-      .map(async (key) => {
-        await ctx.db.patch(key._id, { revokedAt: now, sessionId: undefined });
-
-        if (key.sessionId !== undefined) await endSession(ctx, key.sessionId);
-      }),
-  );
+const revokeLapsedInvites = async (ctx: MutationCtx, inviterId: Id<"users">): Promise<void> => {
+  await ctx.scheduler.runAfter(0, internal.people.revokeLapsedInvites, {
+    inviterId,
+    cursor: null,
+  });
 };
 
 /** The server's owner, if a migration or the first sign-up has named one. */
@@ -205,10 +177,17 @@ export const peopleMutations = {
     if (args.role !== "admin") await keepAnAdmin(ctx, user);
 
     await ctx.db.patch(user._id, { role: args.role });
-    await revokeLapsedInvites(ctx, { ...user, role: args.role });
+    await revokeLapsedInvites(ctx, user._id);
 
-    // Guests have no API keys; the ones they had stop working with the change.
-    if (args.role === "guest") await revokeKeys(ctx, user._id);
+    // Guests have no API keys. Key sign-in refuses guests at once, sessions the keys opened end
+    // here, and the keys themselves are revoked in batches so a promotion does not revive them.
+    if (args.role === "guest") {
+      await endUserSessions(ctx, user._id);
+      await ctx.scheduler.runAfter(0, internal.people.revokeKeys, {
+        userId: user._id,
+        cursor: null,
+      });
+    }
 
     return ok;
   },
@@ -218,10 +197,8 @@ export const peopleMutations = {
 
     await keepAnAdmin(ctx, user);
 
-    const suspendedAt = user.suspendedAt ?? Date.now();
-
-    await ctx.db.patch(user._id, { suspendedAt });
-    await revokeLapsedInvites(ctx, { ...user, suspendedAt });
+    await ctx.db.patch(user._id, { suspendedAt: user.suspendedAt ?? Date.now() });
+    await revokeLapsedInvites(ctx, user._id);
 
     // API keys stay, refusing to sign in until the person is unsuspended. Stream URLs already
     // signed keep working until they expire, as after any revocation.
@@ -256,65 +233,38 @@ export const peopleMutations = {
     // A server from before owners has none until its migration runs; the remover takes over.
     const heir = (await findOwner(ctx))?._id ?? viewer.id;
 
-    const [libraries, grants, accounts, keys, devices, resets, invites, playback] =
-      await Promise.all([
-        ctx.db
-          .query("libraries")
-          .withIndex("by_owner", (q) => q.eq("ownerId", user._id))
-          .collect(),
-        ctx.db
-          .query("libraryAccess")
-          .withIndex("by_user", (q) => q.eq("userId", user._id))
-          .collect(),
-        ctx.db
-          .query("authAccounts")
-          .withIndex("userIdAndProvider", (q) => q.eq("userId", user._id))
-          .collect(),
-        ctx.db
-          .query("apiKeys")
-          .withIndex("by_user", (q) => q.eq("userId", user._id))
-          .collect(),
-        ctx.db
-          .query("devices")
-          .withIndex("by_user_device", (q) => q.eq("userId", user._id))
-          .collect(),
-        ctx.db
-          .query("passwordResets")
-          .withIndex("by_user", (q) => q.eq("userId", user._id))
-          .collect(),
-        ctx.db
-          .query("invites")
-          .withIndex("by_creator", (q) => q.eq("createdBy", user._id))
-          .collect(),
-        findSession(ctx, user._id),
-      ]);
+    // Only the account, its sign-in method, and its one playback session go here: a person has
+    // one password account with at most a code or two. Everything they could create without
+    // limit (keys, devices, likes, history, playlists) goes in batches after, which cannot fail
+    // the removal; with the account gone, none of it is reachable meanwhile.
+    const [accounts, playback] = await Promise.all([
+      ctx.db
+        .query("authAccounts")
+        .withIndex("userIdAndProvider", (q) => q.eq("userId", user._id))
+        .take(10),
+      findSession(ctx, user._id),
+    ]);
 
     const codes = await Promise.all(
       accounts.map((account) =>
         ctx.db
           .query("authVerificationCodes")
           .withIndex("accountId", (q) => q.eq("accountId", account._id))
-          .collect(),
+          .take(10),
       ),
     );
 
     await endUserSessions(ctx, user._id);
 
     await Promise.all([
-      // Private libraries stay private, now to the owner; nothing on disk changes.
-      ...libraries.map((library) => ctx.db.patch(library._id, { ownerId: heir })),
-      ...invites
-        .filter((invite) => !invite.revoked && invite.acceptedBy === undefined)
-        .map((invite) => ctx.db.patch(invite._id, { revoked: true })),
-      ...[...grants, ...accounts, ...codes.flat(), ...keys, ...devices, ...resets].map((doc) =>
-        ctx.db.delete(doc._id),
-      ),
+      // Deleting the account frees the email for a new invite.
+      ...[...accounts, ...codes.flat()].map((doc) => ctx.db.delete(doc._id)),
       ...(playback === null ? [] : [ctx.db.delete(playback._id)]),
     ]);
 
-    // Likes, history, and playlists can be long, so they go in batches after the account.
     await ctx.db.delete(user._id);
-    await ctx.scheduler.runAfter(0, internal.people.purgeRemovedUser, { userId: user._id });
+    await revokeLapsedInvites(ctx, user._id);
+    await ctx.scheduler.runAfter(0, internal.people.purgeRemovedUser, { userId: user._id, heir });
 
     return ok;
   },
