@@ -38,3 +38,23 @@ jobs:
             type=gha,scope=amd64
             type=gha,scope=multiarch
           cache-to: type=gha,scope=multiarch,mode=max
+      # Building is not running: boot the arm64 image under emulation until it reports healthy.
+      # Slow, but it is the only arm64 machine CI has.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/arm64
+          load: true
+          tags: music:arm64
+          cache-from: type=gha,scope=multiarch
+      - name: Boot the arm64 image
+        run: |
+          docker run -d --name music-arm64 --platform linux/arm64 -p 127.0.0.1:8090:8080 music:arm64
+          for _ in $(seq 1 180); do
+            curl -fsS http://127.0.0.1:8090/healthz && break
+            sleep 5
+          done
+          curl -fsS http://127.0.0.1:8090/healthz || { docker logs music-arm64 | tail -80; exit 1; }
+          test "$(docker exec music-arm64 uname -m)" = aarch64
+          curl -fsS http://127.0.0.1:8090/ | grep -q '<title>\[music\]</title>'
