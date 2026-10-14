@@ -85,7 +85,19 @@ function KeysSettings() {
           ))}
         </div>
       )}
-      <TerminalHint label="Use a key" command={`music login --server ${serverUrl} --key mk_…`} />
+      <div className="flex flex-col items-start gap-2">
+        <TerminalHint
+          label="Use a key"
+          command={`printf '%s' "$KEY" | music login --server ${serverUrl} --key-stdin`}
+        />
+        <p className="max-w-130 font-sans text-sm/sm text-text-muted">
+          Keep keys off the command line. Pipe the key in as above, set{" "}
+          <code className="font-mono text-text">MUSIC_SERVER</code> and{" "}
+          <code className="font-mono text-text">MUSIC_API_KEY</code>, or run{" "}
+          <code className="font-mono text-text">music login --server {serverUrl}</code> and paste it
+          at the hidden prompt.
+        </p>
+      </div>
       <NewKeyDialog open={creating} onOpenChange={setCreating} />
     </div>
   );
