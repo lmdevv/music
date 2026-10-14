@@ -63,7 +63,7 @@ export const sweepArt = Effect.fn("ArtStore.sweep")(function* (
 });
 
 /** What `deleteArt` did with each hash it was given. */
-export interface DeletedArt {
+interface DeletedArt {
   readonly removed: number;
   /** Hashes whose file was written at or after `before`, left for a later try. */
   readonly tooNew: ReadonlyArray<string>;
