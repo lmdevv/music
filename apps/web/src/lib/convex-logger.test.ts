@@ -20,31 +20,30 @@ const signInFailure = (error: string) =>
   `[CONVEX A(auth:signIn)] [Request ID: c567abd5af572dac] Server Error\nUncaught Error: ${error}\n    at retrieveAccount (index.ts:602:9)`;
 
 describe("convexLogger", () => {
-  it("drops a wrong password, an unknown email, and a rate-limited sign-in", () => {
+  it("drops failed sign-ins, including from a deployment that redacts error details", () => {
     const { lines, sink } = recordingSink();
     const logger = convexLogger(sink);
 
     logger.error(signInFailure("InvalidSecret"));
     logger.error(signInFailure("InvalidAccountId"));
     logger.error(signInFailure("TooManyFailedAttempts"));
+    logger.error("[CONVEX A(auth:signIn)] [Request ID: 5f0a3c] Server Error");
 
     expect(lines).toEqual([]);
   });
 
-  it("still logs other sign-in failures and other functions' errors", () => {
+  it("still logs every other function's errors", () => {
     const { lines, sink } = recordingSink();
     const logger = convexLogger(sink);
 
     const other =
       "[CONVEX M(commands:run)] [Request ID: 1] Server Error\nUncaught Error: InvalidSecret";
 
-    logger.error(signInFailure("Missing environment variable JWT_PRIVATE_KEY"));
     logger.error(other);
     logger.warn("reconnecting");
     logger.log("%c[CONVEX Q(commands:read)] [LOG]", "color:gray", "'hello'");
 
     expect(lines).toEqual([
-      ["error", [signInFailure("Missing environment variable JWT_PRIVATE_KEY")]],
       ["error", [other]],
       ["warn", ["reconnecting"]],
       ["log", ["%c[CONVEX Q(commands:read)] [LOG]", "color:gray", "'hello'"]],
