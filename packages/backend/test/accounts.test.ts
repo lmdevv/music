@@ -6,7 +6,7 @@ import { UserId } from "@music/commands/ids";
 import { sha256Hex } from "../convex/lib/crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { internal } from "../convex/_generated/api";
+import { api, internal } from "../convex/_generated/api";
 import { enableAuth, joinWithPassword, passwordFlow } from "./auth";
 import { makeBackend, signUp, upsertFiles } from "./backend";
 import type { Backend, User } from "./backend";
@@ -90,6 +90,22 @@ describe("password reset links", () => {
     await owner.music.run("people.role", { userId: member.userId, role: "admin" });
 
     expect(await failureCode(redeem(backend, token))).toBe("invalid_args");
+  });
+
+  it("show as unusable, not as a form, for a suspended person", async () => {
+    const { backend, owner, member } = await household();
+
+    await owner.music.run("people.suspend", { userId: member.userId });
+
+    // An operator's link (`createForEmail`) for someone already suspended.
+    const { path } = await backend.mutation(internal.passwordResets.createForEmail, {
+      email: "member@music.test",
+    });
+
+    const token = path.replace("/reset/", "");
+
+    expect(await backend.query(api.setup.passwordReset, { token })).toEqual({ state: "invalid" });
+    expect(await failureCode(redeem(backend, token))).toBe("forbidden");
   });
 
   it("stop working for a promoted person even if the link was not voided", async () => {
@@ -183,6 +199,32 @@ describe("password sign-up and sign-in", () => {
     expect(attempts).toEqual([INVALID, INVALID]);
   });
 
+  it("signs nobody into an account another sign-up made a moment before", async () => {
+    const { backend, owner } = await household();
+
+    const codes = await Promise.all(
+      [0, 1].map(async () => (await owner.music.run("invites.create", {})).code),
+    );
+
+    // Both start before either account exists, each with an invite of its own and the same
+    // password: the second must not come back signed in to the account the first made.
+    const attempts = await Promise.all(
+      codes.map(async (inviteCode) =>
+        failure(
+          passwordFlow(backend, {
+            flow: "signUp",
+            email: "twin@music.test",
+            password: PASSWORD,
+            inviteCode,
+          }),
+        ),
+      ),
+    );
+
+    expect(attempts.filter((attempt) => attempt === "succeeded")).toHaveLength(1);
+    expect(attempts).toContainEqual(INVALID);
+  });
+
   it("gives a suspended account no tokens through sign-up either", async () => {
     const { backend, owner, member } = await household();
     const { code: inviteCode } = await owner.music.run("invites.create", {});
@@ -265,6 +307,25 @@ describe("password sign-up and sign-in", () => {
 });
 
 describe("library access", () => {
+  it("names a library's owner by email to admins only", async () => {
+    const { backend, owner, admin, member } = await household();
+
+    await backend.run(async (ctx) => {
+      await ctx.db.patch(owner.id, { name: undefined });
+    });
+    await owner.music.run("libraries.create", { name: "Ours", path: "/music/ours" });
+
+    const named = await Promise.all(
+      [admin, member].map(async (viewer) =>
+        (await viewer.music.read("libraries.list", {})).map((library) => library.ownerName),
+      ),
+    );
+
+    const email = await backend.run(async (ctx) => (await ctx.db.get(owner.id))?.email);
+
+    expect(named).toEqual([[email], [null]]);
+  });
+
   it("lets only a library's own owner change who listens", async () => {
     const { owner, admin, member } = await household();
 

@@ -5,8 +5,10 @@ import type {
   Job,
   Library,
   Playlist,
+  Role,
   Track,
 } from "@music/commands/models";
+import { can } from "@music/commands/permissions";
 import { signResource } from "@music/commands/signed-url";
 
 import type { Doc, Id } from "../_generated/dataModel";
@@ -158,10 +160,19 @@ export const presentJob = (
   finishedAt: doc.finishedAt ?? null,
 });
 
+/**
+ * How a library's owner is named to `viewerRole`: their name, or, for admins (who see everyone's
+ * email in People anyway), their email when they have no name. Members and guests never see
+ * someone else's email.
+ */
+export const ownerLabel = (owner: Doc<"users"> | null, viewerRole: Role): string | null =>
+  owner?.name ?? (can(viewerRole, "admin") ? owner?.email : undefined) ?? null;
+
 /** A library folder as clients see it. */
 export const presentLibrary = (
   doc: Doc<"libraries">,
-  owner: Doc<"users"> | null,
+  /** How to name the owner: see `ownerLabel`. */
+  ownerName: string | null,
   readable: boolean,
   manageable: boolean,
   scanning: boolean,
@@ -173,7 +184,7 @@ export const presentLibrary = (
   manageable,
   visibility: doc.visibility,
   ownerId: doc.ownerId,
-  ownerName: owner?.name ?? owner?.email ?? null,
+  ownerName,
   readable,
   trackCount: doc.trackCount,
   lastScanAt: doc.lastScanAt ?? null,

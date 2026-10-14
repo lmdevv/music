@@ -1,5 +1,6 @@
 import { dirname, join } from "node:path";
 
+import { SYSTEM_FOLDER_MESSAGE } from "@music/commands/system-folders";
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Schedule } from "effect";
 
@@ -130,7 +131,7 @@ describe("root claims", { timeout: MEDIA_TEST_TIMEOUT }, () => {
 
         expect(job?.outcome).toEqual({
           status: "failed",
-          error: "A library folder can't be in /proc, /sys, or /dev",
+          error: SYSTEM_FOLDER_MESSAGE,
         });
         expect(tracks).toEqual([]);
       }),

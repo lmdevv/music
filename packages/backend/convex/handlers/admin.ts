@@ -4,6 +4,7 @@ import {
   canChangeLibraryAccess,
   canRemoveLibrary,
 } from "@music/commands/permissions";
+import { isSystemFolder, SYSTEM_FOLDER_MESSAGE } from "@music/commands/system-folders";
 import { Match } from "effect";
 
 import { internal } from "../_generated/api";
@@ -12,8 +13,8 @@ import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { randomToken, sha256Hex } from "../lib/crypto";
 import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
-import { firstOverlap, isSystemPath, normaliseLibraryPath } from "../lib/paths";
-import { presentJob, presentLibrary } from "../lib/present";
+import { firstOverlap, normaliseLibraryPath } from "../lib/paths";
+import { ownerLabel, presentJob, presentLibrary } from "../lib/present";
 import { endSession } from "../lib/sessions";
 import { canManage, canRead, loadPerson, roleOf } from "../lib/viewer";
 import type { Viewer } from "../lib/viewer";
@@ -162,7 +163,7 @@ export const adminQueries = {
       listed.map(async (library) =>
         presentLibrary(
           library,
-          await ctx.db.get(library.ownerId),
+          ownerLabel(await ctx.db.get(library.ownerId), viewer.role),
           canRead(viewer, library._id),
           canManage(viewer, library),
           (await activeJob(ctx, library._id)) !== null,
@@ -250,9 +251,7 @@ export const adminMutations = {
       normaliseLibraryPath(args.path) ??
       fail("invalid_args", `Use an absolute folder path, such as /music, not ${args.path}`);
 
-    if (isSystemPath(path)) {
-      return fail("invalid_args", "A library folder can't be in /proc, /sys, or /dev");
-    }
+    if (isSystemFolder(path)) return fail("invalid_args", SYSTEM_FOLDER_MESSAGE);
 
     await checkNoOverlap(ctx, viewer, path);
 

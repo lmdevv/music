@@ -196,8 +196,8 @@ Every service runs as its own unprivileged user; only the start-up script runs a
   and keep their own playlists, likes, history, and API keys. `guest`s only hear the libraries
   they were added to and have no API keys.
 - **Libraries.** `shared` is everyone but guests, `restricted` is only the people added, and
-  `private` is only the library's owner. Admins rename, rescan, and remove the libraries they can
-  listen to; the server's owner manages every library. Only a library's own owner, or the
+  `private` is only the library's owner. Admins rename and rescan the libraries they can listen
+  to; the server's owner manages every library. Only a library's own owner, or the
   server's owner, removes it. Admins see that the other libraries exist (name, owner,
   visibility, song count) but not their folders. Only a library's own owner changes who listens
   to it. When someone is removed, their libraries move to the server's owner.
@@ -209,7 +209,7 @@ Every service runs as its own unprivileged user; only the start-up script runs a
   folders): the image sets `/music`, where Docker, Compose, and the NixOS module mount your music,
   so a folder elsewhere (or a link out of `/music`) is refused. Set `MUSIC_ROOTS` on the container
   to allow others; outside the image (development) it is unset and every folder is allowed.
-  `/proc`, `/sys`, and `/dev` are always refused. A library whose folder is refused stops
+  `/` itself, and folders in `/proc`, `/sys`, and `/dev`, are always refused. A library whose folder is refused stops
   streaming until a scan claims it again; its songs stay listed. Libraries from before this check
   stream nothing until they claim their folder at their next scan, which an upgrade starts for
   each of them right away.

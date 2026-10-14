@@ -10,18 +10,13 @@
  * link's target can change.
  */
 import type { LibraryId } from "@music/commands/ids";
+import { isSystemFolder, SYSTEM_FOLDER_MESSAGE } from "@music/commands/system-folders";
 import { Effect, Schema } from "effect";
 
 import * as Files from "./files.ts";
 import { MediaBackend } from "./media-backend.ts";
 import { MediaConfig } from "./media-config.ts";
 import * as NodeFiles from "./platform/node-files.ts";
-
-/** Kernel file systems no library may read, by their real paths. */
-const SYSTEM_ROOTS = ["/proc", "/sys", "/dev"];
-
-const isSystemPath = (path: string): boolean =>
-  SYSTEM_ROOTS.some((root) => path === root || NodeFiles.isWithin(root, path));
 
 /** The library's folder may not be scanned. The message is safe to show on the job. */
 class RootRefused extends Schema.TaggedError<RootRefused>()("RootRefused", {
@@ -51,13 +46,11 @@ export const claimRoot = Effect.fn("RootClaim.claim")(function* (library: {
       .refuseRoot(library.id)
       .pipe(Effect.andThen(Effect.fail(new RootRefused({ libraryId: library.id, reason }))));
 
-  if (isSystemPath(library.path)) {
-    return yield* refuse("A library folder can't be in /proc, /sys, or /dev");
-  }
+  if (isSystemFolder(library.path)) return yield* refuse(SYSTEM_FOLDER_MESSAGE);
 
   const real = yield* Files.realPath(library.path);
 
-  if (isSystemPath(real)) return yield* refuse("A library folder can't be in /proc, /sys, or /dev");
+  if (isSystemFolder(real)) return yield* refuse(SYSTEM_FOLDER_MESSAGE);
 
   if (musicRoots !== null) {
     // The allowed roots resolve too, so a root that is itself a link still allows its target.

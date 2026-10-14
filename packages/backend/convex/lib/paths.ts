@@ -20,13 +20,6 @@ export const normaliseLibraryPath = (raw: string): string | null => {
   return `/${segments.join("/")}`;
 };
 
-/**
- * Kernel file systems a library may never read: `/proc/self/root/...` is the whole file system
- * again under another name, and `/sys` and `/dev` hold no music. Takes a normalised path.
- */
-export const isSystemPath = (path: string): boolean =>
-  ["/proc", "/sys", "/dev"].some((root) => path === root || path.startsWith(`${root}/`));
-
 /** How a folder sits relative to another one, both normalised. */
 export type Overlap = "same" | "inside" | "contains" | "apart";
 

@@ -75,7 +75,11 @@ export const passwordReset = query({
 
     if (found.expiresAt < Date.now()) return { state: "expired" as const, ...details };
 
-    if (!(await resetStillAllowed(ctx, found, user))) return { state: "invalid" as const };
+    // Redeeming refuses a suspended account, so its link shows as unusable rather than as a form
+    // that can't succeed.
+    if (user.suspendedAt !== undefined || !(await resetStillAllowed(ctx, found, user))) {
+      return { state: "invalid" as const };
+    }
 
     return { state: "open" as const, ...details };
   },

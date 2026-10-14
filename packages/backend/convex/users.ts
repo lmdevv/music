@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 
-import type { Doc } from "./_generated/dataModel";
-import { internalMutation, internalQuery } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
+import { internalMutation, type MutationCtx } from "./_generated/server";
 import { fail } from "./lib/errors";
 import { inviterStillAllows } from "./lib/invites";
 import type { ReadCtx } from "./lib/viewer";
@@ -47,30 +47,63 @@ const signUpPass = async (
   return { kind: "invite", invite };
 };
 
-/**
- * Whether a sign-up may go ahead: fails with `signup_closed` unless the email may sign up, and
- * only then says whether a password account already uses it. Sign-up has no rate limit, so
- * without a valid invite every email gets the same answer, and nobody learns which have accounts.
- */
-export const checkSignUp = internalQuery({
-  args: { email: v.string(), inviteCode: v.union(v.string(), v.null()) },
-  handler: async (ctx, { email, inviteCode }) => {
-    await signUpPass(ctx, email, inviteCode ?? undefined);
+/** Adds the person a sign-up lets in, using up their invite. The first account is the owner. */
+const insertSignedUp = async (
+  ctx: MutationCtx,
+  pass: SignUpPass,
+  email: string,
+  name: string | undefined,
+): Promise<Id<"users">> => {
+  const displayName = name ?? email.split("@")[0];
 
-    const account = await ctx.db
+  if (pass.kind === "first") {
+    return ctx.db.insert("users", { email, name: displayName, role: "owner" });
+  }
+
+  const userId = await ctx.db.insert("users", { email, name: displayName, role: pass.invite.role });
+
+  await ctx.db.patch(pass.invite._id, { acceptedBy: userId, acceptedAt: Date.now() });
+
+  return userId;
+};
+
+/**
+ * Creates the person and the password account for a sign-up, in one transaction: fails with
+ * `signup_closed` unless the email may sign up, and only then returns null when a password
+ * account already uses it. Sign-up has no rate limit, so without a valid invite every email gets
+ * the same answer, and nobody learns which have accounts. `secret` is the password's hash.
+ */
+export const createPasswordAccount = internalMutation({
+  args: {
+    email: v.string(),
+    name: v.optional(v.string()),
+    inviteCode: v.optional(v.string()),
+    provider: v.string(),
+    secret: v.string(),
+  },
+  handler: async (ctx, { email, name, inviteCode, provider, secret }) => {
+    const pass = await signUpPass(ctx, email, inviteCode);
+
+    const existing = await ctx.db
       .query("authAccounts")
       .withIndex("providerAndAccountId", (q) =>
-        q.eq("provider", "password").eq("providerAccountId", email),
+        q.eq("provider", provider).eq("providerAccountId", email),
       )
       .unique();
 
-    return { accountExists: account !== null };
+    if (existing !== null) return null;
+
+    const userId = await insertSignedUp(ctx, pass, email, name);
+
+    await ctx.db.insert("authAccounts", { userId, provider, providerAccountId: email, secret });
+
+    return userId;
   },
 });
 
 /**
- * Creates the account for a password sign-up. The first account becomes the owner; every later
- * one needs an open invite.
+ * Creates the person for an account Convex Auth makes itself. Password sign-up makes its own
+ * (`createPasswordAccount`), so this only guards the callback: the same rules apply.
  */
 export const createFromSignUp = internalMutation({
   args: {
@@ -78,22 +111,6 @@ export const createFromSignUp = internalMutation({
     name: v.optional(v.string()),
     inviteCode: v.optional(v.string()),
   },
-  handler: async (ctx, { email, name, inviteCode }) => {
-    const pass = await signUpPass(ctx, email, inviteCode);
-    const displayName = name ?? email.split("@")[0];
-
-    if (pass.kind === "first") {
-      return ctx.db.insert("users", { email, name: displayName, role: "owner" });
-    }
-
-    const userId = await ctx.db.insert("users", {
-      email,
-      name: displayName,
-      role: pass.invite.role,
-    });
-
-    await ctx.db.patch(pass.invite._id, { acceptedBy: userId, acceptedAt: Date.now() });
-
-    return userId;
-  },
+  handler: async (ctx, { email, name, inviteCode }) =>
+    insertSignedUp(ctx, await signUpPass(ctx, email, inviteCode), email, name),
 });

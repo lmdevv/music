@@ -3,13 +3,14 @@
  * decides user access. Convex never calls the media service; the service subscribes here.
  */
 import { chainsOverlap } from "@music/commands/folder-ids";
+import { isSystemFolder, SYSTEM_FOLDER_MESSAGE } from "@music/commands/system-folders";
 import { v } from "convex/values";
 
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx } from "./_generated/server";
 import { enqueueScan } from "./handlers/admin";
 import { markTrackMissing, moveScannedTrack, upsertScannedTrack } from "./lib/catalog";
-import { firstOverlap, isClaimed, isSystemPath, normaliseLibraryPath } from "./lib/paths";
+import { firstOverlap, isClaimed, normaliseLibraryPath } from "./lib/paths";
 import { inOrder } from "./lib/sequence";
 import { requireService } from "./lib/service";
 
@@ -121,10 +122,10 @@ export const claimRoot = mutation({
 
     if (library === null) return { ok: false, error: "The library was removed" } as const;
 
-    if (real === null || isSystemPath(real)) {
+    if (real === null || isSystemFolder(real)) {
       await unclaim(ctx, library);
 
-      return { ok: false, error: "A library folder can't be in /proc, /sys, or /dev" } as const;
+      return { ok: false, error: SYSTEM_FOLDER_MESSAGE } as const;
     }
 
     const overlapping = (await ctx.db.query("libraries").collect()).filter(

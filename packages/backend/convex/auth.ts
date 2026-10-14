@@ -1,10 +1,5 @@
 import { ConvexCredentials } from "@convex-dev/auth/providers/ConvexCredentials";
-import {
-  convexAuth,
-  createAccount,
-  modifyAccountCredentials,
-  retrieveAccount,
-} from "@convex-dev/auth/server";
+import { convexAuth, modifyAccountCredentials, retrieveAccount } from "@convex-dev/auth/server";
 import { ConvexError } from "convex/values";
 import { Scrypt } from "lucia";
 import { Result, Schema } from "effect";
@@ -122,24 +117,19 @@ const password = ConvexCredentials<DataModel>({
 
       // Convex Auth's `createAccount` signs in an existing account when the password matches,
       // without the sign-in rate limit: sign-up would be an unlimited password oracle, and a way
-      // around suspension. So an existing email is refused like any failed sign-in, but only
-      // after the invite checks pass, so that without a valid invite every email reads alike.
-      const check = await ctx.runQuery(internal.users.checkSignUp, {
-        email,
-        inviteCode: inviteCode ?? null,
-      });
-
-      if (check.accountExists) return invalidCredentials();
-
-      const { user } = await createAccount(ctx, {
+      // around suspension. So the account is made here, in one transaction with the check that
+      // the email has none (two sign-ups at once can't both pass it), and an existing email is
+      // refused like any failed sign-in, but only after the invite checks pass, so that without
+      // a valid invite every email reads alike.
+      const userId = await ctx.runMutation(internal.users.createPasswordAccount, {
+        ...profile,
         provider: PASSWORD,
-        account: { id: email, secret: input.password },
-        profile,
-        shouldLinkViaEmail: false,
-        shouldLinkViaPhone: false,
+        secret: await scrypt.hash(input.password),
       });
 
-      return { userId: user._id };
+      if (userId === null) return invalidCredentials();
+
+      return { userId };
     }
 
     if (input.flow === "signIn") {

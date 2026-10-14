@@ -59,6 +59,15 @@ export const listenable = async (
 }> => {
   const all = await ctx.db.query("libraries").collect();
 
+  return { all, libraries: await listenableIn(ctx, all, user) };
+};
+
+/** The libraries of `all` that `user` can listen to. */
+const listenableIn = async (
+  ctx: ReadCtx,
+  all: ReadonlyArray<Doc<"libraries">>,
+  user: Doc<"users">,
+): Promise<ReadonlyArray<Doc<"libraries">>> => {
   const grants = await ctx.db
     .query("libraryAccess")
     .withIndex("by_user", (q) => q.eq("userId", user._id))
@@ -67,12 +76,7 @@ export const listenable = async (
   const granted = new Set(grants.map((grant) => grant.libraryId));
   const role = roleOf(user);
 
-  return {
-    all,
-    libraries: all.filter((library) =>
-      canListen(library, user._id, role, granted.has(library._id)),
-    ),
-  };
+  return all.filter((library) => canListen(library, user._id, role, granted.has(library._id)));
 };
 
 /**
@@ -84,10 +88,16 @@ export const listensBeyond = async (
   actor: Doc<"users">,
   target: Doc<"users">,
 ): Promise<boolean> => {
-  const [mine, theirs] = await Promise.all([listenable(ctx, actor), listenable(ctx, target)]);
-  const readable = new Set(mine.libraries.map((library) => library._id));
+  const all = await ctx.db.query("libraries").collect();
 
-  return theirs.libraries.some((library) => !readable.has(library._id));
+  const [mine, theirs] = await Promise.all([
+    listenableIn(ctx, all, actor),
+    listenableIn(ctx, all, target),
+  ]);
+
+  const readable = new Set(mine.map((library) => library._id));
+
+  return theirs.some((library) => !readable.has(library._id));
 };
 
 /** The suspended-account message sign-in, API keys, and open sessions all show. */

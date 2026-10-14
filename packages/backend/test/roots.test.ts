@@ -93,10 +93,12 @@ describe("real folder claims", () => {
     expect(overlapping).toEqual(Array.from({ length: 4 }, () => ({ ok: false, error: OVERLAP })));
 
     const system = await Promise.all(
-      ["/proc/1/root", "/sys", "/dev/shm"].map((real) => claim(backend, alias.libraryId, real)),
+      ["/proc/1/root", "/sys", "/dev/shm", "/"].map((real) =>
+        claim(backend, alias.libraryId, real),
+      ),
     );
 
-    expect(system.map((result) => result.ok)).toEqual([false, false, false]);
+    expect(system.map((result) => result.ok)).toEqual([false, false, false, false]);
 
     // Nothing was stored for the refused claims; a folder of its own is fine, and claiming it
     // again is too.
@@ -295,17 +297,17 @@ describe("real folder claims", () => {
     expect((await libraryDoc(backend, half)).rootIds).toEqual(["6:1", "5:0"]);
   });
 
-  it("refuse /proc, /sys, and /dev when a library is added", async () => {
+  it("refuse /, /proc, /sys, and /dev when a library is added", async () => {
     const backend = makeBackend();
     const owner = await signUp(backend, "owner");
 
     const codes = await Promise.all(
-      ["/proc/self/root/srv/music", "/sys/x", "/dev/shm/music"].map((path) =>
+      ["/proc/self/root/srv/music", "/sys/x", "/dev/shm/music", "/", "/.."].map((path) =>
         failureCode(owner.music.run("libraries.create", { name: "Sys", path })),
       ),
     );
 
-    expect(codes).toEqual(["invalid_args", "invalid_args", "invalid_args"]);
+    expect(codes).toEqual(Array.from({ length: 5 }, () => "invalid_args"));
   });
 });
 
