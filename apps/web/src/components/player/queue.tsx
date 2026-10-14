@@ -13,6 +13,8 @@ import { useAction } from "@/lib/action";
 import { formatDuration } from "@/lib/format";
 
 import { perform } from "./controls";
+import { focusMove } from "./queue-focus";
+import type { LandedRemoval } from "./queue-focus";
 
 /** The current song and the songs after it. */
 export interface UpNext {
@@ -138,12 +140,6 @@ function QueueRow({
   );
 }
 
-/** A removal that landed: the row's place in the list, and the list's length before it. */
-interface RemovedRow {
-  readonly position: number;
-  readonly lengthBefore: number;
-}
-
 /**
  * The upcoming songs as queue rows, or `empty` when there are none. Removing a row moves focus to
  * the row that takes its place, or to the new last row, instead of dropping it to the page
@@ -162,29 +158,43 @@ export function QueueList({
 }) {
   const player = usePlayer();
   const list = useRef<HTMLDivElement>(null);
-  // Set once a removal has landed (a failure shows as the player error and sets nothing). Focus
-  // moves when the list has actually shrunk, since the queue can reach this view a render later.
-  const [removed, setRemoved] = useState<RemovedRow | null>(null);
-  const handled = useRef<RemovedRow | null>(null);
+  // Set once a removal has landed (a failure shows as the player error and sets nothing). The
+  // queue can reach this view a render later, so focus moves when the list no longer shows it.
+  const [removed, setRemoved] = useState<LandedRemoval | null>(null);
+  const handled = useRef<LandedRemoval | null>(null);
+  const trackIds = next.map((entry) => entry.track.id);
+  const signature = trackIds.join(" ");
 
   useEffect(() => {
     const element = list.current;
 
     if (removed === null || handled.current === removed || element === null) return;
 
-    if (next.length >= removed.lengthBefore) return;
+    const active = document.activeElement;
+
+    const move = focusMove(removed, {
+      now: Date.now(),
+      trackIds: signature.length === 0 ? [] : signature.split(" "),
+      focusFree: active === null || active === document.body || element.contains(active),
+    });
+
+    if (move === "wait") return;
 
     handled.current = removed;
+
+    if (move === "drop") return;
 
     const buttons = element.querySelectorAll<HTMLElement>("[data-queue-remove]");
 
     (buttons[Math.min(removed.position, buttons.length - 1)] ?? element).focus();
-  }, [removed, next.length]);
+  }, [removed, signature]);
 
-  const removeAt = async (index: number, position: number): Promise<void> => {
-    const lengthBefore = next.length;
+  const removeAt = async (index: number, position: number, trackId: string): Promise<void> => {
+    const countBefore = trackIds.filter((id) => id === trackId).length;
 
-    if (await player.removeFromQueue(index)) setRemoved({ position, lengthBefore });
+    if (await player.removeFromQueue(index)) {
+      setRemoved({ position, trackId, countBefore, landedAt: Date.now() });
+    }
   };
 
   return (
@@ -197,7 +207,7 @@ export function QueueList({
               track={entry.track}
               index={entry.index}
               tone={tone}
-              onRemove={() => void removeAt(entry.index, position)}
+              onRemove={() => void removeAt(entry.index, position, entry.track.id)}
             />
           ))}
     </div>
