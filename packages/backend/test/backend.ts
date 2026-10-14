@@ -4,7 +4,7 @@
  * does.
  */
 import type { LibraryId, TrackId } from "@music/commands/ids";
-import type { Track } from "@music/commands/models";
+import type { Role, Track } from "@music/commands/models";
 import { makeMusicClient, type MusicClient } from "@music/sdk/client";
 import { convexTest } from "convex-test";
 import { vi } from "vitest";
@@ -53,7 +53,7 @@ export interface User {
 /** Creates a user with an auth session and returns a client signed in as them. */
 export const signUp = async (
   backend: Backend,
-  role: "admin" | "member",
+  role: Role,
   email = `${role}-${Math.random().toString(36).slice(2, 8)}@music.test`,
 ): Promise<User> => {
   const { userId, sessionId } = await backend.run(async (ctx) => {

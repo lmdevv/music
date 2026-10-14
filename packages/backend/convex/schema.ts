@@ -106,9 +106,7 @@ export default defineSchema({
     albumCount: v.number(),
     artistCount: v.number(),
     durationMs: v.number(),
-  })
-    .index("by_path", ["path"])
-    .index("by_owner", ["ownerId"]),
+  }).index("by_owner", ["ownerId"]),
 
   /**
    * People added to a library. They can listen to it while it is `restricted`, or, for guests,

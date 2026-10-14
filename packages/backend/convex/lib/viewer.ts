@@ -17,6 +17,11 @@ export interface Viewer {
   readonly role: Role;
   readonly libraries: ReadonlyArray<Doc<"libraries">>;
   readonly libraryIds: ReadonlySet<Id<"libraries">>;
+  /**
+   * Whether the viewer reads every library on the server, so a list can page one index over all
+   * of them instead of one range per library they read.
+   */
+  readonly readsEveryLibrary: boolean;
 }
 
 /** A stored user's role; accounts from before roles were stored are members. */
@@ -91,6 +96,7 @@ export const loadViewer = async (ctx: ReadCtx): Promise<Viewer> => {
     role,
     libraries,
     libraryIds: new Set(libraries.map((library) => library._id)),
+    readsEveryLibrary: libraries.length === all.length,
   };
 };
 

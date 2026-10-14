@@ -233,16 +233,20 @@ export const peopleMutations = {
     // A server from before owners has none until its migration runs; the remover takes over.
     const heir = (await findOwner(ctx))?._id ?? viewer.id;
 
-    // Only the account, its sign-in method, and its one playback session go here: a person has
+    // Only the account, its sign-in method, and its one playback session and queue go here: a person has
     // one password account with at most a code or two. Everything they could create without
     // limit (keys, devices, likes, history, playlists) goes in batches after, which cannot fail
     // the removal; with the account gone, none of it is reachable meanwhile.
-    const [accounts, playback] = await Promise.all([
+    const [accounts, playback, queue] = await Promise.all([
       ctx.db
         .query("authAccounts")
         .withIndex("userIdAndProvider", (q) => q.eq("userId", user._id))
         .take(10),
       findSession(ctx, user._id),
+      ctx.db
+        .query("playbackQueues")
+        .withIndex("by_user", (q) => q.eq("userId", user._id))
+        .unique(),
     ]);
 
     const codes = await Promise.all(
@@ -259,7 +263,7 @@ export const peopleMutations = {
     await Promise.all([
       // Deleting the account frees the email for a new invite.
       ...[...accounts, ...codes.flat()].map((doc) => ctx.db.delete(doc._id)),
-      ...(playback === null ? [] : [ctx.db.delete(playback._id)]),
+      ...[playback, queue].flatMap((row) => (row === null ? [] : [ctx.db.delete(row._id)])),
     ]);
 
     await ctx.db.delete(user._id);
