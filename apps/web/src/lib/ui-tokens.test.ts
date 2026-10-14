@@ -20,7 +20,7 @@ const tokens = (namespace: string): ReadonlyArray<string> =>
   themeNames.flatMap((name) => {
     const token = name.slice(namespace.length + 1);
 
-    return name.startsWith(`${namespace}-`) && !name.includes("--") && !/^\d/.test(token)
+    return name.startsWith(`${namespace}-`) && !name.includes("--") && !/^\d+$/.test(token)
       ? [token]
       : [];
   });
