@@ -19,7 +19,7 @@ const PURGE_QUEUES = 4;
 
 const PRUNE_BATCH = 200;
 
-/** A scan whose lease expires this many times in a row without getting further fails. */
+/** A scan whose lease expires this many times in a row before it saves anything fails. */
 export const MAX_SCAN_STALLS = 3;
 
 /** Finished jobs, used invites, and revoked keys are kept this long, then deleted. */
@@ -228,9 +228,9 @@ export const purgeLibrary = internalMutation({
 
 /**
  * Returns running jobs whose worker stopped renewing the lease to the pending queue, or fails one
- * whose lease expired `MAX_SCAN_STALLS` times in a row without getting further: a file that
- * crashes the scanner would otherwise crash it again on every retry, forever. A scan that gets
- * further each time (the service restarted for a deploy) keeps retrying.
+ * whose lease expired `MAX_SCAN_STALLS` times in a row before saving anything: a file that crashes
+ * the scanner would otherwise crash it again on every retry, forever. A scan that saves batches
+ * between restarts (the service restarted for a deploy) keeps retrying.
  */
 export const releaseExpiredLeases = internalMutation({
   args: {},
@@ -246,9 +246,9 @@ export const releaseExpiredLeases = internalMutation({
 
     await Promise.all(
       expired.map((job) => {
-        const further = job.furthestDone === undefined || job.done > job.furthestDone;
-        const stalls = further ? 1 : (job.stalls ?? 1) + 1;
-        const furthestDone = Math.max(job.done, job.furthestDone ?? 0);
+        // `done` counts files this lease saved: claiming resets it, and the scanner adds a batch
+        // only once it is written. Files already saved are skipped on the next try.
+        const stalls = job.done > 0 ? 0 : (job.stalls ?? 0) + 1;
 
         return stalls >= MAX_SCAN_STALLS
           ? ctx.db.patch(job._id, {
@@ -257,15 +257,13 @@ export const releaseExpiredLeases = internalMutation({
               leaseUntil: undefined,
               finishedAt: now,
               stalls,
-              furthestDone,
-              error: `The scan stopped responding ${MAX_SCAN_STALLS} times at the same place, so it was stopped. Check the media service log for the file it was reading, then scan again.`,
+              error: `The scan stopped responding ${MAX_SCAN_STALLS} times without saving anything, so it was stopped. Check the media service log for the file it was reading, then scan again.`,
             })
           : ctx.db.patch(job._id, {
               status: "pending",
               workerId: undefined,
               leaseUntil: undefined,
               stalls,
-              furthestDone,
               message: "Worker stopped responding; retrying",
             });
       }),

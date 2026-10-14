@@ -184,6 +184,9 @@ export const SearchResults = Schema.Struct({
 
 export interface SearchResults extends Schema.Schema.Type<typeof SearchResults> {}
 
+/** Songs a playlist holds at most. */
+export const PLAYLIST_LIMIT = 2000;
+
 export const Playlist = Schema.Struct({
   id: PlaylistId,
   name: Schema.String,

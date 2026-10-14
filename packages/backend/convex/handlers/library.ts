@@ -162,8 +162,17 @@ const readableAlbums = (viewer: Viewer, albums: ReadonlyArray<Doc<"albums"> | nu
 export const libraryQueries = {
   "library.home": async (ctx, viewer) => {
     const present = makePresenter(ctx, viewer);
-    const recent = await ctx.db.query("albums").withIndex("by_added").order("desc").take(200);
-    const recentlyAdded = readableAlbums(viewer, recent).slice(0, 12);
+    const scopes = await listScopes(ctx, viewer);
+
+    // Newest albums over the readable libraries' indexes, as `albums.list` reads them.
+    const recent = await mergedPage(
+      scopes.map((libraryId) => albumSource(ctx, libraryId)),
+      (album) => album.addedAt,
+      "desc",
+      { limit: 12 },
+    );
+
+    const recentlyAdded = readableAlbums(viewer, recent.items);
 
     const plays = await ctx.db
       .query("history")

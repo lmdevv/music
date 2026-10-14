@@ -133,7 +133,7 @@ describe("the scan job lifecycle", () => {
     expect(await backend.query(api.media.pendingJobs, { secret: MEDIA_SECRET })).toEqual([]);
   });
 
-  it("keeps retrying a scan that gets further each time its worker restarts", async () => {
+  it("keeps retrying a scan that saves files between restarts, even the same number each time", async () => {
     const backend = makeBackend();
     const admin = await signUp(backend, "admin");
     const created = await admin.music.run("libraries.create", { name: "Rock", path: "/music" });
@@ -146,7 +146,7 @@ describe("the scan job lifecycle", () => {
         secret: MEDIA_SECRET,
         jobId: job,
         workerId: WORKER,
-        done: attempt * 1000,
+        done: 500,
       });
       vi.setSystemTime(START + attempt * 10 * 60_000 + 2 * 60_000);
       await backend.mutation(internal.maintenance.releaseExpiredLeases, {});

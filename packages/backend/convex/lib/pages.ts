@@ -139,7 +139,7 @@ export const mergedPage = async <Row extends { readonly _creationTime: number }>
   const items = merged.slice(0, limit);
   const last = items.at(-1);
 
-  if (range.end !== null && request.end !== undefined && request.end !== null) {
+  if (range.end !== null) {
     // A page that outgrew `MAX_SPAN` ends at its last row instead, and the client puts a page
     // starting there in front of the one at `end`.
     return {
@@ -147,7 +147,7 @@ export const mergedPage = async <Row extends { readonly _creationTime: number }>
       cursor:
         merged.length > limit && last !== undefined
           ? encodeCursor({ key: keyOf(last), time: last._creationTime })
-          : request.end,
+          : encodeCursor(range.end),
       done: false,
     };
   }

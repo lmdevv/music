@@ -264,6 +264,13 @@ export const upsertScannedTrack = async (
 
   await ctx.db.patch(existing._id, fields);
 
+  // Still in the same album: only the length changes, so the album never looks empty midway.
+  if (!existing.missing && existing.albumId === album._id) {
+    await adjustAlbum(ctx, album._id, 0, scanned.durationMs - existing.durationMs);
+
+    return;
+  }
+
   if (!existing.missing) await adjustAlbum(ctx, existing.albumId, -1, -existing.durationMs);
   await adjustAlbum(ctx, album._id, 1, scanned.durationMs);
 };

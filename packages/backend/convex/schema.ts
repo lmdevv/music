@@ -206,6 +206,8 @@ export default defineSchema({
     playing: v.boolean(),
     updatedAt: v.number(),
     volume: v.number(),
+    /** When a command last moved playback to another song (play, skip, jump, remove). */
+    movedAt: v.optional(v.number()),
     /**
      * Queue fields from before the queue had its own row (`playbackQueues`). The next write to a
      * user's queue, or the `splitPlaybackQueues` migration, moves them there and clears them.
@@ -247,13 +249,12 @@ export default defineSchema({
     startedAt: v.optional(v.number()),
     finishedAt: v.optional(v.number()),
     /**
-     * How many leases in a row expired without the scan getting further than `furthestDone`. A
-     * file that crashes the scanner stops it at the same place each time, so it fails after a few;
-     * a scan that restarts for other reasons (a deploy) and keeps getting further does not.
+     * How many leases in a row expired before the worker saved a single batch (`done` is 0 when a
+     * lease ends, since claiming resets it and it counts saved files). A file that crashes the
+     * scanner stops it before its batch saves every time, so the job fails after a few; a scan
+     * that restarts for other reasons (a deploy) still saves batches and keeps retrying.
      */
     stalls: v.optional(v.number()),
-    /** The most files a lease of this job had done when it expired. */
-    furthestDone: v.optional(v.number()),
   })
     .index("by_status", ["status"])
     .index("by_status_finished", ["status", "finishedAt"])

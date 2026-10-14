@@ -485,6 +485,8 @@ describe("position reports and history", () => {
     await admin.music.run("playback.play", { trackIds: [...rock], deviceId: DEVICE });
 
     await report(admin, 0, 100);
+    // The first song ends and the player moves on to the next by itself.
+    vi.setSystemTime(START + 180_000);
     await report(admin, 1, 100);
     await admin.music.run("playback.report", {
       deviceId: DeviceId.make("someone-else"),
@@ -495,6 +497,31 @@ describe("position reports and history", () => {
 
     expect(await history(admin)).toEqual([at(1, rock), at(0, rock)]);
     expect(await current(admin)).toBe(at(1, rock));
+  });
+
+  it("ignores a report sent before the player saw a skip", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: [...rock], deviceId: DEVICE });
+    await report(admin, 0, 100);
+
+    // Someone skips from another device while this player's report for song one is in flight.
+    vi.setSystemTime(START + 15_000);
+    await admin.music.run("playback.next", {});
+    await admin.music.run("playback.report", {
+      deviceId: DEVICE,
+      index: 0,
+      trackId: at(0, rock),
+      positionMs: 15_100,
+      playing: true,
+    });
+
+    expect(await current(admin)).toBe(at(1, rock));
+    expect(await history(admin)).toEqual([at(0, rock)]);
+
+    // Once the player plays the new song, its reports land as usual.
+    vi.setSystemTime(START + 16_000);
+    await report(admin, 1, 900);
+    expect(await history(admin)).toEqual([at(1, rock), at(0, rock)]);
   });
 
   it("counts a pause and resume of the same song as one play", async () => {

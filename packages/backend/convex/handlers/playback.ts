@@ -7,7 +7,7 @@ import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
 import { MAX_QUEUE, ensureSession, findSession, livePosition, shuffled } from "../lib/playback";
 import { DEVICE_ONLINE_MS, makePresenter, presentDevice } from "../lib/present";
-import { loadQueue, restrictTo, saveQueue, storedQueue } from "../lib/queue";
+import { loadQueue, normaliseStored, restrictTo, saveQueue, storedQueue } from "../lib/queue";
 import type { StoredQueue } from "../lib/queue";
 import { canRead } from "../lib/viewer";
 import type { ReadCtx, Viewer } from "../lib/viewer";
@@ -22,6 +22,9 @@ const RESTART_THRESHOLD_MS = 3000;
  * start), so it counts as another play.
  */
 const REPLAY_GAP_MS = 10_000;
+
+/** How long after a command moves the queue a report naming another song counts as stale. */
+const MOVE_GRACE_MS = 3000;
 
 const findDevice = (ctx: ReadCtx, userId: Id<"users">, deviceId: string) =>
   ctx.db
@@ -110,7 +113,7 @@ const locateReport = async (
     }
   }
 
-  const queue = await loadQueue(ctx, viewer);
+  const queue = await normaliseStored(ctx, stored, (track) => canRead(viewer, track.libraryId));
   const index = reportedIndex(queue.queue, reported, trackId);
   const track = index === null ? undefined : queue.tracks[index];
 
@@ -185,10 +188,11 @@ const queueOf = async (
 };
 
 export const playbackQueries = {
-  "playback.state": async (ctx, viewer) => ({
-    ...(await positionOf(ctx, viewer)),
-    ...(await queueOf(ctx, viewer)),
-  }),
+  "playback.state": async (ctx, viewer) => {
+    const [position, queue] = await Promise.all([positionOf(ctx, viewer), queueOf(ctx, viewer)]);
+
+    return { ...position, ...queue };
+  },
 
   "playback.position": positionOf,
 
@@ -270,6 +274,7 @@ export const playbackMutations = {
     const activeDeviceId = args.deviceId ?? (await defaultDevice(ctx, viewer, session));
     await ctx.db.patch(session._id, {
       positionMs: 0,
+      movedAt: Date.now(),
       playing: true,
       updatedAt: Date.now(),
       activeDeviceId,
@@ -312,13 +317,18 @@ export const playbackMutations = {
 
     if (queue.index < last) {
       await saveQueue(ctx, viewer.id, { ...restart, index: queue.index + 1 });
-      await ctx.db.patch(session._id, { positionMs: 0, updatedAt: now });
+      await ctx.db.patch(session._id, { positionMs: 0, updatedAt: now, movedAt: now });
     } else if (queue.repeat === "all" && queue.tracks.length > 0) {
       await saveQueue(ctx, viewer.id, { ...restart, index: 0 });
-      await ctx.db.patch(session._id, { positionMs: 0, updatedAt: now });
+      await ctx.db.patch(session._id, { positionMs: 0, updatedAt: now, movedAt: now });
     } else {
       await saveQueue(ctx, viewer.id, restart);
-      await ctx.db.patch(session._id, { positionMs: 0, playing: false, updatedAt: now });
+      await ctx.db.patch(session._id, {
+        positionMs: 0,
+        playing: false,
+        updatedAt: now,
+        movedAt: now,
+      });
     }
 
     return ok;
@@ -340,7 +350,7 @@ export const playbackMutations = {
             : 0;
 
     await saveQueue(ctx, viewer.id, { ...queue, index, reportedTrackId: undefined });
-    await ctx.db.patch(session._id, { positionMs: 0, updatedAt: now });
+    await ctx.db.patch(session._id, { positionMs: 0, updatedAt: now, movedAt: now });
 
     return ok;
   },
@@ -361,6 +371,7 @@ export const playbackMutations = {
     const activeDeviceId = await defaultDevice(ctx, viewer, session);
     await ctx.db.patch(session._id, {
       positionMs: 0,
+      movedAt: Date.now(),
       playing: true,
       updatedAt: Date.now(),
       activeDeviceId,
@@ -442,6 +453,16 @@ export const playbackMutations = {
     const { queue, index, track } = located;
     const now = Date.now();
 
+    // A report sent before the player saw a skip or jump would move the queue back to the old
+    // song; the player reports again once it plays the new one.
+    if (
+      index !== queue.index &&
+      session.movedAt !== undefined &&
+      now - session.movedAt < MOVE_GRACE_MS
+    ) {
+      return ok;
+    }
+
     // A short song loops sooner than the gap, so its gap is half its length.
     const gap = Math.min(REPLAY_GAP_MS, track.durationMs / 2);
 
@@ -492,7 +513,12 @@ export const playbackMutations = {
         reportedTrackId: undefined,
       });
 
-      await ctx.db.patch(session._id, { positionMs: 0, playing: false, updatedAt: Date.now() });
+      await ctx.db.patch(session._id, {
+        positionMs: 0,
+        playing: false,
+        updatedAt: Date.now(),
+        movedAt: Date.now(),
+      });
 
       return ok;
     }
@@ -553,6 +579,7 @@ export const playbackMutations = {
 
       await ctx.db.patch(session._id, {
         positionMs: 0,
+        movedAt: Date.now(),
         playing: session.playing && next.length > 0,
         updatedAt: Date.now(),
       });

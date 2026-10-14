@@ -6,6 +6,7 @@ import { tableId } from "../lib/ids";
 import { makePresenter, presentPlaylist } from "../lib/present";
 import { canRead } from "../lib/viewer";
 import type { Viewer } from "../lib/viewer";
+import { PLAYLIST_LIMIT } from "@music/commands/models";
 import { signResource } from "@music/commands/signed-url";
 import type { MutationHandlers, QueryHandlers } from "./types";
 import { ok } from "./types";
@@ -17,7 +18,7 @@ const MAX_LIKES = 1000;
 
 const LIKES_PAGE = 50;
 
-const MAX_PLAYLIST = 2000;
+const MAX_PLAYLIST = PLAYLIST_LIMIT;
 
 const readableTracks = async (
   ctx: QueryCtx,

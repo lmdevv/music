@@ -86,6 +86,13 @@ describe("lists for a member who reads only part of the catalog", () => {
     expect(read).toBeLessThan(20);
   });
 
+  it("shows the readable library's albums on Home, past others' newer ones", async () => {
+    const { member } = await setup();
+    const home = await member.music.read("library.home", {});
+
+    expect(home.recentlyAdded.map((album) => album.title)).toEqual(["Shared Album"]);
+  });
+
   it("pages albums and artists the same way", async () => {
     const { member } = await setup();
 
