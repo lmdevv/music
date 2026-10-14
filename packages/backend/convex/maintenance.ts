@@ -22,7 +22,7 @@ const PRUNE_BATCH = 200;
 /** A scan whose lease expires this many times in a row before it saves anything fails. */
 export const MAX_SCAN_STALLS = 3;
 
-/** Finished jobs, used invites, and revoked keys are kept this long, then deleted. */
+/** Finished jobs, used invites, revoked keys, and expired reset links are kept this long, then deleted. */
 export const RECORD_RETAINED_MS = 30 * 24 * 60 * 60 * 1000;
 
 const purgePhase = v.union(
@@ -364,6 +364,7 @@ const recordKind = v.union(
   v.literal("expiredInvites"),
   v.literal("acceptedInvites"),
   v.literal("revokedKeys"),
+  v.literal("passwordResets"),
 );
 
 type RecordKind = typeof recordKind.type;
@@ -372,7 +373,8 @@ const NEXT_KIND: Readonly<Record<RecordKind, RecordKind | null>> = {
   jobs: "expiredInvites",
   expiredInvites: "acceptedInvites",
   acceptedInvites: "revokedKeys",
-  revokedKeys: null,
+  revokedKeys: "passwordResets",
+  passwordResets: null,
 };
 
 /** Deletes up to `PRUNE_BATCH` records of `kind` older than `cutoff`; returns how many. */
@@ -414,6 +416,13 @@ const pruneRecords = async (
         .withIndex("by_revoked", (q) => q.gte("revokedAt", 0).lt("revokedAt", cutoff))
         .take(PRUNE_BATCH),
     ),
+    // A reset link lasts a day, used or not; it is kept as long as the other records after that.
+    Match.when("passwordResets", () =>
+      ctx.db
+        .query("passwordResets")
+        .withIndex("by_expires", (q) => q.lt("expiresAt", cutoff))
+        .take(PRUNE_BATCH),
+    ),
     Match.exhaustive,
   );
 
@@ -424,8 +433,8 @@ const pruneRecords = async (
 
 /**
  * Deletes jobs that finished, failed, or were cancelled, invites that expired or were accepted,
- * and API keys that were revoked, all more than `RECORD_RETAINED_MS` ago, a batch per run. Play
- * history is the user's own record and is kept.
+ * API keys that were revoked, and password reset links that expired, all more than
+ * `RECORD_RETAINED_MS` ago, a batch per run. Play history is the user's own record and is kept.
  */
 export const pruneOldRecords = internalMutation({
   args: { kind: v.optional(recordKind), cutoff: v.optional(v.number()) },

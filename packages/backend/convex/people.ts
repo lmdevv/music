@@ -9,6 +9,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { internalMutation } from "./_generated/server";
 import { inviterStillAllows } from "./lib/invites";
+import { endSession } from "./lib/sessions";
 
 const PURGE_BATCH = 100;
 
@@ -71,7 +72,7 @@ export const revokeLapsedInvites = internalMutation({
   },
 });
 
-/** Revokes every API key a person has, for someone made a guest. */
+/** Revokes every API key a person has and ends the sessions they opened, for someone made a guest. */
 export const revokeKeys = internalMutation({
   args: { userId: v.id("users"), cursor },
   handler: async (ctx, { userId, cursor: from }) => {
@@ -85,7 +86,11 @@ export const revokeKeys = internalMutation({
     await Promise.all(
       page.page
         .filter((key) => key.revokedAt === undefined)
-        .map((key) => ctx.db.patch(key._id, { revokedAt: now, sessionId: undefined })),
+        .map(async (key) => {
+          await ctx.db.patch(key._id, { revokedAt: now, sessionId: undefined });
+
+          if (key.sessionId !== undefined) await endSession(ctx, key.sessionId);
+        }),
     );
 
     if (!page.isDone) {

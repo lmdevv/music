@@ -31,6 +31,7 @@ import type * as lib_paths from "../lib/paths.js";
 import type * as lib_playback from "../lib/playback.js";
 import type * as lib_present from "../lib/present.js";
 import type * as lib_queue from "../lib/queue.js";
+import type * as lib_resets from "../lib/resets.js";
 import type * as lib_sequence from "../lib/sequence.js";
 import type * as lib_service from "../lib/service.js";
 import type * as lib_sessions from "../lib/sessions.js";
@@ -73,6 +74,7 @@ declare const fullApi: ApiFromModules<{
   "lib/playback": typeof lib_playback;
   "lib/present": typeof lib_present;
   "lib/queue": typeof lib_queue;
+  "lib/resets": typeof lib_resets;
   "lib/sequence": typeof lib_sequence;
   "lib/service": typeof lib_service;
   "lib/sessions": typeof lib_sessions;

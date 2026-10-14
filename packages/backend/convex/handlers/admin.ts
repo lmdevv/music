@@ -184,13 +184,27 @@ export const adminQueries = {
   "jobs.list": async (ctx, viewer) => {
     const jobs = await ctx.db.query("jobs").order("desc").take(RECENT_JOBS);
 
-    const withLibraries = await Promise.all(
-      jobs.map(async (job) => {
-        const library = await ctx.db.get(job.libraryId);
-        const visible = library !== null && (await canSee(ctx, viewer, library));
+    // Recent jobs share a few libraries; each library and its visibility is read once.
+    const seen = new Map<Id<"libraries">, Promise<Doc<"libraries"> | null>>();
 
-        return { job, library: visible ? library : null };
-      }),
+    const visibleLibrary = (libraryId: Id<"libraries">): Promise<Doc<"libraries"> | null> => {
+      const cached = seen.get(libraryId);
+
+      if (cached !== undefined) return cached;
+
+      const pending = (async () => {
+        const library = await ctx.db.get(libraryId);
+
+        return library !== null && (await canSee(ctx, viewer, library)) ? library : null;
+      })();
+
+      seen.set(libraryId, pending);
+
+      return pending;
+    };
+
+    const withLibraries = await Promise.all(
+      jobs.map(async (job) => ({ job, library: await visibleLibrary(job.libraryId) })),
     );
 
     return withLibraries.flatMap(({ job, library }) =>

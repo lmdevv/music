@@ -48,10 +48,15 @@ export interface PersonRef {
 
 /**
  * Whether `actor` may change `target`'s role, suspend, reset, or remove them. Nobody changes their
- * own account this way, and the owner is out of reach until they transfer ownership.
+ * own account this way, the owner is out of reach until they transfer ownership, and only the
+ * owner manages admins.
  */
 export const canManagePerson = (actor: PersonRef, target: PersonRef): boolean =>
-  can(actor.role, "admin") && actor.id !== target.id && target.role !== "owner";
+  can(actor.role, "admin") &&
+  actor.id !== target.id &&
+  target.role !== "owner" &&
+  // An admin who could reset or demote another admin could take over their private libraries.
+  (target.role !== "admin" || can(actor.role, "owner"));
 
 /** Whether `actor` may make `target` the owner: only the owner, and only to an admin. */
 export const canTransferOwnership = (

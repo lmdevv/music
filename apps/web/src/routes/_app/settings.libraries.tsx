@@ -362,12 +362,9 @@ function AccessForm({
   const visibility = library.visibility;
 
   const [setVisibility, changing] = useAction(
-    async (next: LibraryVisibility) => {
-      await update({ libraryId: library.id, visibility: next });
-
-      // A private folder of someone else's leaves this admin's list with this card.
-      if (next === "private" && owner !== "you") onDone();
-    },
+    // A folder that turns private for an admin who owns it leaves the list, and this dialog goes
+    // with its card; one owned by someone who can't manage it stays, and so does the dialog.
+    (next: LibraryVisibility) => update({ libraryId: library.id, visibility: next }),
     { success: () => "Saved who can listen" },
   );
 

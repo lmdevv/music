@@ -79,7 +79,8 @@ export default defineSchema({
     usedAt: v.optional(v.number()),
   })
     .index("by_hash", ["hash"])
-    .index("by_user", ["userId"]),
+    .index("by_user", ["userId"])
+    .index("by_expires", ["expiresAt"]),
 
   apiKeys: defineTable({
     userId: v.id("users"),

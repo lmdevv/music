@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { query } from "./_generated/server";
 import { sha256Hex } from "./lib/crypto";
 import { inviterStillAllows } from "./lib/invites";
+import { resetByHash } from "./lib/resets";
 
 /** First-run state for the welcome screen. Public: it reveals only whether setup is done. */
 export const status = query({
@@ -58,10 +59,7 @@ export const passwordReset = query({
   handler: async (ctx, { token }) => {
     const hash = await sha256Hex(token);
 
-    const found = await ctx.db
-      .query("passwordResets")
-      .withIndex("by_hash", (q) => q.eq("hash", hash))
-      .unique();
+    const found = await resetByHash(ctx, hash);
 
     const user = found === null ? null : await ctx.db.get(found.userId);
 

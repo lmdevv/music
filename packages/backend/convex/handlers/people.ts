@@ -79,6 +79,8 @@ const managedPerson = async (ctx: QueryCtx, viewer: Viewer, id: string): Promise
     return fail("forbidden", "You can't change your own account here; ask another admin");
   }
 
+  if (roleOf(user) === "admin") return fail("forbidden", "Only the owner can change an admin");
+
   return fail(
     "forbidden",
     "The owner's account can't be changed. The owner can transfer ownership first.",
@@ -91,7 +93,7 @@ const managedPerson = async (ctx: QueryCtx, viewer: Viewer, id: string): Promise
  * on a server that predates owners, until its migration names one.
  */
 const keepAnAdmin = async (ctx: QueryCtx, leaving: Doc<"users">): Promise<void> => {
-  if (roleOf(leaving) !== "admin") return;
+  if (roleOf(leaving) !== "admin" || (await findOwner(ctx)) !== null) return;
 
   const others = await Promise.all(
     (["owner", "admin"] as const).map((role) =>
@@ -174,15 +176,17 @@ export const peopleMutations = {
       return fail("forbidden", `You can't make someone ${args.role}`);
     }
 
+    if (roleOf(user) === args.role) return ok;
+
     if (args.role !== "admin") await keepAnAdmin(ctx, user);
 
     await ctx.db.patch(user._id, { role: args.role });
     await revokeLapsedInvites(ctx, user._id);
 
-    // Guests have no API keys. Key sign-in refuses guests at once, sessions the keys opened end
-    // here, and the keys themselves are revoked in batches so a promotion does not revive them.
+    // Guests have no API keys. Key sign-in refuses guests at once; the keys are revoked, and the
+    // sessions they opened ended, in batches, so a promotion does not revive them. Password
+    // sessions stay: a guest still listens.
     if (args.role === "guest") {
-      await endUserSessions(ctx, user._id);
       await ctx.scheduler.runAfter(0, internal.people.revokeKeys, {
         userId: user._id,
         cursor: null,
@@ -209,6 +213,8 @@ export const peopleMutations = {
 
   "people.unsuspend": async (ctx, viewer, args) => {
     const user = await managedPerson(ctx, viewer, args.userId);
+
+    if (user.suspendedAt === undefined) return ok;
 
     // A sign-in that raced the suspension made a session after it ended the others; it must not
     // come back to life with the account.

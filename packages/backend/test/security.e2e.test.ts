@@ -818,6 +818,16 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
         jobId: fixture.alpha.jobId,
         workerId: "intruder",
       }),
+      visitor.mutation(makeFunctionReference<"mutation">("media:moveTracks"), {
+        secret,
+        libraryId: fixture.alpha.libraryId,
+        moves: [],
+      }),
+      visitor.query(makeFunctionReference<"query">("media:artHashes"), {
+        secret,
+        table: "tracks",
+        cursor: null,
+      }),
     ];
 
     const codes = await Promise.all(calls.map(failureCode));
@@ -1220,8 +1230,8 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
   });
 
   it("changes roles up to the changer's own, and takes API keys from new guests", async () => {
-    const { adminB } = fixture;
-    const person = await invite(fixture.adminA, `promoted-${id}@music.test`, "member");
+    const { adminA, adminB } = fixture;
+    const person = await invite(adminA, `promoted-${id}@music.test`, "member");
     const { id: userId } = await person.music.read("account.me", {});
     const { key } = await person.music.run("keys.create", { name: `CLI ${id}` });
     const keyTokens = await signIn(server, { provider: "apikey", params: { key } });
@@ -1233,24 +1243,27 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
 
     await adminB.music.run("people.role", { userId, role: "guest" });
 
-    // Becoming a guest ends the sessions their keys opened, and the keys no longer sign in.
-    await expectReadFailure(withTokens(server, keyTokens), "account.me", {}, "unauthenticated");
+    // A guest still listens, but their keys stop signing in and the sessions they opened end.
+    expect((await person.music.read("account.me", {})).role).toBe("guest");
+    await expectReadFailure(person, "keys.list", {}, "forbidden");
     expect(await keySignIn()).toBeNull();
-
-    const asGuest = await passwordSignIn(server, `promoted-${id}@music.test`, PASSWORD);
-
-    expect((await asGuest.music.read("account.me", {})).role).toBe("guest");
-    await expectReadFailure(asGuest, "keys.list", {}, "forbidden");
+    await expect
+      .poll(() => failureCode(withTokens(server, keyTokens).music.read("account.me", {})))
+      .toBe("unauthenticated");
 
     await adminB.music.run("people.role", { userId, role: "admin" });
-    expect((await asGuest.music.read("people.list", {})).map((found) => found.id)).toContain(
-      userId,
-    );
+    expect((await person.music.read("people.list", {})).map((found) => found.id)).toContain(userId);
     // Revoked, not just refused: a promotion does not bring the key back.
     await expect.poll(keySignIn).toBeNull();
 
-    await adminB.music.run("people.role", { userId, role: "member" });
-    await expectReadFailure(asGuest, "people.list", {}, "forbidden");
+    // Only the owner manages admins, so another admin can't reset or demote them into reach of
+    // their private libraries.
+    await expectRunFailure(adminB, "people.reset", { userId }, "forbidden");
+    await expectRunFailure(adminB, "people.role", { userId, role: "member" }, "forbidden");
+    await expectRunFailure(adminB, "people.suspend", { userId }, "forbidden");
+
+    await adminA.music.run("people.role", { userId, role: "member" });
+    await expectReadFailure(person, "people.list", {}, "forbidden");
   });
 
   it("takes an admin's invites and sole say over private libraries when they step down", async () => {
@@ -1332,7 +1345,7 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
 
     expect(before?.lastActiveAt).toEqual(expect.any(Number));
 
-    await adminB.music.run("people.remove", { userId: leaverId });
+    await adminA.music.run("people.remove", { userId: leaverId });
 
     await expectReadFailure(leaver, "account.me", {}, "unauthenticated");
     expect(await signIn(server, { provider: "apikey", params: { key } })).toBeNull();

@@ -9,6 +9,7 @@ import { v } from "convex/values";
 import { internalMutation } from "./_generated/server";
 import { createPasswordReset } from "./handlers/people";
 import { fail } from "./lib/errors";
+import { resetByHash } from "./lib/resets";
 import { endUserSessions } from "./lib/sessions";
 import { SUSPENDED_MESSAGE } from "./lib/viewer";
 
@@ -16,15 +17,12 @@ import { SUSPENDED_MESSAGE } from "./lib/viewer";
  * Uses up the reset link with this token hash. Returns the person and the password account to set
  * the new password on, or fails saying why the link does not work. Claiming before the password
  * changes means a link works exactly once; `release` undoes the claim if the change fails, and
- * `finish` ends the old sessions once it succeeds.
+ * `finish` ends the sessions again once it succeeds.
  */
 export const redeem = internalMutation({
   args: { hash: v.string() },
   handler: async (ctx, { hash }) => {
-    const reset = await ctx.db
-      .query("passwordResets")
-      .withIndex("by_hash", (q) => q.eq("hash", hash))
-      .unique();
+    const reset = await resetByHash(ctx, hash);
 
     if (reset === null) return fail("invalid_args", "This reset link is not valid");
 
@@ -47,6 +45,9 @@ export const redeem = internalMutation({
     if (account === null) return fail("invalid_args", "This account has no password to reset");
 
     await ctx.db.patch(reset._id, { usedAt: Date.now() });
+    // Sessions end here and again in `finish`: if `finish` never runs, every session from before
+    // the reset is already over, and only a sign-in racing the reset could remain.
+    await endUserSessions(ctx, user._id);
 
     return { userId: user._id, accountId: account.providerAccountId };
   },
@@ -71,10 +72,7 @@ export const finish = internalMutation({
 export const release = internalMutation({
   args: { hash: v.string() },
   handler: async (ctx, { hash }) => {
-    const reset = await ctx.db
-      .query("passwordResets")
-      .withIndex("by_hash", (q) => q.eq("hash", hash))
-      .unique();
+    const reset = await resetByHash(ctx, hash);
 
     if (reset !== null) await ctx.db.patch(reset._id, { usedAt: undefined });
   },

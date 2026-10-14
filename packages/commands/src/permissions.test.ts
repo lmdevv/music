@@ -44,7 +44,8 @@ describe("permissions", () => {
 
     expect(canManagePerson(owner, admin)).toBe(true);
     expect(canManagePerson(admin, member)).toBe(true);
-    expect(canManagePerson(admin, { id: "b", role: "admin" })).toBe(true);
+    expect(canManagePerson(admin, { id: "b", role: "admin" })).toBe(false);
+    expect(canManagePerson(owner, { id: "b", role: "admin" })).toBe(true);
     expect(canManagePerson(admin, owner)).toBe(false);
     expect(canManagePerson(admin, admin)).toBe(false);
     expect(canManagePerson(owner, owner)).toBe(false);
