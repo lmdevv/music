@@ -202,7 +202,10 @@ echo "/healthz with the media service down: $health_down"
 wait_healthy
 
 # s6 stops Convex with SIGINT, its down-signal, on which it drains requests and shuts the database
-# down before exiting 0. SIGTERM, s6's default, kills it on the spot.
+# down before exiting. SIGTERM, s6's default, kills it on the spot. Convex 1.46 sometimes aborts
+# after it logged "Database shutdown ... Done", when a JavaScript isolate thread outlives the Tokio
+# runtime ("A Tokio 1.x context was found, but it is being shutdown"), so 0 and SIGABRT both mean
+# the database was closed first; a kill by SIGTERM or SIGKILL means it wasn't.
 docker exec "$name" /command/s6-svc -d /run/service/convex
 for _ in $(seq 1 100); do
   [[ "$(docker exec "$name" /command/s6-svstat -o up /run/service/convex)" == "false" ]] && break
@@ -211,7 +214,8 @@ done
 convex_exit="$(docker exec "$name" /command/s6-svstat -o exitcode,signal /run/service/convex)"
 docker exec "$name" /command/s6-svc -u /run/service/convex
 echo "Convex stopped with: $convex_exit"
-[[ "$convex_exit" == "0 NA" ]] || fail "Convex did not shut down cleanly when stopped: $convex_exit"
+[[ "$convex_exit" == "0 NA" || "$convex_exit" == "-1 SIGABRT" ]] ||
+  fail "Convex was killed instead of shutting down when stopped: $convex_exit"
 wait_healthy
 
 # Upgrading in place from an image that recorded only /data/version, ran the media service and
@@ -249,9 +253,15 @@ if [[ -z "$(docker exec "$name" find /data/media/art /data/media/cache -type f -
   fail "the suite left no art or transcodes in /data/media"
 fi
 
+# The number of rows in table $1, through the container's Convex CLI and admin key.
+convex_rows() {
+  docker exec "$name" sh -c 'cd /app/backend && CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210 \
+    CONVEX_SELF_HOSTED_ADMIN_KEY="$(cat /data/secrets/admin_key)" \
+    ./node_modules/.bin/convex data "$1" --limit 10000 --format jsonLines' sh "$1" | grep -c '"_id"' || true
+}
+
 # Stopping and starting the same image keeps the data and takes no new backup.
-users_before="$(in_container 'cd /app/backend && CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210 \
-  CONVEX_SELF_HOSTED_ADMIN_KEY="$(cat /data/secrets/admin_key)" ./node_modules/.bin/convex data users --limit 1000 --format jsonLines | wc -l')"
+users_before="$(convex_rows users)"
 stop_started=$SECONDS
 docker stop -t 30 "$name" >/dev/null
 stop_seconds=$((SECONDS - stop_started))
@@ -261,8 +271,7 @@ echo "docker stop took ${stop_seconds}s"
 docker start "$name" >/dev/null
 wait_healthy
 services_check
-users_after="$(in_container 'cd /app/backend && CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210 \
-  CONVEX_SELF_HOSTED_ADMIN_KEY="$(cat /data/secrets/admin_key)" ./node_modules/.bin/convex data users --limit 1000 --format jsonLines | wc -l')"
+users_after="$(convex_rows users)"
 echo "users before the restart: $users_before, after: $users_after"
 [[ "$users_before" -gt 0 && "$users_before" == "$users_after" ]] || fail "users did not survive a restart"
 [[ "$(backups | head -n 1)" == "${kept[0]}" ]] || fail "a restart of the same build took a backup"

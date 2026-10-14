@@ -6,10 +6,10 @@ on:
     tags: ["v*"]
   pull_request:
 
-# A newer push to a pull request cancels its older run. Runs on main and on tags finish, since
-# they publish the image; a newer one waits for them.
+# A newer push to a pull request cancels its older run. Every push to main or a tag gets a run of
+# its own (one group per commit), so every commit is checked.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -133,6 +133,11 @@ jobs:
     needs: [check, stack-e2e, backend-e2e, nix, nixos-vm]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    # One publish at a time per branch, so `main` never moves back to an older commit. GitHub keeps
+    # one waiting run per group: a burst of merges publishes the first and the newest.
+    concurrency:
+      group: publish-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write

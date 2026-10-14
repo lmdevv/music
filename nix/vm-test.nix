@@ -47,10 +47,12 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript = ''
+    from datetime import timedelta
+
     machine.wait_for_unit("podman-music.service")
     # The first start generates secrets and deploys the Convex functions.
-    machine.wait_until_succeeds("curl -fsS http://127.0.0.1:8080/healthz", timeout=900)
-    machine.wait_until_succeeds("curl -fsS http://127.0.0.1:8080/media/health | grep -q '\"ok\":true'", timeout=300)
+    machine.wait_until_succeeds("curl -fsS http://127.0.0.1:8080/healthz", timeout=timedelta(minutes=15))
+    machine.wait_until_succeeds("curl -fsS http://127.0.0.1:8080/media/health | grep -q '\"ok\":true'", timeout=timedelta(minutes=5))
 
     with subtest("the web app, the Convex API, and the media service answer"):
         machine.succeed("curl -fsS http://127.0.0.1:8080/ | grep -q '<title>\\[music\\]</title>'")
@@ -72,7 +74,7 @@ pkgs.testers.runNixOSTest {
         machine.succeed("test -s /var/lib/music/secrets/instance_secret")
         secret = machine.succeed("cat /var/lib/music/secrets/instance_secret")
         machine.succeed("systemctl restart podman-music.service")
-        machine.wait_until_succeeds("curl -fsS http://127.0.0.1:8080/media/health | grep -q '\"ok\":true'", timeout=300)
+        machine.wait_until_succeeds("curl -fsS http://127.0.0.1:8080/media/health | grep -q '\"ok\":true'", timeout=timedelta(minutes=5))
         assert machine.succeed("cat /var/lib/music/secrets/instance_secret") == secret
   '';
 }

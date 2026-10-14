@@ -90,12 +90,14 @@ fi
 
 # An upgrade whose boot fails after the export retries on the next boot (and a restart policy may
 # retry it many times). The first export is the one taken before anything changed, so the retries
-# reuse it instead of exporting again and pruning it away, as long as it is still there.
+# reuse it instead of exporting again and pruning it away, as long as it is still there and no
+# older image has run since (it would rewrite /data/version, and the data would have moved on).
 pending="$backups/.pending"
 upgrade="$previous -> $build"
 
 if [ -n "$previous" ] && [ "$previous" != "$build" ] && [ -s "$pending" ] \
-  && [ "$(head -n 1 "$pending")" = "$upgrade" ] && [ -s "$(tail -n 1 "$pending")" ]; then
+  && [ "$(head -n 1 "$pending")" = "$upgrade" ] && [ -s "$(tail -n 1 "$pending")" ] \
+  && ! [ "$data/version" -nt "$pending" ]; then
   log "upgrading from $previous to $version ($build); already backed up to $(tail -n 1 "$pending")"
 elif [ -n "$previous" ] && [ "$previous" != "$build" ]; then
   backup="$backups/pre-$version-$build-$(date -u +%Y%m%d%H%M%S).zip"

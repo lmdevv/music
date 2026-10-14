@@ -36,7 +36,8 @@ services:
       - ${MUSIC_DIR:-./music}:/music:ro
     # The image's own health check, spelled out: /healthz answers 200 only while the web server,
     # the media service, and the database all work. An upgrade backs up and migrates before it
-    # turns healthy, which can take minutes on a large library.
+    # turns healthy, which can take minutes on a large library. Delete this block to use the
+    # image's own check (the same values), which follows future images.
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
       interval: 30s
