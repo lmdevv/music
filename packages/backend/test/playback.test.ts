@@ -536,26 +536,41 @@ describe("what a position report costs", () => {
       ),
     ).toBe(1 + 1000);
 
-    // A periodic report rewrites only the session.
+    // A periodic report rewrites only the session, and reads the queue row and one song.
+    const [first] = tracks;
+
+    if (first === undefined) throw new Error("Seed missing");
     await admin.music.run("playback.report", {
       deviceId: DEVICE,
       index: 0,
+      trackId: first.id,
       positionMs: 100,
       playing: true,
     });
 
-    const written = await admin.as.mutation(async (ctx) => {
-      await playbackMutations["playback.report"](ctx, await loadViewer(ctx), {
+    const cost = await admin.as.mutation(async (ctx) => {
+      const viewer = await loadViewer(ctx);
+      const before = await ctx.meta.getTransactionMetrics();
+
+      await playbackMutations["playback.report"](ctx, viewer, {
         deviceId: DEVICE,
         index: 0,
+        trackId: first.id,
         positionMs: 15_100,
         playing: true,
       });
 
-      return (await ctx.meta.getTransactionMetrics()).documentsWritten.used;
+      const after = await ctx.meta.getTransactionMetrics();
+
+      return {
+        read: after.documentsRead.used - before.documentsRead.used,
+        written: after.documentsWritten.used - before.documentsWritten.used,
+      };
     });
 
-    expect(written).toBe(1);
+    // The session (read, then read again by its patch), the queue row (read to locate the song,
+    // then to save), and the one song: never the other 999.
+    expect(cost).toEqual({ read: 5, written: 1 });
   });
 });
 

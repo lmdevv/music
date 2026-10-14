@@ -8,6 +8,7 @@ import { tableId } from "../lib/ids";
 import { MAX_QUEUE, ensureSession, findSession, livePosition, shuffled } from "../lib/playback";
 import { DEVICE_ONLINE_MS, makePresenter, presentDevice } from "../lib/present";
 import { loadQueue, restrictTo, saveQueue, storedQueue } from "../lib/queue";
+import type { StoredQueue } from "../lib/queue";
 import { canRead } from "../lib/viewer";
 import type { ReadCtx, Viewer } from "../lib/viewer";
 import type { MutationHandlers, QueryHandlers } from "./types";
@@ -79,6 +80,41 @@ const reportedIndex = (
   );
 
   return nearest ?? null;
+};
+
+/**
+ * The queue, and the index and song a position report names. Reports arrive every few seconds,
+ * so when the stored queue holds the named song at the reported index (every write saves the
+ * queue as the viewer sees it, so this is the usual case) only that song is read. Otherwise, as
+ * after a library was deleted, the whole queue is loaded and normalised, and the index is the one
+ * the client was shown.
+ */
+const locateReport = async (
+  ctx: MutationCtx,
+  viewer: Viewer,
+  reported: number,
+  trackId: string | undefined,
+): Promise<{
+  readonly queue: StoredQueue;
+  readonly index: number;
+  readonly track: Doc<"tracks">;
+} | null> => {
+  const stored = await storedQueue(ctx, viewer.id);
+  const storedId = stored.queue[reported];
+
+  if (trackId !== undefined && storedId === trackId) {
+    const track = await ctx.db.get(storedId);
+
+    if (track !== null && canRead(viewer, track.libraryId)) {
+      return { queue: stored, index: reported, track };
+    }
+  }
+
+  const queue = await loadQueue(ctx, viewer);
+  const index = reportedIndex(queue.queue, reported, trackId);
+  const track = index === null ? undefined : queue.tracks[index];
+
+  return index === null || track === undefined ? null : { queue, index, track };
 };
 
 /** Picks the device that should play when the caller did not name one. */
@@ -400,12 +436,10 @@ export const playbackMutations = {
     const session = await ensureSession(ctx, viewer.id);
 
     if (session.activeDeviceId !== args.deviceId) return ok;
-    // The index is one the client was shown, so it counts in the queue as the viewer sees it.
-    const queue = await loadQueue(ctx, viewer);
-    const index = reportedIndex(queue.queue, args.index, args.trackId);
-    const track = index === null ? undefined : queue.tracks[index];
+    const located = await locateReport(ctx, viewer, args.index, args.trackId);
 
-    if (index === null || track === undefined) return ok;
+    if (located === null) return ok;
+    const { queue, index, track } = located;
     const now = Date.now();
 
     // A short song loops sooner than the gap, so its gap is half its length.

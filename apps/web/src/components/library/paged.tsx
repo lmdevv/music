@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { splitChain } from "./split-chain";
+
 /** One page from a cursor-paginated command. */
 export interface PageResult<Item> {
   readonly items: ReadonlyArray<Item>;
@@ -25,23 +27,6 @@ export const summarizeChain = (reported: ReadonlyArray<PageReport | undefined>) 
   empty: reported.every((page) => page?.items === 0) && reported.at(-1)?.done === true,
   firstFilled: reported.findIndex((page) => (page?.items ?? 0) > 0),
 });
-
-/**
- * The chain's cursors after the page at `cursor` reported that it ends at `next`. A page that is
- * not the last ends where the following page starts, unless it outgrew the most rows one page
- * holds; then a page starting at `next` goes in between, so no row falls out of the list.
- */
-export const splitChain = (
-  cursors: ReadonlyArray<string | null>,
-  cursor: string | null,
-  next: string,
-): ReadonlyArray<string | null> => {
-  const at = cursors.indexOf(cursor);
-
-  if (at === -1 || at === cursors.length - 1 || cursors.includes(next)) return cursors;
-
-  return [...cursors.slice(0, at + 1), next, ...cursors.slice(at + 1)];
-};
 
 /**
  * The cursors of a list loaded page by page, and what each page reported. A page can be empty

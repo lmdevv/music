@@ -21,6 +21,24 @@ export type TrackListVariant = "album" | "list";
 
 const headerCell = "font-mono text-xs/xs tracking-mono text-text-muted";
 
+/** The row box both playable and unavailable songs use, so the two stay the same size. */
+const rowClassName = (variant: TrackListVariant): string =>
+  cn(
+    "group/row relative flex shrink-0 items-center rounded-sm select-none",
+    "h-12 border-t-[0.5px] border-border pr-1 lg:gap-3 lg:border-t-0 lg:px-2",
+    variant === "album" ? "lg:h-row" : "gap-3 lg:h-[52px]",
+    "hover:bg-surface has-[[data-popup-open]]:bg-surface",
+  );
+
+/** The track number column of the album variant. */
+const numberCell = "w-[30px] shrink-0 lg:w-7";
+
+/** A song's cover in the list variant. */
+const coverClassName = "size-11 rounded-[4px] lg:size-row";
+
+/** The format column of the list variant. */
+const formatCell = "hidden w-[110px] shrink-0 font-mono text-xs/xs text-text-muted lg:block";
+
 /**
  * Plays a song from a list on double click (desktop) or tap (phone), queueing the list's songs
  * that can play.
@@ -174,12 +192,7 @@ function TrackRow({
       role="row"
       aria-current={current ? "true" : undefined}
       onDoubleClick={onPlay}
-      className={cn(
-        "group/row relative flex shrink-0 items-center rounded-sm select-none",
-        "h-12 border-t-[0.5px] border-border pr-1 lg:gap-3 lg:border-t-0 lg:px-2",
-        variant === "album" ? "lg:h-row" : "gap-3 lg:h-[52px]",
-        "hover:bg-surface has-[[data-popup-open]]:bg-surface",
-      )}
+      className={rowClassName(variant)}
     >
       {/* Phones tap anywhere on the row to play. */}
       <button
@@ -191,7 +204,7 @@ function TrackRow({
       {variant === "album" ? (
         <span
           role="cell"
-          className="relative flex h-full w-[30px] shrink-0 items-center lg:w-7 lg:justify-end"
+          className={cn(numberCell, "relative flex h-full items-center lg:justify-end")}
         >
           {playing ? (
             <PlayingBars />
@@ -209,11 +222,7 @@ function TrackRow({
         </span>
       ) : (
         <span role="cell" className="relative shrink-0">
-          <Artwork
-            url={track.artUrl}
-            seed={track.albumId}
-            className="size-11 rounded-[4px] lg:size-row"
-          >
+          <Artwork url={track.artUrl} seed={track.albumId} className={coverClassName}>
             {playing ? (
               <span className="absolute inset-0 flex items-end justify-center bg-black/35 pb-2.5">
                 <PlayingBars />
@@ -257,10 +266,7 @@ function TrackRow({
               {track.album}
             </Link>
           </span>
-          <span
-            role="cell"
-            className="hidden w-[110px] shrink-0 font-mono text-xs/xs text-text-muted lg:block"
-          >
+          <span role="cell" className={formatCell}>
             {formatQuality(track)}
           </span>
         </>
@@ -310,20 +316,15 @@ function UnavailableRow({
   readonly menuExtra: ReactNode;
 }) {
   return (
-    <div
-      role="row"
-      className={cn(
-        "group/row relative flex shrink-0 items-center gap-3 rounded-sm select-none",
-        "h-12 border-t-[0.5px] border-border pr-1 lg:border-t-0 lg:px-2",
-        variant === "album" ? "lg:h-row" : "lg:h-[52px]",
-        "hover:bg-surface has-[[data-popup-open]]:bg-surface",
-      )}
-    >
+    <div role="row" className={cn(rowClassName(variant), "gap-3")}>
       <span role="cell" className="flex min-w-0 grow items-center gap-3 opacity-(--opacity-muted)">
         {variant === "album" ? (
           <span
             aria-hidden
-            className="w-[30px] shrink-0 font-sans text-md/base text-text-muted lg:w-7 lg:text-right lg:font-mono lg:text-sm/xs"
+            className={cn(
+              numberCell,
+              "font-sans text-md/base text-text-muted lg:text-right lg:font-mono lg:text-sm/xs",
+            )}
           >
             {number}
           </span>
@@ -331,7 +332,7 @@ function UnavailableRow({
           <Artwork
             url={track.artUrl}
             seed={track.albumId}
-            className="size-11 shrink-0 rounded-[4px] grayscale lg:size-row"
+            className={cn(coverClassName, "shrink-0 grayscale")}
           />
         )}
         <span className="flex min-w-0 grow flex-col gap-px lg:grow-2 lg:basis-0">
@@ -347,9 +348,7 @@ function UnavailableRow({
             <span className="hidden min-w-0 grow-[1.4] basis-0 truncate font-sans text-sm/xs text-text-muted lg:block">
               {track.album}
             </span>
-            <span className="hidden w-[110px] shrink-0 font-mono text-xs/xs text-text-muted lg:block">
-              {formatQuality(track)}
-            </span>
+            <span className={formatCell}>{formatQuality(track)}</span>
           </>
         ) : null}
         <span aria-hidden className="hidden w-9 shrink-0 lg:block" />

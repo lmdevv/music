@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { splitChain, summarizeChain } from "./paged";
+import { summarizeChain } from "./paged";
+import { splitChain } from "./split-chain";
 
 const page = (items: number, done = false) => ({ items, done });
 
