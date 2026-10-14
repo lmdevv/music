@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { ADMIN, seed, seedDevice, signIn, unique } from "./support";
+import { ADMIN, joinAsNewMember, seed, seedDevice, signIn, unique } from "./support";
 
 test.describe.configure({ mode: "serial" });
 
@@ -24,12 +24,15 @@ test("a wrong password shows the sign-in error and logs nothing", async ({ page 
   expect(errors).toEqual([]);
 });
 
-test("Play on asked for before any song loads doesn't open by itself later", async ({ page }) => {
-  await signIn(page);
+test("Play on asked for before any song loads doesn't open by itself later", async ({
+  page: admin,
+  browser,
+}) => {
+  // A new member has never played anything, so the desktop player bar and its picker are absent.
+  const page = await joinAsNewMember(admin, browser);
   const bar = page.getByRole("region", { name: "Player" });
   const picker = page.getByText(/DEVICES? ONLINE/);
 
-  // Nothing has played yet on this backend, so the desktop player bar and its picker are absent.
   await expect(bar).toHaveCount(0);
   await page.keyboard.press("d");
   await expect(picker).toHaveCount(0);
@@ -47,6 +50,7 @@ test("Play on asked for before any song loads doesn't open by itself later", asy
   await expect(picker).toBeVisible();
   await page.keyboard.press("Escape");
   await bar.getByRole("button", { name: "Pause", exact: true }).click();
+  await page.context().close();
 });
 
 test("browse to an album and press play", async ({ page }) => {
