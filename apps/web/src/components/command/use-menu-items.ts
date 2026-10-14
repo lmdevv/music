@@ -2,7 +2,7 @@ import { usePlayer } from "@music/player/react";
 import { useRead, useReadOnce } from "@music/sdk/react";
 import { useNavigate } from "@tanstack/react-router";
 import { HeartIcon, ListMusicIcon, PlusIcon, SpeakerIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { usePlayTracks } from "@/components/library/cards";
@@ -48,9 +48,11 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
   const [lastSearch, setLastSearch] = useState(search);
   const admin = me?.role === "admin";
 
-  useEffect(() => {
-    if (search !== undefined) setLastSearch(search);
-  }, [search]);
+  // Remember the last results during render (not in an effect, which would show one frame with
+  // the new results missing). While a new query loads, the previous results stay on screen.
+  if (search !== undefined && search !== lastSearch) setLastSearch(search);
+
+  const results = search ?? lastSearch;
 
   const actions = useMemo((): ReadonlyArray<Item> => {
     const go = (to: Route) => () => {
@@ -163,8 +165,8 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
             recentlyPlayed: home?.recentlyPlayed ?? [],
             actions,
           })
-        : searchItems({ query, results: lastSearch, playlists: playlists ?? [], actions }),
-    [query, player.track, playlists, home, actions, lastSearch],
+        : searchItems({ query, results, playlists: playlists ?? [], actions }),
+    [query, player.track, playlists, home, actions, results],
   );
 
   return { items, searching: query.length > 0 && search === undefined };
