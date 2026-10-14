@@ -104,6 +104,64 @@ describe("password reset links", () => {
   });
 });
 
+/** A restricted library of the owner's that the admin is not on, with `member` added. */
+const restricted = async (owner: User, memberId: UserId) => {
+  const { libraryId } = await owner.music.run("libraries.create", {
+    name: "Kept",
+    path: "/music/kept",
+    visibility: "restricted",
+  });
+
+  await owner.music.run("libraries.grant", { libraryId, userId: memberId });
+
+  return libraryId;
+};
+
+describe("password resets around library access", () => {
+  it("leave someone who hears a library the admin can't to the owner", async () => {
+    const { owner, admin, member } = await household();
+
+    await restricted(owner, member.userId);
+
+    expect(await failureCode(admin.music.run("people.reset", { userId: member.userId }))).toBe(
+      "forbidden",
+    );
+    expect(await failureCode(owner.music.run("people.reset", { userId: member.userId }))).toBe(
+      "succeeded",
+    );
+  });
+
+  it("stop working once the person is let into a library the maker can't hear", async () => {
+    const { backend, owner, admin, member } = await household();
+    const { token } = await admin.music.run("people.reset", { userId: member.userId });
+
+    await restricted(owner, member.userId);
+
+    expect(await failureCode(redeem(backend, token))).toBe("invalid_args");
+  });
+
+  it("leave a demoted admin with a private library to the owner", async () => {
+    const { backend, owner, admin } = await household();
+
+    const keeper = await joinWithPassword(backend, owner, {
+      email: "keeper@music.test",
+      password: PASSWORD,
+      role: "admin",
+    });
+
+    await keeper.music.run("libraries.create", {
+      name: "Vault",
+      path: "/music/vault",
+      visibility: "private",
+    });
+    await owner.music.run("people.role", { userId: keeper.userId, role: "member" });
+
+    expect(await failureCode(admin.music.run("people.reset", { userId: keeper.userId }))).toBe(
+      "forbidden",
+    );
+  });
+});
+
 describe("password sign-up and sign-in", () => {
   it("refuses a sign-up for an email that already has an account, right password or not", async () => {
     const { backend } = await household();

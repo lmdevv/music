@@ -45,6 +45,51 @@ export const canListen = (
   return granted || (library.visibility === "shared" && role !== "guest");
 };
 
+/**
+ * Every library on the server, and the ones `user` can listen to. A server has a handful of
+ * libraries, and a person holds at most one grant per library (`libraries.grant` adds none twice
+ * and a removed library takes its grants with it), so both reads stay that small.
+ */
+export const listenable = async (
+  ctx: ReadCtx,
+  user: Doc<"users">,
+): Promise<{
+  readonly all: ReadonlyArray<Doc<"libraries">>;
+  readonly libraries: ReadonlyArray<Doc<"libraries">>;
+}> => {
+  const all = await ctx.db.query("libraries").collect();
+
+  const grants = await ctx.db
+    .query("libraryAccess")
+    .withIndex("by_user", (q) => q.eq("userId", user._id))
+    .take(all.length);
+
+  const granted = new Set(grants.map((grant) => grant.libraryId));
+  const role = roleOf(user);
+
+  return {
+    all,
+    libraries: all.filter((library) =>
+      canListen(library, user._id, role, granted.has(library._id)),
+    ),
+  };
+};
+
+/**
+ * Whether `target` can listen to a library `actor` cannot. Whoever can take over `target`'s
+ * account (with a password reset link) would hear it, so only the owner may then.
+ */
+export const listensBeyond = async (
+  ctx: ReadCtx,
+  actor: Doc<"users">,
+  target: Doc<"users">,
+): Promise<boolean> => {
+  const [mine, theirs] = await Promise.all([listenable(ctx, actor), listenable(ctx, target)]);
+  const readable = new Set(mine.libraries.map((library) => library._id));
+
+  return theirs.libraries.some((library) => !readable.has(library._id));
+};
+
 /** The suspended-account message sign-in, API keys, and open sessions all show. */
 export const SUSPENDED_MESSAGE = "This account is suspended. Ask an admin on this server.";
 
@@ -73,27 +118,12 @@ export const loadViewer = async (ctx: ReadCtx): Promise<Viewer> => {
   // Suspending ends every session, so this only catches a sign-in racing the suspension.
   if (user.suspendedAt !== undefined) return fail("unauthenticated", SUSPENDED_MESSAGE);
 
-  const role = roleOf(user);
-
-  // A server has a handful of libraries, and a person is on a handful of access lists.
-  const [all, grants] = await Promise.all([
-    ctx.db.query("libraries").collect(),
-    ctx.db
-      .query("libraryAccess")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
-      .collect(),
-  ]);
-
-  const granted = new Set(grants.map((grant) => grant.libraryId));
-
-  const libraries = all.filter((library) =>
-    canListen(library, userId, role, granted.has(library._id)),
-  );
+  const { all, libraries } = await listenable(ctx, user);
 
   return {
     id: userId,
     user,
-    role,
+    role: roleOf(user),
     libraries,
     libraryIds: new Set(libraries.map((library) => library._id)),
     readsEveryLibrary: libraries.length === all.length,

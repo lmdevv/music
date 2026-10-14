@@ -260,7 +260,12 @@ function LibraryCard({
           <RenameForm library={library} onDone={() => setEditing(null)} />
         ) : null}
         {editing === "access" ? (
-          <AccessForm library={library} owner={owner} onDone={() => setEditing(null)} />
+          <AccessForm
+            library={library}
+            owner={owner}
+            mine={library.ownerId === myId}
+            onDone={() => setEditing(null)}
+          />
         ) : null}
       </Dialog>
     </section>
@@ -348,10 +353,14 @@ const VISIBILITY_HINTS: Readonly<Record<LibraryVisibility, (owner: string) => st
 function AccessForm({
   library,
   owner,
+  mine,
   onDone,
 }: {
   readonly library: Library;
+  /** How to name the owner: "you", or their name. */
   readonly owner: string;
+  /** Whether the viewer owns the library, the only one who may change who listens. */
+  readonly mine: boolean;
   readonly onDone: () => void;
 }) {
   const update = useRun("libraries.update");
@@ -360,8 +369,6 @@ function AccessForm({
   const people = useRead("people.list", {});
   const added = useRead("libraries.people", { libraryId: library.id });
   const visibility = library.visibility;
-  // Only a library's own owner decides who listens; other admins see the settings read-only.
-  const mine = owner === "you";
 
   const [setVisibility, changing] = useAction(
     (next: LibraryVisibility) => update({ libraryId: library.id, visibility: next }),

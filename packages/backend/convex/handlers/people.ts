@@ -5,6 +5,7 @@
  */
 import {
   assignableRoles,
+  can,
   canManagePerson,
   canTransferOwnership,
 } from "@music/commands/permissions";
@@ -16,7 +17,7 @@ import { randomToken, sha256Hex } from "../lib/crypto";
 import { fail } from "../lib/errors";
 import { findSession } from "../lib/playback";
 import { endUserSessions } from "../lib/sessions";
-import { loadPerson, roleOf } from "../lib/viewer";
+import { listensBeyond, loadPerson, roleOf } from "../lib/viewer";
 import type { Viewer } from "../lib/viewer";
 import type { MutationHandlers, QueryHandlers } from "./types";
 import { ok } from "./types";
@@ -29,7 +30,7 @@ const RESET_TTL_MS = 24 * 60 * 60 * 1000;
  * Each comes from an index on the person, so this reads a few rows per person.
  */
 const lastActiveAt = async (ctx: QueryCtx, userId: Id<"users">): Promise<number | null> => {
-  const [device, session, keys, playback] = await Promise.all([
+  const [device, session, key, playback] = await Promise.all([
     ctx.db
       .query("devices")
       .withIndex("by_user_last_seen", (q) => q.eq("userId", userId))
@@ -41,11 +42,12 @@ const lastActiveAt = async (ctx: QueryCtx, userId: Id<"users">): Promise<number 
       .withIndex("userId", (q) => q.eq("userId", userId))
       .order("desc")
       .first(),
-    // A person has a handful of keys; their last use is not indexed.
+    // Keys never used sort first, so the last one is the most recently used.
     ctx.db
       .query("apiKeys")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
-      .collect(),
+      .withIndex("by_user_last_used", (q) => q.eq("userId", userId))
+      .order("desc")
+      .first(),
     findSession(ctx, userId),
   ]);
 
@@ -53,7 +55,7 @@ const lastActiveAt = async (ctx: QueryCtx, userId: Id<"users">): Promise<number 
     device?.lastSeenAt,
     playback?.updatedAt,
     session?._creationTime,
-    ...keys.map((key) => key.lastUsedAt),
+    key?.lastUsedAt,
   ].filter((time) => time !== undefined);
 
   return times.length === 0 ? null : Math.max(...times);
@@ -243,6 +245,15 @@ export const peopleMutations = {
 
   "people.reset": async (ctx, viewer, args) => {
     const user = await managedPerson(ctx, viewer, args.userId);
+
+    // A reset link hands over the account, and with it every library the person can hear.
+    if (!can(viewer.role, "owner") && (await listensBeyond(ctx, viewer.user, user))) {
+      return fail(
+        "forbidden",
+        "Only the owner can reset someone who can listen to libraries you can't",
+      );
+    }
+
     const reset = await createPasswordReset(ctx, user._id, viewer.id);
 
     return { userId: user._id, ...reset };

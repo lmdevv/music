@@ -96,7 +96,8 @@ export default defineSchema({
   })
     .index("by_hash", ["hash"])
     .index("by_user", ["userId"])
-    .index("by_revoked", ["revokedAt"]),
+    .index("by_revoked", ["revokedAt"])
+    .index("by_user_last_used", ["userId", "lastUsedAt"]),
 
   libraries: defineTable({
     name: v.string(),
