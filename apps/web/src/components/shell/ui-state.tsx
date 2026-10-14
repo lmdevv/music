@@ -23,9 +23,10 @@ export interface UiState {
   /** Opens "Play on" on the surface that fits the layout now. */
   readonly openPlayOn: () => void;
   readonly closePlayOn: () => void;
-  /** The player bar's speaker button is mounted, so desktop can open "Play on" as its popover. */
-  readonly playOnPopoverMounted: boolean;
-  /** The speaker button mounted or went away; going away closes its open popover. */
+  /**
+   * The player bar's speaker button mounted (so desktop can open "Play on" as its popover) or went
+   * away, which closes its open popover.
+   */
   readonly setPlayOnPopoverMounted: (mounted: boolean) => void;
   /** Open with the songs a new playlist starts with; null when the dialog is closed. */
   readonly newPlaylist: { readonly trackIds: ReadonlyArray<TrackId> } | null;
@@ -61,9 +62,14 @@ export function UiStateProvider({ children }: { readonly children: ReactNode }) 
       setCommandOpen,
       playOn,
       openPlayOn: () =>
-        setPlayOn(chooseSurface({ desktop: isDesktopNow(), popoverMounted: playOnPopoverMounted })),
+        setPlayOn(
+          chooseSurface({
+            desktop: isDesktopNow(),
+            popoverMounted: playOnPopoverMounted,
+            nowPlayingOpen: nowPlaying !== null,
+          }),
+        ),
       closePlayOn: () => setPlayOn(null),
-      playOnPopoverMounted,
       setPlayOnPopoverMounted,
       newPlaylist,
       openNewPlaylist: (trackIds = []) => setNewPlaylist({ trackIds }),

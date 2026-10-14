@@ -174,12 +174,11 @@ export function PlayerBar() {
  * when it goes away (the queue empties) an open popover closes, so nothing reopens by itself.
  */
 function DevicePickerButton() {
-  const { playOn, openPlayOn, closePlayOn, playOnPopoverMounted, setPlayOnPopoverMounted } =
-    useUi();
+  const { playOn, openPlayOn, closePlayOn, setPlayOnPopoverMounted } = useUi();
 
   const { onlineCount } = useDevices();
   const desktop = useIsDesktop();
-  const shown = shownSurface(playOn, { desktop, popoverMounted: playOnPopoverMounted });
+  const shown = shownSurface(playOn, desktop);
 
   useEffect(() => {
     setPlayOnPopoverMounted(true);

@@ -336,6 +336,40 @@ test("removing a queue row from the keyboard keeps focus in the queue", async ({
   await bar.getByRole("button", { name: "Pause", exact: true }).click();
 });
 
+test("removing a row in the Now Playing queue keeps focus there, and Play on opens above it", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto("/albums");
+  await page.getByRole("link", { name: "Mezzanine" }).first().click();
+  await page.getByRole("button", { name: "Play", exact: true }).first().click();
+
+  const bar = page.getByRole("region", { name: "Player" });
+
+  await expect(bar.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  await bar.getByRole("button", { name: "Open Now Playing" }).click();
+
+  const nowPlaying = page.getByRole("dialog", { name: "Now Playing" });
+
+  await nowPlaying.getByRole("button", { name: "Queue", exact: true }).first().click();
+
+  const remove = nowPlaying.getByRole("button", { name: /^Remove .* from the queue$/ });
+  const second = (await remove.nth(1).getAttribute("aria-label")) ?? "";
+
+  await remove.first().focus();
+  await page.keyboard.press("Enter");
+  // The dialog takes focus when the removed button unmounts; focus still moves to the next row.
+  await expect(nowPlaying.getByRole("button", { name: second, exact: true })).toBeFocused();
+
+  // The player bar's speaker is under Now Playing, so Play on opens as a dialog above it.
+  await page.keyboard.press("d");
+  await expect(page.getByRole("dialog", { name: "Play on" })).toBeVisible();
+  await expect(page.getByText(/DEVICES? ONLINE/)).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await bar.getByRole("button", { name: "Pause", exact: true }).click();
+});
+
 test("the phone Now Playing opens the one shared Play on sheet", async ({ browser }) => {
   const phone = await browser.newContext({ hasTouch: true });
   const page = await phone.newPage();

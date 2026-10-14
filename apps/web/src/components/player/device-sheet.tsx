@@ -14,11 +14,11 @@ import { shownSurface } from "./play-on";
  * key, or the phone Now Playing, so moving playback is always reachable.
  */
 export function DeviceSheet() {
-  const { playOn, closePlayOn, playOnPopoverMounted } = useUi();
+  const { playOn, closePlayOn } = useUi();
   const desktop = useIsDesktop();
   const player = usePlayer();
   const track = player.track;
-  const shown = shownSurface(playOn, { desktop, popoverMounted: playOnPopoverMounted });
+  const shown = shownSurface(playOn, desktop);
   const description = track === null ? undefined : `${track.title} · ${track.artist}`;
 
   const onOpenChange = (open: boolean) => {

@@ -13,5 +13,4 @@ const subscribe = (onChange: () => void): (() => void) => {
 export const isDesktopNow = (): boolean => window.matchMedia(DESKTOP).matches;
 
 /** True at the desktop layout width (the `lg` breakpoint), where the sidebar shell is shown. */
-export const useIsDesktop = (): boolean =>
-  useSyncExternalStore(subscribe, () => window.matchMedia(DESKTOP).matches);
+export const useIsDesktop = (): boolean => useSyncExternalStore(subscribe, isDesktopNow);
