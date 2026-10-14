@@ -18,6 +18,10 @@ describe("signInFailure", () => {
     expect(signInFailure(new Error("Uncaught Error: InvalidAccountId"))).toBe("credentials");
   });
 
+  it("reads Convex Auth's rate limit as too many attempts", () => {
+    expect(signInFailure(new Error("Uncaught Error: TooManyFailedAttempts"))).toBe("rate-limited");
+  });
+
   it("reads anything else as a server problem, including other unauthenticated failures", () => {
     expect(signInFailure(new Error("[Request ID: 5f0a3c] Server Error"))).toBe("server");
     expect(signInFailure(new Error("Missing environment variable JWT_PRIVATE_KEY"))).toBe("server");

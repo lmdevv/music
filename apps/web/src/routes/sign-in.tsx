@@ -5,7 +5,7 @@ import { Button } from "@music/ui/components/button";
 import { FieldHint, FieldLabel, Input } from "@music/ui/components/input";
 import { createFileRoute } from "@tanstack/react-router";
 import { useConvexAuth, useQuery } from "convex/react";
-import { Schema } from "effect";
+import { Match, Schema } from "effect";
 import { useState } from "react";
 import type { FormEvent } from "react";
 
@@ -94,9 +94,15 @@ function SignInForm() {
             />
             {failed === null ? null : (
               <FieldHint id="sign-in-error" tone="danger" role="alert">
-                {failed === "credentials"
-                  ? "That email and password don't match."
-                  : "Couldn't sign in. The server reported an error."}
+                {Match.value(failed).pipe(
+                  Match.when("credentials", () => "That email and password don't match."),
+                  Match.when(
+                    "rate-limited",
+                    () => "Too many attempts. Wait a minute and try again.",
+                  ),
+                  Match.when("server", () => "Couldn't sign in. The server reported an error."),
+                  Match.exhaustive,
+                )}
               </FieldHint>
             )}
           </Field>

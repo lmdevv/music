@@ -11,9 +11,18 @@ const WRONG_CREDENTIALS = /\b(?:InvalidAccountId|InvalidSecret)\b/;
  */
 export const mentionsWrongCredentials = (text: string): boolean => WRONG_CREDENTIALS.test(text);
 
-/** Why a sign-in failed: the credentials, or anything else the server reported. */
-export type SignInFailure = "credentials" | "server";
+/** Why a sign-in failed: the credentials, too many attempts, or anything else the server reported. */
+export type SignInFailure = "credentials" | "rate-limited" | "server";
 
-/** Classifies a failed `signIn("password", …)` by {@link mentionsWrongCredentials}. */
-export const signInFailure = (error: Error): SignInFailure =>
-  mentionsWrongCredentials(error.message) ? "credentials" : "server";
+/** Convex Auth's rejection after too many failed attempts in a row. */
+const TOO_MANY_ATTEMPTS = /\bTooManyFailedAttempts\b/;
+
+/**
+ * Classifies a failed `signIn("password", …)`: wrong credentials by
+ * {@link mentionsWrongCredentials}, Convex Auth's rate limit, or a server problem.
+ */
+export const signInFailure = (error: Error): SignInFailure => {
+  if (mentionsWrongCredentials(error.message)) return "credentials";
+
+  return TOO_MANY_ATTEMPTS.test(error.message) ? "rate-limited" : "server";
+};
