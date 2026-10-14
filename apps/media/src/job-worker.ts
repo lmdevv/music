@@ -2,8 +2,8 @@
  * Runs scan jobs from Convex. The worker subscribes to pending jobs, claims one at a time,
  * renews its lease while the scan runs, stops when the job is cancelled, and reports the result.
  * Claims are guarded by Convex and scans are idempotent, so a job that runs twice is harmless.
- * After a scan that changed songs, it deletes the artwork nothing uses any more; jobs run one at
- * a time, so no scan of this worker is storing artwork meanwhile.
+ * At startup and after a scan that changed songs, it deletes the artwork nothing uses any more;
+ * jobs run one at a time, so no scan of this worker is storing artwork meanwhile.
  */
 import { hostname } from "node:os";
 
@@ -114,7 +114,16 @@ export const layer: Layer.Layer<never, never, MediaBackend | MediaConfig> = Laye
     const backend = yield* MediaBackend;
     const workerId = `${hostname()}:${process.pid}:${crypto.randomUUID().slice(0, 8)}`;
 
-    yield* backend.pendingJobs.pipe(
+    // Artwork that went out of use while the service was down (a deleted library) goes first,
+    // before any job runs, so no scan stores artwork meanwhile.
+    const collectAtStart = collectUnusedArt().pipe(
+      Effect.catchTags({
+        BackendError: (error) => Effect.logWarning("JobWorker.art_collection_failed", error),
+        FileError: (error) => Effect.logWarning("JobWorker.art_collection_failed", error),
+      }),
+    );
+
+    const runJobs = backend.pendingJobs.pipe(
       Stream.runForEach((jobs) =>
         Effect.forEach(
           jobs,
@@ -129,6 +138,10 @@ export const layer: Layer.Layer<never, never, MediaBackend | MediaConfig> = Laye
       ),
       Effect.tapError((error) => Effect.logWarning("JobWorker.subscription_lost", error)),
       Effect.retry(resubscribeSchedule),
+    );
+
+    yield* collectAtStart.pipe(
+      Effect.andThen(runJobs),
       Effect.annotateLogs({ workerId }),
       Effect.forkScoped,
     );

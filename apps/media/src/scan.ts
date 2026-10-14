@@ -62,14 +62,18 @@ export class LibraryUnavailable extends Schema.TaggedError<LibraryUnavailable>()
 /**
  * The library folder holds no audio files while Convex knows songs in it: most likely a network
  * share or a drive that is not mounted, whose empty mount point reads fine. The scan stops
- * without marking anything missing.
+ * without marking anything missing. Losing every song to an unmounted drive is worse than
+ * keeping songs that were all deleted on purpose, which deleting the library clears.
  */
 export class LibraryEmpty extends Schema.TaggedError<LibraryEmpty>()("LibraryEmpty", {
   libraryId: Schema.String,
   path: Schema.String,
 }) {
   override get message(): string {
-    return `The folder is empty. Is the drive mounted? (${this.path})`;
+    return (
+      `The folder is empty. Is the drive mounted? (${this.path}) ` +
+      "If its music was removed on purpose, delete the library."
+    );
   }
 }
 
@@ -250,7 +254,9 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
     .toArray();
 
   const movedFrom = movedFileMatcher(vanished);
-  const moved = new Set<string>();
+  // Gone paths a found file took over: moved, or stored anew with the old one marked missing.
+  const claimed = new Set<string>();
+  let moved = 0;
 
   let done = 0;
   let failed = 0;
@@ -272,9 +278,9 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
 
     if (upserts.length > 0) yield* backend.upsertTracks(library.id, upserts);
 
-    if (moves.length > 0) yield* backend.moveTracks(library.id, moves);
+    if (moves.length > 0) moved += yield* backend.moveTracks(library.id, moves);
 
-    for (const { from } of moves) moved.add(from);
+    for (const { from } of moves) claimed.add(from);
     done += batch.length;
     yield* Ref.set(progress, {
       done,
@@ -284,15 +290,15 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
   }
 
   const gone = vanished
-    .filter((file) => !file.missing && !moved.has(file.path))
+    .filter((file) => !file.missing && !claimed.has(file.path))
     .map((file) => file.path);
 
   for (const batch of chunks(gone, MISSING_BATCH)) yield* backend.markMissing(library.id, batch);
 
   const summary: ScanSummary = {
     files: files.length,
-    updated: changed.length - failed - moved.size,
-    moved: moved.size,
+    updated: changed.length - failed - moved,
+    moved,
     missing: gone.length,
     failed,
   };

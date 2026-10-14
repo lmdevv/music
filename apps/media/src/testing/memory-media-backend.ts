@@ -274,6 +274,8 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
           libraryId: LibraryId,
           moves: ReadonlyArray<TrackMove>,
         ) {
+          let moved = 0;
+
           for (const { from, track } of moves) {
             const source = yield* trackAt(libraryId, from);
             const occupied = yield* trackAt(libraryId, track.path);
@@ -283,8 +285,11 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
               yield* upsertTracks(libraryId, [track]);
             } else {
               yield* store({ id: source.id, libraryId, scanned: track, missing: false });
+              moved += 1;
             }
           }
+
+          return moved;
         }),
 
         markMissing,

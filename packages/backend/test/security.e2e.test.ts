@@ -77,6 +77,23 @@ const coverSong = (artHash: string, folderArt: string): ScannedSong => ({
   folderArt,
 });
 
+/** A song of the cover test's album at `path`, with the art the media service found for it. */
+const canvasSong = (
+  path: string,
+  art: Pick<ScannedSong, "artHash" | "folderArt">,
+): ScannedSong => ({
+  path,
+  size: path.length * 100,
+  mtimeMs: 1_700_000_000_000,
+  title: `Cover ${path} ${TOKEN}`,
+  artist: `Painter ${TOKEN}`,
+  album: `Canvas ${TOKEN}`,
+  durationMs: 100_000,
+  codec: "flac",
+  lossless: true,
+  ...art,
+});
+
 const upsertTracksRef = makeFunctionReference<
   "mutation",
   { secret: string; libraryId: string; tracks: ReadonlyArray<ScannedSong> },
@@ -677,9 +694,12 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     if (oldHash === undefined || newHash === undefined) throw new Error("No cover hashes");
 
     const albumArt = async (): Promise<string | null> => {
-      const track = await findTrack(adminA, `Cover Song ${TOKEN}`);
+      const results = await adminA.music.read("search", { query: TOKEN, limit: 50 });
+      const album = results.albums.find((found) => found.title === `Canvas ${TOKEN}`);
 
-      return (await adminA.music.read("albums.get", { albumId: track.albumId })).album.artUrl;
+      if (album === undefined) throw new Error("The cover test's album is not searchable");
+
+      return album.artUrl;
     };
 
     const artInUse = async (): Promise<ReadonlyArray<string>> => {
@@ -726,6 +746,28 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     });
 
     expect(known.files).toEqual([expect.objectContaining({ folderArt: "Album/cover.jpg:20:2" })]);
+
+    // A second song of the album gets a picture of its own: the album keeps its cover.
+    const picture = createHash("sha256").update(`picture ${id}`).digest("hex");
+
+    const upsert = (song: ScannedSong) =>
+      media.mutation(upsertTracksRef, { secret: mediaSecret, libraryId, tracks: [song] });
+
+    await upsert(
+      canvasSong("Album/second.flac", { artHash: newHash, folderArt: "Album/cover.jpg:20:2" }),
+    );
+    await upsert(
+      canvasSong("Album/second.flac", { artHash: picture, folderArt: "Album/cover.jpg:20:2" }),
+    );
+    expect(await albumArt()).toContain(`/art/${newHash}?`);
+
+    // The cover is removed: the album takes the art its other song still has, then none.
+    await upsert(canvasSong("Album/song.flac", {}));
+    expect(await albumArt()).toContain(`/art/${picture}?`);
+    expect(await artInUse()).not.toContain(newHash);
+    await upsert(canvasSong("Album/second.flac", {}));
+    expect(await albumArt()).toBeNull();
+    expect(await artInUse()).not.toContain(picture);
   });
 
   it("refuses media service functions without the service secret", async () => {

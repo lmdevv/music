@@ -180,7 +180,12 @@ const profileOf = (url: string | undefined): StreamProfile | null =>
   url === undefined ? null : decodeProfile(new URL(url).searchParams.get("p"));
 
 /** A started controller on a recording transport and instant engines, with a settable clock. */
-const setup = async (options: { readonly gapless: boolean; readonly quality?: StreamQuality }) => {
+const setup = async (options: {
+  readonly gapless: boolean;
+  readonly quality?: StreamQuality;
+  /** How far the server's clock is ahead of this device's. */
+  readonly serverAheadMs?: number;
+}) => {
   const media = await fakeMediaService();
   const mutations: Array<Mutation> = [];
   const clock = { now: 1_000_000 };
@@ -188,7 +193,9 @@ const setup = async (options: { readonly gapless: boolean; readonly quality?: St
   const engines: Array<ReturnType<typeof instantEngine>> = [];
 
   const controller = new PlaybackController(
-    makeMusicClient(recordingTransport(mutations, media.base, () => clock.now)),
+    makeMusicClient(
+      recordingTransport(mutations, media.base, () => clock.now + (options.serverAheadMs ?? 0)),
+    ),
     {
       mse: options.gapless ? { flac: true, changeType: true } : null,
       create: (kind) => {
@@ -360,6 +367,43 @@ describe("PlaybackController", () => {
 
     await vi.waitFor(() => expect(record.loads).toHaveLength(2));
     expect(profileOf(record.loads[1]?.url)).toBe("original");
+    stop();
+  });
+
+  it("does not reload on every resume when the device clock is hours ahead of the server's", async () => {
+    const { controller, record, stop } = await setup({
+      gapless: true,
+      serverAheadMs: -7 * 60 * 60 * 1000,
+    });
+
+    controller.sync(session(true, 1));
+    await vi.waitFor(() => expect(record.loads).toHaveLength(1));
+    await controller.togglePlay();
+    await controller.togglePlay();
+
+    // Every URL looks expired on this clock; only a refusal can tell, so playback resumes.
+    expect(record.plays).toBe(1);
+    expect(record.loads).toHaveLength(1);
+    stop();
+  });
+
+  it("does not ask about a transcoded stream, which could start a transcode", async () => {
+    const { controller, engine, media, clock, record, stop } = await setup({ gapless: false });
+    controller.sync(session(true, 1));
+    await vi.waitFor(() => expect(record.loads).toHaveLength(1));
+    expect(profileOf(record.loads[0]?.url)).toBe("aac-320");
+
+    media.state.streamStatus = 403;
+    clock.now += 60_000;
+    engine().emit({ type: "error", reason: "unsupported", message: "Format error" });
+
+    await vi.waitFor(() =>
+      expect(controller.getSnapshot()).toMatchObject({
+        engineStatus: "error",
+        error: "Format error",
+      }),
+    );
+    expect(record.loads).toHaveLength(1);
     stop();
   });
 

@@ -71,6 +71,13 @@ const EVICT_MIN_SECONDS = 5;
 const QUOTA_BEHIND_SECONDS = 1;
 
 /**
+ * Least that freeing the buffer behind the playhead must remove to count, when it is full and
+ * less than a second is left to play. Removing the few milliseconds just played would only
+ * repeat the failing append until the playhead stalls.
+ */
+const QUOTA_FREED_SECONDS = 1;
+
+/**
  * Largest single append. Browsers hand `fetch` chunks of any size (WebKit delivers megabytes at
  * once), and one append larger than the buffer quota could never succeed.
  */
@@ -610,6 +617,8 @@ export class MseEngine implements PlayerEngine {
     }
 
     if (response.status === FORBIDDEN) {
+      void response.body?.cancel().catch(() => undefined);
+
       throw new EngineFailure("expired", "The stream's signed URL has expired");
     }
 
@@ -1539,7 +1548,7 @@ export class MseEngine implements PlayerEngine {
           // The playhead is about to wait for this append. Free all but the last moment behind
           // it (up to `BEHIND_SECONDS` can be there) and append again on the next step; only a
           // buffer with nothing behind to free and nothing ahead to play out can never fit it.
-          if (await this.#evictBehind(session, QUOTA_BEHIND_SECONDS, 0)) return;
+          if (await this.#evictBehind(session, QUOTA_BEHIND_SECONDS, QUOTA_FREED_SECONDS)) return;
 
           throw new EngineFailure("decode", "The browser's buffer cannot hold the stream");
         }

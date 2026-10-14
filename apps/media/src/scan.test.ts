@@ -424,7 +424,9 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const error = yield* Effect.flip(scan);
 
         expect(error).toBeInstanceOf(LibraryEmpty);
-        expect(error.message).toBe(`The folder is empty. Is the drive mounted? (${root})`);
+        expect(error.message).toBe(
+          `The folder is empty. Is the drive mounted? (${root}) If its music was removed on purpose, delete the library.`,
+        );
         expect((yield* control.tracks).filter((track) => track.missing)).toEqual([]);
       }),
     ));

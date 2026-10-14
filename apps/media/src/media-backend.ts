@@ -99,6 +99,8 @@ export interface TrackSource extends Schema.Schema.Type<typeof TrackSource> {}
 
 const ReportResult = Schema.Struct({ cancelled: Schema.Boolean });
 
+const MoveResult = Schema.Struct({ moved: Schema.Finite });
+
 /** Tags read from one file, in the shape `media:upsertTracks` accepts. */
 export interface ScannedTrack {
   readonly path: string;
@@ -246,11 +248,12 @@ export interface Interface {
   /**
    * Moves at most 100 known tracks to the paths their files were found at, keeping their IDs. A
    * move whose source is gone or whose new path is taken is stored as a new file instead.
+   * Returns how many tracks moved.
    */
   readonly moveTracks: (
     libraryId: LibraryId,
     moves: ReadonlyArray<TrackMove>,
-  ) => Effect.Effect<void, BackendError>;
+  ) => Effect.Effect<number, BackendError>;
   readonly markMissing: (
     libraryId: LibraryId,
     paths: ReadonlyArray<string>,
@@ -286,6 +289,8 @@ export const resubscribeSchedule = Schedule.min([
 const decodeClaim = Schema.decodeUnknownEffect(Schema.NullOr(ClaimedJob));
 
 const decodeReport = Schema.decodeUnknownEffect(ReportResult);
+
+const decodeMove = Schema.decodeUnknownEffect(MoveResult);
 
 const decodeFingerprints = Schema.decodeUnknownEffect(FingerprintPage);
 
@@ -411,9 +416,15 @@ const make = Effect.gen(function* () {
       libraryId: LibraryId,
       moves: ReadonlyArray<TrackMove>,
     ) {
-      yield* call("moveTracks", () =>
+      const result = yield* call("moveTracks", () =>
         client.mutation(functions.moveTracks, { secret: secret(), libraryId, moves }),
       );
+
+      const { moved } = yield* decodeMove(result).pipe(
+        Effect.mapError(decodeFailure("moveTracks")),
+      );
+
+      return moved;
     }),
 
     markMissing: Effect.fn("MediaBackend.markMissing")(function* (

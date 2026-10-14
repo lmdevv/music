@@ -66,9 +66,12 @@ const isHidden = (relativePath: string): boolean =>
 
 /**
  * Emits once for every visible change under `path`, and once as soon as the watch runs when
- * `announceStart` is set. Fails when the watch cannot start or stops.
+ * `started` (run then) says so. Fails when the watch cannot start or stops.
  */
-const folderChanges = (path: string, announceStart: boolean): Stream.Stream<void, WatchError> =>
+const folderChanges = (
+  path: string,
+  started: Effect.Effect<boolean>,
+): Stream.Stream<void, WatchError> =>
   Stream.callback<void, WatchError>((queue) =>
     Effect.acquireRelease(
       Effect.try({
@@ -89,7 +92,10 @@ const folderChanges = (path: string, announceStart: boolean): Stream.Stream<void
         Effect.sync(() => {
           stop();
         }),
-    ).pipe(Effect.tap(() => (announceStart ? Queue.offer(queue, undefined) : Effect.void))),
+    ).pipe(
+      Effect.andThen(started),
+      Effect.tap((announce) => (announce ? Queue.offer(queue, undefined) : Effect.void)),
+    ),
   );
 
 const watchLibrary = Effect.fn("LibraryWatcher.watch")(
@@ -107,19 +113,22 @@ const watchLibrary = Effect.fn("LibraryWatcher.watch")(
         ),
       );
 
-    // Set once the watch has failed: a watch that starts again then scans for what it missed.
-    const restarted = yield* Ref.make(false);
+    // Failures since the watch last ran: a watch that starts again after one scans for what it
+    // missed, and only the first failure in a row is a warning.
+    const failures = yield* Ref.make(0);
 
-    const onChange = Ref.get(restarted).pipe(
-      Effect.flatMap((restart) =>
-        folderChanges(library.path, restart).pipe(
-          Stream.debounce(DEBOUNCE),
-          Stream.runForEach(() => requestScan(restart ? "watch restarted" : "change")),
-        ),
-      ),
+    const started = Ref.getAndSet(failures, 0).pipe(Effect.map((missed) => missed > 0));
+
+    const onChange = folderChanges(library.path, started).pipe(
+      Stream.debounce(DEBOUNCE),
+      Stream.runForEach(() => requestScan("change")),
       Effect.tapError((error) =>
-        Effect.logWarning("LibraryWatcher.watch_unavailable", error).pipe(
-          Effect.andThen(Ref.set(restarted, true)),
+        Ref.getAndUpdate(failures, (count) => count + 1).pipe(
+          Effect.flatMap((before) =>
+            before === 0
+              ? Effect.logWarning("LibraryWatcher.watch_unavailable", error)
+              : Effect.logDebug("LibraryWatcher.watch_unavailable", error),
+          ),
         ),
       ),
       Effect.retry(RESTART_SCHEDULE),

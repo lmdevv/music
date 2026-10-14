@@ -101,7 +101,7 @@ describe("JobWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
 
         expect(job?.outcome).toEqual({
           status: "failed",
-          error: `The folder is empty. Is the drive mounted? (${root})`,
+          error: `The folder is empty. Is the drive mounted? (${root}) If its music was removed on purpose, delete the library.`,
         });
         expect((yield* control.tracks).filter((track) => track.missing)).toEqual([]);
       }),
@@ -155,6 +155,50 @@ describe("JobWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
             createHash("sha256").update(replaced).digest("hex"),
           ].toSorted(),
         );
+      }),
+    ));
+
+  it("deletes artwork that went out of use while it was stopped when it starts", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root } = yield* fixtureLibrary;
+        const dataDir = yield* temporaryDirectory("data");
+        const services = yield* Layer.build(Layer.merge(layerMemory, testConfig(dataDir)));
+        const control = yield* MemoryMediaBackendControl.pipe(Effect.provideContext(services));
+        const worker = JobWorker.layer.pipe(Layer.provide(Layer.succeedContext(services)));
+
+        // A first run scans the library.
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* Layer.build(worker);
+            yield* untilSettled(
+              control,
+              yield* control.enqueueScan(yield* control.addLibrary(root)),
+            );
+          }),
+        );
+
+        // Meanwhile a library was deleted: its art stays behind, unused for an hour.
+        const orphan = join(dataDir, "art", "0".repeat(64));
+
+        yield* Files.writeFileAtomic(orphan, new Uint8Array([0xff, 0xd8, 0xff, 0xe0]), "w");
+        yield* Effect.promise(() => setFileTime(orphan, Date.now() - 60 * 60 * 1000));
+
+        const kept = (yield* Files.listNames(join(dataDir, "art"))).filter(
+          (name) => name !== "0".repeat(64),
+        );
+
+        yield* Layer.build(worker);
+
+        const after = yield* Files.listNames(join(dataDir, "art")).pipe(
+          Effect.repeat({
+            schedule: Schedule.spaced("20 millis"),
+            until: (names) => !names.includes("0".repeat(64)),
+            times: 100,
+          }),
+        );
+
+        expect(after.toSorted()).toEqual(kept.toSorted());
       }),
     ));
 
