@@ -36,8 +36,10 @@ const hashesInUse = Effect.fn("ArtCollector.hashesInUse")(function* () {
 
 /**
  * Deletes the artwork no track, album, or artist uses that is older than ten minutes. Nothing is
- * deleted when Convex lists no artwork in use at all, so a backend that answers with nothing
- * cannot empty the store.
+ * deleted when Convex lists no artwork in use at all: that is also what a media service pointed
+ * at the wrong (or an empty) deployment sees, and deleted art never comes back on its own, as
+ * rescans skip unchanged files. A server whose libraries were all deleted keeps its art until
+ * one uses art again.
  *
  * @returns How many files were deleted, or `BackendError` when Convex could not list the
  *   artwork in use, or `FileError` when the art store could not be read.
