@@ -199,9 +199,11 @@ function PlayOnButton({
   readonly showName: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  // Now Playing keeps this view mounted (CSS-hidden) at desktop width, so the sheet must not
-  // outlive a resize there (ADS-106).
+  // Now Playing keeps this view mounted (CSS-hidden) at desktop width, so the sheet closes when
+  // the window widens, and stays closed if it narrows again (ADS-106).
   const desktop = useIsDesktop();
+
+  if (desktop && open) setOpen(false);
 
   return (
     <>
@@ -218,7 +220,7 @@ function PlayOnButton({
           </span>
         ) : null}
       </button>
-      <Sheet open={open && !desktop} onOpenChange={setOpen}>
+      <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent title="Play on" description={`${track.title} · ${track.artist}`}>
           <DeviceList touch />
         </SheetContent>
