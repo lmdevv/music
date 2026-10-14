@@ -10,7 +10,6 @@ import { createRoot } from "react-dom/client";
 
 import { PageNotFound, RouteError } from "./components/route-error";
 import { resolveConvexUrl } from "./config";
-import { isNotFoundFailure } from "./lib/action";
 import { convexLogger } from "./lib/convex-logger";
 import { parseSearch, stringifySearch } from "./lib/search-params";
 import { routeTree } from "./routeTree.gen";
@@ -43,14 +42,7 @@ const rootElement = document.getElementById("app");
 
 if (rootElement === null) throw new Error("The #app element is missing from index.html");
 
-createRoot(rootElement, {
-  // A detail screen whose item is gone shows its own "deleted" state: expected, not a fault.
-  onCaughtError: (error, info) => {
-    if (error instanceof Error && isNotFoundFailure(error)) return;
-
-    console.error(error, info.componentStack);
-  },
-}).render(
+createRoot(rootElement).render(
   <StrictMode>
     <RouterProvider router={router} />
   </StrictMode>,
