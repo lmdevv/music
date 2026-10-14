@@ -119,6 +119,8 @@ export const cleartextError = (
 const StoredConfig = Schema.Struct({
   server: ServerUrl,
   key: Schema.String.check(Schema.isMinLength(1)),
+  /** Set by `music login --insecure`: the user chose a plain http:// server on another machine. */
+  insecure: Schema.optionalKey(Schema.Boolean),
 });
 
 /** A cached auth token for one server and key. */
@@ -193,9 +195,14 @@ export const loadCredentials = Effect.fn("Config.loadCredentials")(function* (en
     });
   }
 
-  // `music login` vetted a stored server; one from the environment has not been.
-  if (Option.isSome(env.server) && !env.insecure && sendsKeyInCleartext(server)) {
-    return yield* cleartextError(server, "MUSIC_INSECURE=1", null);
+  if (!env.insecure && sendsKeyInCleartext(server)) {
+    if (Option.isSome(env.server)) return yield* cleartextError(server, "MUSIC_INSECURE=1", null);
+
+    // `music login --insecure` records the choice. A config without it was written by a CLI that
+    // did not ask, so the key would go out unencrypted without anyone having agreed to it.
+    if (file?.insecure !== true) {
+      return yield* cleartextError(server, "music login --insecure (or MUSIC_INSECURE=1)", "login");
+    }
   }
 
   const credentials: Credentials = { server, key };
@@ -203,15 +210,21 @@ export const loadCredentials = Effect.fn("Config.loadCredentials")(function* (en
   return credentials;
 });
 
-/** Stores credentials from `music login`. */
+/**
+ * Stores credentials from `music login`, with `insecure` when the user allowed a plain http://
+ * server on another machine.
+ */
 export const saveCredentials = (
   paths: ConfigPaths,
   credentials: Credentials,
+  insecure = false,
 ): Effect.Effect<void, ConfigFileError> =>
-  writeJson(paths.config, {
-    server: credentials.server,
-    key: Redacted.value(credentials.key),
-  });
+  writeJson(
+    paths.config,
+    insecure
+      ? { server: credentials.server, key: Redacted.value(credentials.key), insecure: true }
+      : { server: credentials.server, key: Redacted.value(credentials.key) },
+  );
 
 /** Reads the cached session, treating a missing or unreadable cache as empty. */
 export const loadSession = (

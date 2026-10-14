@@ -48,6 +48,12 @@ let
     || lib.hasInfix ":" mount.name
   ) mounts;
 
+  # The ids of the container's Convex and Caddy users (deploy/docker/Dockerfile).
+  reservedIds = [
+    901
+    902
+  ];
+
   # The runtime reads `host:container:ro`, so a host path needs a leading / and no colon.
   badPaths = builtins.filter (
     mount: !lib.hasPrefix "/" mount.path || lib.hasInfix ":" mount.path
@@ -169,6 +175,11 @@ in
         message = "services.music.musicDirs: ${
           lib.concatMapStringsSep ", " (mount: mount.path) badPaths
         } must be absolute paths without a colon.";
+      }
+      {
+        # The container's init refuses these at start, which would crash-loop the service.
+        assertion = !(builtins.elem cfg.uid reservedIds || builtins.elem cfg.gid reservedIds);
+        message = "services.music.uid and gid cannot be 901 or 902 (got uid ${toString cfg.uid}, gid ${toString cfg.gid}): the container's Convex and Caddy users have those ids, and sharing one would let the media service read the database.";
       }
     ];
 

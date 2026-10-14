@@ -305,7 +305,8 @@ const login = Effect.fn("Cli.login")(function* (tokens: ParsedTokens, json: bool
   const credentials = { server: server.value, key };
   const fresh = yield* signIn(credentials);
 
-  yield* saveCredentials(env.paths, credentials);
+  // Reaching here with a cleartext server means the user allowed it; remember that they did.
+  yield* saveCredentials(env.paths, credentials, sendsKeyInCleartext(credentials.server));
   yield* saveSession(env.paths, fresh);
 
   const api = yield* connect(credentials, env.paths);

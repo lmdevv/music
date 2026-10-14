@@ -28,8 +28,8 @@ CLI, the web app, and this skill always agree.
    sandboxes. `music logout` deletes the stored key and the cached session.
 
    A plain `http://` server on another machine would carry the key unencrypted, so `login`
-   refuses it unless you pass `--insecure`, and `MUSIC_SERVER` is refused unless
-   `MUSIC_INSECURE=1` is set. `http://localhost` and `http://127.0.0.1` are fine.
+   refuses it unless you pass `--insecure` (and remembers that you did), and `MUSIC_SERVER` is
+   refused unless `MUSIC_INSECURE=1` is set. `http://localhost` and `http://127.0.0.1` are fine.
 
 ## How it works
 

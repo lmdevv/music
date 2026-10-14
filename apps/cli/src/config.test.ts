@@ -111,6 +111,29 @@ describe("config files", () => {
     expect(await load(env())).toMatchObject({ failure: { _tag: "ConfigFileError" } });
   });
 
+  it("refuses a stored plain-http remote server that login did not allow", async () => {
+    const paths = pathsFor(home);
+    const remote = { server: "http://nas.lan:8080/convex", key: "mk_old-cli-key" };
+
+    // A config written by a CLI from before --insecure.
+    await makeDir(paths.dir, 0o700);
+    await writeText(paths.config, JSON.stringify(remote));
+
+    expect(await load(env())).toMatchObject({
+      failure: { _tag: "UsageError", command: "login" },
+    });
+
+    await Effect.runPromise(
+      saveCredentials(paths, { server: remote.server, key: Redacted.make(remote.key) }, true),
+    );
+
+    expect(JSON.parse(await readText(paths.config))).toMatchObject({ insecure: true });
+
+    const allowed = await Effect.runPromise(loadCredentials(env()));
+
+    expect(allowed.server).toBe(remote.server);
+  });
+
   it("caches sessions and forgets everything on logout", async () => {
     const paths = pathsFor(home);
 

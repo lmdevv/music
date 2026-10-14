@@ -72,7 +72,16 @@
                 "/b/music"
               ];
             };
+            # The container's Convex and Caddy ids, which init refuses at start.
+            reservedUid = evaluate { uid = 901; };
+            reservedGid = evaluate { gid = 902; };
+            refusesReserved =
+              evaluated:
+              builtins.any (nixpkgs.lib.hasInfix "uid and gid cannot be 901 or 902") (failed evaluated);
           in
+          assert expect (
+            refusesReserved reservedUid && refusesReserved reservedGid
+          ) "uid or gid 901/902 is not refused: ${toString (failed reservedUid)}";
           assert expect (failed listed == [ ]) "the list form fails: ${toString (failed listed)}";
           assert expect (
             (container listed).volumes == [
