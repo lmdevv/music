@@ -12,11 +12,14 @@ import { toast } from "sonner";
 
 import { SettingsHeader, TerminalHint } from "@/components/settings/settings-ui";
 import { resolveConvexUrl } from "@/config";
+import { cliLoginCommand, needsInsecure } from "@/lib/cli-login";
 import { useAction } from "@/lib/action";
 import { formatAgo, formatDate } from "@/lib/format";
 
 /** The URL the CLI signs in to: the Convex URL, not the web app's address. */
 const serverUrl = resolveConvexUrl();
+
+const insecure = needsInsecure(serverUrl);
 
 export const Route = createFileRoute("/_app/settings/keys")({ component: KeysSettings });
 
@@ -86,16 +89,26 @@ function KeysSettings() {
         </div>
       )}
       <div className="flex flex-col items-start gap-2">
-        <TerminalHint
-          label="Use a key"
-          command={`printf '%s' "$KEY" | music login --server ${serverUrl} --key-stdin`}
-        />
+        <TerminalHint label="Use a key" command={cliLoginCommand(serverUrl)} />
         <p className="max-w-130 font-sans text-sm/sm text-text-muted">
           Keep keys off the command line. Pipe the key in as above, set{" "}
           <code className="font-mono text-text">MUSIC_SERVER</code> and{" "}
-          <code className="font-mono text-text">MUSIC_API_KEY</code>, or run{" "}
-          <code className="font-mono text-text">music login --server {serverUrl}</code> and paste it
-          at the hidden prompt.
+          <code className="font-mono text-text">MUSIC_API_KEY</code>
+          {insecure ? (
+            <>
+              {" "}
+              (with <code className="font-mono text-text">MUSIC_INSECURE=1</code>)
+            </>
+          ) : null}
+          , or run{" "}
+          <code className="font-mono text-text">
+            music login --server {serverUrl}
+            {insecure ? " --insecure" : ""}
+          </code>{" "}
+          and paste it at the hidden prompt.
+          {insecure
+            ? " This server is plain http:// on another machine, so the key travels unencrypted; the CLI asks you to confirm that with --insecure."
+            : ""}
         </p>
       </div>
       <NewKeyDialog open={creating} onOpenChange={setCreating} />
