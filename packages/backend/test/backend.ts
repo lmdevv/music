@@ -110,6 +110,7 @@ const claimFolder = async (backend: Backend, libraryId: string): Promise<void> =
     libraryId: library._id,
     realPath: library.path,
     rootIds: [`test:${library._id}`],
+    fsPath: null,
   });
 
   if (!claim.ok) throw new Error(`The claim on ${library.path} was refused: ${claim.error}`);

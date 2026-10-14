@@ -3,7 +3,7 @@
  * the backend, the web app, the command menu, and the CLI all ask this module, so a rule changed
  * here changes everywhere at once.
  */
-import type { AssignableRole, Role } from "./models";
+import type { AccessControl, AssignableRole, LibraryVisibility, Role } from "./models";
 
 /**
  * What a command needs from the caller's role:
@@ -77,23 +77,45 @@ export const canRemoveLibrary = (
   can(actor.role, "owner") || (can(actor.role, "admin") && library.ownerId === actor.id);
 
 /**
- * Whether `actor` may change who listens to a library: its visibility and its access list. A
- * library's own owner may while they run libraries (an admin), so no admin can let themselves or
- * anyone else into a library that is not theirs. Once its owner can't (demoted to member or
- * guest, or gone), the server's owner may, as they manage every library; a library whose owner is
- * removed moves to the server's owner anyway.
+ * How `actor` may change who listens to a library (its visibility and its access list):
+ *
+ * - `full`: its own owner, while an admin. Only they let anyone in, so nobody can let themselves
+ *   or others into a library that is not theirs.
+ * - `narrow`: the server's owner, once the library's owner doesn't run libraries any more
+ *   (demoted, suspended, or gone). They may take people out and make it more private, never let
+ *   anyone in: the server's owner could otherwise demote an admin, let themselves into that
+ *   admin's private library, and promote them again.
+ * - `none`: everyone else.
  */
-export const canChangeLibraryAccess = (
+export const libraryAccessControl = (
   actor: PersonRef,
   library: {
     readonly ownerId: string;
     /** The library owner's role now; null when their account is gone. */
     readonly ownerRole: Role | null;
+    readonly ownerSuspended: boolean;
   },
-): boolean =>
-  can(actor.role, "admin") &&
-  (library.ownerId === actor.id ||
-    (can(actor.role, "owner") && (library.ownerRole === null || !can(library.ownerRole, "admin"))));
+): AccessControl => {
+  if (!can(actor.role, "admin")) return "none";
+
+  if (library.ownerId === actor.id) return "full";
+
+  const ownerRunsLibraries =
+    library.ownerRole !== null && can(library.ownerRole, "admin") && !library.ownerSuspended;
+
+  return can(actor.role, "owner") && !ownerRunsLibraries ? "narrow" : "none";
+};
+
+/** How many people a visibility lets in, least first. */
+const REACH: Readonly<Record<LibraryVisibility, number>> = { private: 0, restricted: 1, shared: 2 };
+
+/**
+ * Whether going from `from` to `to` lets more people in: private to restricted or shared, or
+ * restricted to shared. Restricted is narrower than shared, which also lets in everyone but
+ * guests.
+ */
+export const widensVisibility = (from: LibraryVisibility, to: LibraryVisibility): boolean =>
+  REACH[to] > REACH[from];
 
 /** Whether `actor` may make `target` the owner: only the owner, and only to an admin. */
 export const canTransferOwnership = (

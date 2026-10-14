@@ -170,7 +170,12 @@ const functions = {
   libraries: makeFunctionReference<"query", Secret, unknown>("media:libraries"),
   claimRoot: makeFunctionReference<
     "mutation",
-    Secret & { libraryId: string; realPath: string; rootIds: ReadonlyArray<string> },
+    Secret & {
+      libraryId: string;
+      realPath: string;
+      rootIds: ReadonlyArray<string>;
+      fsPath: string | null;
+    },
     unknown
   >("media:claimRoot"),
   refuseRoot: makeFunctionReference<"mutation", Secret & { libraryId: string }, unknown>(
@@ -257,6 +262,8 @@ export interface Interface {
     libraryId: LibraryId,
     realPath: string,
     rootIds: FolderChain,
+    /** Where the folder is on its file system (`mounts.ts`); null without a mount table. */
+    fsPath: string | null,
   ) => Effect.Effect<RootClaim, BackendError>;
   /**
    * Drops a library's claim after the service refused its folder itself (outside `MUSIC_ROOTS`,
@@ -410,9 +417,16 @@ const make = Effect.gen(function* () {
       libraryId: LibraryId,
       realPath: string,
       rootIds: FolderChain,
+      fsPath: string | null,
     ) {
       const result = yield* call("claimRoot", () =>
-        client.mutation(functions.claimRoot, { secret: secret(), libraryId, realPath, rootIds }),
+        client.mutation(functions.claimRoot, {
+          secret: secret(),
+          libraryId,
+          realPath,
+          rootIds,
+          fsPath,
+        }),
       );
 
       return yield* decodeRootClaim(result).pipe(Effect.mapError(decodeFailure("claimRoot")));

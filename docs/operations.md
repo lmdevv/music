@@ -68,8 +68,9 @@ image second:
 
    It replaces every table in the backup, including accounts and sessions, with its contents,
    and records in `/data/version` that the data is now 0.2.0's. It stops the media service
-   first, so nothing the current image writes (a folder claim, a scan) lands on the restored data;
-   the media service starts again with the container. A file from outside the container must be
+   first, so nothing the current image writes (a folder claim, a scan) lands on the restored data,
+   and refuses to restore if it doesn't stop within 30 seconds; the media service starts again
+   with the container. A file from outside the container must be
    copied in first: `docker cp ./backup.zip music:/data/backups/`.
 
 2. Start the previous image on the same volume (see [Pin a version](#pin-a-version)). It deploys
@@ -202,7 +203,8 @@ Every service runs as its own unprivileged user; only the start-up script runs a
   to; the server's owner manages every library. Only a library's own owner, or the
   server's owner, removes it. Admins see that the other libraries exist (name, owner,
   visibility, song count) but not their folders. Only a library's own owner changes who listens
-  to it, while they are an admin; once they are demoted, the server's owner does. When someone is
+  to it, while they are an admin. Once they aren't (demoted or suspended), the server's owner may
+  only let fewer people in: take people out, or make it more private. When someone is
   removed, their libraries move to the server's owner.
 - **Library folders (`MUSIC_ROOTS`).** Before every scan the media service resolves a library's
   folder through links and claims it, with the device and inode of the folder and of each folder

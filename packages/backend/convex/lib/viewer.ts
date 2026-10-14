@@ -47,8 +47,8 @@ export const canListen = (
 
 /**
  * Every library on the server, and the ones `user` can listen to. A server has a handful of
- * libraries, and a person holds at most one grant per library (`libraries.grant` adds none twice
- * and a removed library takes its grants with it), so both reads stay that small.
+ * libraries, and a grant is looked up only for each library whose access list decides (see
+ * `listenableIn`), so both reads stay that small.
  */
 export const listenable = async (
   ctx: ReadCtx,
@@ -62,21 +62,38 @@ export const listenable = async (
   return { all, libraries: await listenableIn(ctx, all, user) };
 };
 
-/** The libraries of `all` that `user` can listen to. */
+/** Whether `user`'s access to `library` turns on its access list rather than its visibility. */
+const turnsOnGrant = (library: Doc<"libraries">, user: Doc<"users">): boolean =>
+  library.ownerId !== user._id &&
+  (library.visibility === "restricted" ||
+    (library.visibility === "shared" && roleOf(user) === "guest"));
+
+/**
+ * The libraries of `all` that `user` can listen to. A grant is looked up by library, one index
+ * point read each, and only where it decides: grants left by a removed library until its purge
+ * runs (`maintenance:purgeLibraryAccess`) are never read, so they can't crowd out a real one.
+ */
 const listenableIn = async (
   ctx: ReadCtx,
   all: ReadonlyArray<Doc<"libraries">>,
   user: Doc<"users">,
 ): Promise<ReadonlyArray<Doc<"libraries">>> => {
-  const grants = await ctx.db
-    .query("libraryAccess")
-    .withIndex("by_user", (q) => q.eq("userId", user._id))
-    .take(all.length);
-
-  const granted = new Set(grants.map((grant) => grant.libraryId));
   const role = roleOf(user);
 
-  return all.filter((library) => canListen(library, user._id, role, granted.has(library._id)));
+  const granted = await Promise.all(
+    all.map(async (library) =>
+      turnsOnGrant(library, user)
+        ? (await ctx.db
+            .query("libraryAccess")
+            .withIndex("by_user", (q) => q.eq("userId", user._id).eq("libraryId", library._id))
+            .first()) !== null
+        : false,
+    ),
+  );
+
+  return all.filter((library, index) =>
+    canListen(library, user._id, role, granted[index] === true),
+  );
 };
 
 /**
@@ -161,8 +178,8 @@ export const canRead = (viewer: Viewer, libraryId: Id<"libraries">): boolean =>
 /**
  * Checks that the viewer can rename, rescan, or remove a library (`canManageLibrary`): the server's
  * owner every library, an admin the ones they can listen to. Admins see that the others exist,
- * without their folder paths. Who may listen is the library owner's alone to change
- * (`canChangeLibraryAccess`).
+ * without their folder paths. Who may listen is the library owner's to change
+ * (`libraryAccessControl`).
  */
 export const canManage = (viewer: Viewer, library: Doc<"libraries">): boolean =>
   canManageLibrary(viewer.role, canRead(viewer, library._id));

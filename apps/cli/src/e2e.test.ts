@@ -83,7 +83,13 @@ const claimJob = makeFunctionReference<
 
 const claimRoot = makeFunctionReference<
   "mutation",
-  { secret: string; libraryId: string; realPath: string; rootIds: ReadonlyArray<string> },
+  {
+    secret: string;
+    libraryId: string;
+    realPath: string;
+    rootIds: ReadonlyArray<string>;
+    fsPath: string | null;
+  },
   { ok: boolean }
 >("media:claimRoot");
 
@@ -171,6 +177,7 @@ const completeNextScan = async (url: string, secret: string): Promise<void> => {
     libraryId: claimed.library.id,
     realPath: claimed.library.path,
     rootIds: [`e2e:${claimed.library.id}`],
+    fsPath: null,
   });
 
   if (!root.ok) throw new Error("The fake media service's folder claim was refused");

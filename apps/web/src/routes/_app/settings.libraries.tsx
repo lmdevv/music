@@ -1,6 +1,6 @@
 import type { UserId } from "@music/commands/ids";
-import type { Job, Library, LibraryVisibility, User } from "@music/commands/models";
-import { can, canRemoveLibrary, roleLabel } from "@music/commands/permissions";
+import type { AccessControl, Job, Library, LibraryVisibility, User } from "@music/commands/models";
+import { can, canRemoveLibrary, roleLabel, widensVisibility } from "@music/commands/permissions";
 import { useRead, useRun } from "@music/sdk/react";
 import { Button } from "@music/ui/components/button";
 import { Chip } from "@music/ui/components/chip";
@@ -294,7 +294,7 @@ function LibraryCard({
           <AccessForm
             library={library}
             owner={owner}
-            editable={library.accessEditable}
+            control={library.accessControl}
             serverOwner={can(me.role, "owner")}
             removable={removable}
             onDone={() => setEditing(null)}
@@ -390,6 +390,22 @@ const VISIBILITY_HINTS: Readonly<
   private: (owner, serverOwner) => (owner === "you" ? privateHint(serverOwner) : `Only ${owner}.`),
 };
 
+/**
+ * Why the viewer can change who listens only partly, or not at all, and what they may still do.
+ * Only the library's owner, while an admin, lets people in; once they aren't one, the server's
+ * owner may only take people out or make it more private.
+ */
+const accessNote = (
+  control: Exclude<AccessControl, "full">,
+  owner: string,
+  library: Library,
+  removable: boolean,
+): string =>
+  control === "narrow"
+    ? `${owner} doesn't run libraries now, so you can only let fewer people listen: remove ` +
+      "people, or make it more private. Only they, as an admin again, can let anyone in."
+    : `Only ${owner} can change who listens to this folder. ${stillCan(library, removable)}`;
+
 /** What a viewer who doesn't own a library may still do with it, for the access dialog. */
 const stillCan = (library: Library, removable: boolean): string => {
   if (removable) return "You can still rename, rescan, or remove it.";
@@ -403,7 +419,7 @@ const stillCan = (library: Library, removable: boolean): string => {
 function AccessForm({
   library,
   owner,
-  editable,
+  control,
   serverOwner,
   removable,
   onDone,
@@ -412,10 +428,10 @@ function AccessForm({
   /** How to name the owner: "you", or their name. */
   readonly owner: string;
   /**
-   * Whether the viewer may change who listens: the library's owner while an admin, else the
-   * server's owner (`canChangeLibraryAccess`).
+   * How the viewer may change who listens (`libraryAccessControl`): the library's owner, while an
+   * admin, any way; the server's owner, once its owner isn't one, only to let fewer people in.
    */
-  readonly editable: boolean;
+  readonly control: AccessControl;
   /** Whether the viewer owns the server, and so manages every library. */
   readonly serverOwner: boolean;
   /** Whether the viewer may remove the library (`canRemoveLibrary`). */
@@ -427,7 +443,7 @@ function AccessForm({
   const revoke = useRun("libraries.revoke");
   // Only a library's managers may read its access list (anyone else gets not_found, which would
   // take the whole screen down), and only who may change access adds people.
-  const people = useRead("people.list", editable ? {} : "skip");
+  const people = useRead("people.list", control === "full" ? {} : "skip");
 
   const added = useRead(
     "libraries.people",
@@ -461,7 +477,11 @@ function AccessForm({
             <Chip
               key={option}
               selected={visibility === option}
-              disabled={changing || !editable}
+              disabled={
+                changing ||
+                control === "none" ||
+                (control === "narrow" && widensVisibility(visibility, option))
+              }
               onClick={() => (option === visibility ? undefined : void setVisibility(option))}
             >
               {visibilityLabel(option, owner)}
@@ -469,10 +489,8 @@ function AccessForm({
           ))}
         </div>
         <FieldHint>{VISIBILITY_HINTS[visibility](owner, serverOwner)}</FieldHint>
-        {editable ? null : (
-          <FieldHint>
-            Only {owner} can change who listens to this folder. {stillCan(library, removable)}
-          </FieldHint>
+        {control === "full" ? null : (
+          <FieldHint>{accessNote(control, owner, library, removable)}</FieldHint>
         )}
       </div>
       {visibility === "private" || !library.manageable ? null : (
@@ -502,7 +520,7 @@ function AccessForm({
                   </span>
                   <button
                     type="button"
-                    disabled={!editable}
+                    disabled={control === "none"}
                     aria-label={`Remove ${person.name ?? person.email}`}
                     onClick={() => void remove(person.id)}
                     className="font-sans text-sm/xs font-medium text-danger hover:underline disabled:cursor-not-allowed disabled:opacity-(--opacity-disabled) disabled:no-underline"
@@ -513,7 +531,7 @@ function AccessForm({
               ))}
             </ul>
           )}
-          {candidates.length === 0 || !editable ? null : (
+          {candidates.length === 0 || control !== "full" ? null : (
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={<Button variant="secondary" size="sm" className="w-fit" pending={adding} />}

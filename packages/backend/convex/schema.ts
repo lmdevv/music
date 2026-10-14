@@ -30,6 +30,17 @@ export const deviceKind = v.union(v.literal("web"), v.literal("phone"), v.litera
 export default defineSchema({
   ...authTables,
 
+  /**
+   * Convex Auth's sessions, plus the generation of the person's sessions each was opened in
+   * (`users.sessionGeneration`); sessions [music] opens itself (password sign-in, reset, API
+   * keys) record it, and one from an older generation no longer counts (`isStale`).
+   */
+  authSessions: defineTable({
+    userId: v.id("users"),
+    expirationTime: v.number(),
+    generation: v.optional(v.number()),
+  }).index("userId", ["userId"]),
+
   users: defineTable({
     name: v.optional(v.string()),
     image: v.optional(v.string()),
@@ -48,6 +59,12 @@ export default defineSchema({
      * however many there are; the rows themselves are purged in batches afterwards.
      */
     sessionsValidAfter: v.optional(v.number()),
+    /**
+     * Bumped with `sessionsValidAfter` whenever every session ends. A session opened with the
+     * password must have checked it in the generation it records, so one whose check raced a
+     * reset can't outlive it, whatever the clocks say.
+     */
+    sessionGeneration: v.optional(v.number()),
     /**
      * API keys created up to this time no longer work, nor do the sessions they opened. Demotion
      * to guest sets it, so a later promotion can't revive keys the batched revocation
@@ -122,6 +139,12 @@ export default defineSchema({
      * refused, so nothing of the library streams until a scan claims it again.
      */
     rootIds: v.optional(v.array(v.string())),
+    /**
+     * Where the claimed folder is on its file system (`<major>:<minor>:/path`, from the media
+     * service's mount table), which a bind mount of a subfolder can't disguise. Missing without a
+     * mount table, or on claims from before it was recorded. Cleared with `realPath`.
+     */
+    fsPath: v.optional(v.string()),
     visibility,
     ownerId: v.id("users"),
     lastScanAt: v.optional(v.number()),

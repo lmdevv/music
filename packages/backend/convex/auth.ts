@@ -48,6 +48,9 @@ const ApiKeyCredentials = Schema.Struct({ key: Schema.String.check(Schema.isMinL
 
 const decodeApiKeyCredentials = Schema.decodeUnknownResult(ApiKeyCredentials);
 
+/** The stored password hash of an account `retrieveAccount` returned. */
+const decodeSecret = Schema.decodeUnknownResult(Schema.String);
+
 const invalid = (message: string): never => {
   throw new ConvexError({ code: "invalid_args", message });
 };
@@ -134,7 +137,7 @@ const password = ConvexCredentials<DataModel>({
 
     if (input.flow === "signIn") {
       // Fails on a wrong password before anything reveals that the account is suspended.
-      const { user } = await retrieveAccount(ctx, {
+      const { account, user } = await retrieveAccount(ctx, {
         provider: PASSWORD,
         account: { id: input.email.toLowerCase(), secret: input.password },
       }).catch(async (cause: unknown) => {
@@ -155,20 +158,37 @@ const password = ConvexCredentials<DataModel>({
         throw new ConvexError({ code: "forbidden", message: SUSPENDED_MESSAGE });
       }
 
-      return { userId: user._id };
+      // The session opens in its own transaction with a second look at the password, rather than
+      // in Convex Auth's later one, so a reset landing after the check leaves no session behind.
+      const secret = decodeSecret(account.secret);
+
+      // A password account always has a secret; one without can't have passed the check.
+      if (Result.isFailure(secret)) return invalidCredentials();
+
+      const opened = await ctx.runMutation(internal.users.openPasswordSession, {
+        accountId: account._id,
+        secret: secret.success,
+      });
+
+      if (opened.kind === "suspended") {
+        throw new ConvexError({ code: "forbidden", message: SUSPENDED_MESSAGE });
+      }
+
+      if (opened.kind === "changed") return invalidCredentials();
+
+      return { userId: opened.userId, sessionId: opened.sessionId };
     }
 
     checkPassword(input.newPassword);
 
     // One transaction checks the link and who may use it, sets the password on the person's own
-    // account, and ends their sessions, so nothing can change in between.
-    const userId = await ctx.runMutation(internal.passwordResets.redeem, {
+    // account, ends their sessions, and opens the one this sign-in gets, so nothing can change
+    // in between.
+    return ctx.runMutation(internal.passwordResets.redeem, {
       hash: await sha256Hex(input.token),
       provider: PASSWORD,
       secret: await scrypt.hash(input.newPassword),
     });
-
-    return { userId };
   },
   crypto: {
     hashSecret: (secret) => scrypt.hash(secret),

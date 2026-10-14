@@ -174,6 +174,24 @@ describe("root claims", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       }),
     ));
 
+  it("tries a claim that failed for a passing reason again, with backoff", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root } = yield* fixtureLibrary;
+        const control = yield* claimPass(yield* temporaryDirectory("data"));
+        // Not mounted yet when the library appears, as a drive that comes up after the service.
+        const later = join(yield* temporaryDirectory("later"), "music");
+        const libraryId = yield* control.addLibrary(later);
+
+        yield* Effect.sleep("300 millis");
+        expect(yield* control.claimed).not.toContain(libraryId);
+
+        yield* Files.copyTree(root, later);
+
+        expect(yield* claimedSoon(control, libraryId)).toBe(true);
+      }),
+    ));
+
   it("refuses /proc/self/root, which names the whole file system again", () =>
     runScoped(
       Effect.gen(function* () {

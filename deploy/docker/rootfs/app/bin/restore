@@ -20,8 +20,9 @@ fi
 # The media service writes to Convex on its own (folder claims, scan jobs): stop it first, so
 # nothing this image writes lands on the restored data before the container restarts. It stays
 # down until then.
-if [ -d /run/service/media ]; then
-  /command/s6-svc -wD -T 30000 -d /run/service/media || echo "[restore] the media service did not stop; restoring anyway" >&2
+if [ -d /run/service/media ] && ! /command/s6-svc -wD -T 30000 -d /run/service/media; then
+  echo "[restore] refusing to restore: the media service did not stop within 30 seconds, and it could write to the restored data. Nothing was changed; try again, and check the container's log if it keeps happening." >&2
+  exit 1
 fi
 
 cd /app/backend

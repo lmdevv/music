@@ -361,7 +361,13 @@ const finishJob = makeFunctionReference<
 
 const claimRoot = makeFunctionReference<
   "mutation",
-  { secret: string; libraryId: string; realPath: string; rootIds: ReadonlyArray<string> },
+  {
+    secret: string;
+    libraryId: string;
+    realPath: string;
+    rootIds: ReadonlyArray<string>;
+    fsPath: string | null;
+  },
   { ok: boolean }
 >("media:claimRoot");
 
@@ -405,6 +411,7 @@ const finishPendingJobs = async (client: ConvexHttpClient, secret: string): Prom
       libraryId: claim.library.id,
       realPath: claim.library.path,
       rootIds: [`seed:${claim.library.id}`],
+      fsPath: null,
     });
 
     await inOrder(batches, async (batch, index) => {

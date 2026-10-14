@@ -11,7 +11,7 @@
  */
 import type { LibraryId } from "@music/commands/ids";
 import { isSystemFolder, SYSTEM_FOLDER_MESSAGE } from "@music/commands/system-folders";
-import { Effect, Layer, Ref, Schema, Stream } from "effect";
+import { Effect, FiberMap, Layer, Ref, Schedule, Schema, Semaphore, Stream } from "effect";
 
 import * as Files from "./files.ts";
 import { type LibraryFolder, MediaBackend, resubscribeSchedule } from "./media-backend.ts";
@@ -66,7 +66,8 @@ export const claimRoot = Effect.fn("RootClaim.claim")(function* (library: {
   }
 
   const rootIds = yield* Files.folderIds(real);
-  const claim = yield* backend.claimRoot(library.id, real, rootIds);
+  const fsPath = yield* Files.fsPath(real);
+  const claim = yield* backend.claimRoot(library.id, real, rootIds, fsPath);
 
   if (!claim.ok) return yield* new RootRefused({ libraryId: library.id, reason: claim.error });
 
@@ -76,42 +77,76 @@ export const claimRoot = Effect.fn("RootClaim.claim")(function* (library: {
 /** Libraries claimed at once, side by side, when many need it (after an upgrade, say). */
 const CLAIM_CONCURRENCY = 4;
 
+/** Backoff for a claim that failed but wasn't refused: from half a second, capped at a minute. */
+const RETRY_SCHEDULE = Schedule.min([
+  Schedule.exponential("500 millis"),
+  Schedule.spaced("1 minute"),
+]);
+
 const claimKey = (library: LibraryFolder): string => `${library.id}:${library.path}`;
 
 /**
  * Claims every library without a claim as soon as it appears, ahead of the scan queue: libraries
  * from before claims (after an upgrade), new ones, and ones whose claim was dropped. A claim takes
  * a `stat` per folder level, so every library streams again within seconds rather than waiting
- * for its full scan, which still claims again first. A library is tried once per folder in this
- * process; a refused one is tried again by its scans.
+ * for its full scan, which still claims again first. A claim that fails for another reason (the
+ * folder not there yet, Convex unreachable) is retried with backoff; once a folder's claim
+ * succeeds or is refused, this process leaves it to the library's scans, which claim again.
  */
 export const layer: Layer.Layer<never, never, MediaBackend | MediaConfig> = Layer.effectDiscard(
   Effect.gen(function* () {
     const backend = yield* MediaBackend;
     const config = yield* MediaConfig;
-    const tried = yield* Ref.make<ReadonlySet<string>>(new Set());
+    // Folders whose claim succeeded or was refused; only those are not tried again.
+    const settled = yield* Ref.make<ReadonlySet<string>>(new Set());
+    const claims = yield* FiberMap.make<string>();
+    const listed = yield* Ref.make<ReadonlySet<string>>(new Set());
+    const permits = yield* Semaphore.make(CLAIM_CONCURRENCY);
+
+    // A claim that failed for another reason (the folder not mounted yet, Convex unreachable)
+    // is tried again with backoff until it succeeds or is refused.
+    const claimOnce = (library: LibraryFolder) =>
+      permits
+        .withPermits(1)(claimRoot(library))
+        .pipe(
+          Effect.tapError((error) =>
+            error instanceof RootRefused
+              ? Effect.void
+              : Effect.logDebug("RootClaim.retrying", { libraryId: library.id, error }),
+          ),
+          Effect.retry({
+            schedule: RETRY_SCHEDULE,
+            while: (error) => !(error instanceof RootRefused),
+          }),
+          Effect.tap(() => Effect.logInfo("RootClaim.claimed", { libraryId: library.id })),
+          Effect.catch((error) =>
+            Effect.logWarning("RootClaim.not_claimed", { libraryId: library.id, error }),
+          ),
+          Effect.andThen(Ref.update(settled, (keys) => new Set([...keys, claimKey(library)]))),
+          Effect.provideService(MediaBackend, backend),
+          Effect.provideService(MediaConfig, config),
+        );
 
     const claimNew = Effect.fn("RootClaim.claimNew")(function* (
       libraries: ReadonlyArray<LibraryFolder>,
     ) {
-      const seen = yield* Ref.get(tried);
+      const done = yield* Ref.get(settled);
+      const wanted = new Map(libraries.map((library) => [claimKey(library), library]));
 
-      const fresh = libraries.filter((library) => !library.claimed && !seen.has(claimKey(library)));
-
-      yield* Ref.set(tried, new Set([...seen, ...fresh.map(claimKey)]));
+      // A library removed, or moved to another folder, stops its claim in flight.
+      const previous = yield* Ref.getAndSet(listed, new Set(wanted.keys()));
 
       yield* Effect.forEach(
-        fresh,
+        [...previous].filter((key) => !wanted.has(key)),
+        (key) => FiberMap.remove(claims, key),
+        { discard: true },
+      );
+
+      yield* Effect.forEach(
+        libraries.filter((library) => !library.claimed && !done.has(claimKey(library))),
         (library) =>
-          claimRoot(library).pipe(
-            Effect.tap(() => Effect.logInfo("RootClaim.claimed", { libraryId: library.id })),
-            Effect.catch((error) =>
-              Effect.logWarning("RootClaim.not_claimed", { libraryId: library.id, error }),
-            ),
-            Effect.provideService(MediaBackend, backend),
-            Effect.provideService(MediaConfig, config),
-          ),
-        { concurrency: CLAIM_CONCURRENCY, discard: true },
+          FiberMap.run(claims, claimKey(library), claimOnce(library), { onlyIfMissing: true }),
+        { discard: true },
       );
     });
 

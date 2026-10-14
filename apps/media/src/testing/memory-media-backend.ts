@@ -7,7 +7,7 @@
  * It keeps tracks only: albums and artists, whose artwork Convex takes from their tracks, list no
  * artwork of their own.
  */
-import { chainsOverlap, type FolderChain } from "@music/commands/folder-ids";
+import { chainsOverlap, type FolderChain, fsPathsOverlap } from "@music/commands/folder-ids";
 import { JobId, LibraryId, TrackId } from "@music/commands/ids";
 import { Context, Effect, Layer, Option, Stream, SubscriptionRef } from "effect";
 
@@ -44,13 +44,24 @@ export interface MemoryJob {
   readonly outcome: JobOutcome | undefined;
 }
 
+/** What a claim stores: the folder's identities (`@music/commands/folder-ids`). */
+interface Claim {
+  readonly rootIds: FolderChain;
+  readonly fsPath: string | null;
+}
+
+/** Whether two claims are the same folder, or one is inside the other, by either identity. */
+const claimsOverlap = (left: Claim, right: Claim): boolean =>
+  chainsOverlap(left.rootIds, right.rootIds) ||
+  (left.fsPath !== null && right.fsPath !== null && fsPathsOverlap(left.fsPath, right.fsPath));
+
 interface State {
   readonly libraries: ReadonlyArray<Omit<LibraryFolder, "claimed">>;
   /**
    * The identities of the folders libraries claimed, as `media:claimRoot` stores them. Compared
    * by identity only, so tests show the service reports identities that catch any overlap.
    */
-  readonly roots: ReadonlyMap<LibraryId, FolderChain>;
+  readonly roots: ReadonlyMap<LibraryId, Claim>;
   readonly tracks: ReadonlyArray<MemoryTrack>;
   readonly jobs: ReadonlyArray<MemoryJob>;
   readonly nextId: number;
@@ -211,21 +222,21 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
           libraryId: LibraryId,
           _realPath: string,
           rootIds: FolderChain,
+          fsPath: string | null,
         ) {
           return yield* SubscriptionRef.modify(state, (current): [RootClaim, State] => {
             const others = [...current.roots].filter(([other]) => other !== libraryId);
 
-            if (others.some(([, root]) => chainsOverlap(root, rootIds))) {
+            const claim: Claim = { rootIds, fsPath };
+
+            if (others.some(([, root]) => claimsOverlap(root, claim))) {
               return [
                 { ok: false, error: "This folder overlaps another library" },
                 { ...current, roots: new Map(others) },
               ];
             }
 
-            return [
-              { ok: true },
-              { ...current, roots: new Map([...others, [libraryId, rootIds]]) },
-            ];
+            return [{ ok: true }, { ...current, roots: new Map([...others, [libraryId, claim]]) }];
           });
         }),
 

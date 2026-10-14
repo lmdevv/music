@@ -10,7 +10,7 @@ import { internalMutation } from "./_generated/server";
 import { createPasswordReset } from "./handlers/people";
 import { fail } from "./lib/errors";
 import { resetByHash, resetStillAllowed } from "./lib/resets";
-import { endUserSessions } from "./lib/sessions";
+import { endUserSessions, openSession } from "./lib/sessions";
 import { SUSPENDED_MESSAGE } from "./lib/viewer";
 
 /**
@@ -51,10 +51,13 @@ export const redeem = internalMutation({
 
     await ctx.db.patch(account._id, { secret });
     await ctx.db.patch(reset._id, { usedAt: Date.now() });
-    // The session the reset itself opens is created after this, so it is the only one left.
-    await endUserSessions(ctx, user._id);
 
-    return user._id;
+    // Every session ends, and the one the reset signs in with opens in the new generation, here,
+    // so it is the only one left.
+    const generation = await endUserSessions(ctx, user._id);
+    const sessionId = await openSession(ctx, user, generation);
+
+    return { userId: user._id, sessionId };
   },
 });
 

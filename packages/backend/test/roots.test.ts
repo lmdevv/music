@@ -43,6 +43,7 @@ const claim = async (
   libraryId: LibraryId,
   realPath: string,
   rootIds: ReadonlyArray<string> = [`path:${realPath}`],
+  fsPath: string | null = null,
 ) => {
   const library = await libraryDoc(backend, libraryId);
 
@@ -51,6 +52,7 @@ const claim = async (
     libraryId: library._id,
     realPath,
     rootIds: [...rootIds],
+    fsPath,
   });
 };
 
@@ -162,6 +164,41 @@ describe("real folder claims", () => {
     expect(await claim(backend, alias.libraryId, "/mnt/b", ["1:31", mnt, top])).toEqual({
       ok: true,
     });
+  });
+
+  it("refuse a library on a bound subfolder of another, by file system path", async () => {
+    const backend = makeBackend();
+    const owner = await signUp(backend, "owner");
+    const admin = await signUp(backend, "admin");
+
+    const kept = await owner.music.run("libraries.create", {
+      name: "Kept",
+      path: "/music/a",
+      visibility: "private",
+    });
+
+    expect(
+      await claim(backend, kept.libraryId, "/music/a", ["8:1", "8:0", "0:1"], "8:1:/srv/a"),
+    ).toEqual({ ok: true });
+
+    // /srv/a/sub bound at /music/x: walking up from it never passes /music/a, so the identity
+    // chains share nothing, but on the file system it is inside A.
+    const bound = await admin.music.run("libraries.create", { name: "Bound", path: "/music/x" });
+
+    expect(
+      await claim(backend, bound.libraryId, "/music/x", ["8:7", "0:2", "0:1"], "8:1:/srv/a/sub"),
+    ).toEqual({ ok: false, error: OVERLAP });
+    // And the folder around it, bound the other way.
+    expect(
+      await claim(backend, bound.libraryId, "/music/x", ["8:9", "0:2", "0:1"], "8:1:/srv"),
+    ).toEqual({ ok: false, error: OVERLAP });
+    // A folder beside it, or one on another file system, is fine.
+    expect(
+      await claim(backend, bound.libraryId, "/music/x", ["8:8", "0:2", "0:1"], "8:1:/srv/b"),
+    ).toEqual({ ok: true });
+    expect(
+      await claim(backend, bound.libraryId, "/music/x", ["9:7", "0:2", "0:1"], "9:1:/srv/a/sub"),
+    ).toEqual({ ok: true });
   });
 
   it("stream nothing from a library until a claim succeeds, and stop when one is refused", async () => {

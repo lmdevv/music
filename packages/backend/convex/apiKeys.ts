@@ -3,11 +3,8 @@ import { v } from "convex/values";
 
 import { internalMutation } from "./_generated/server";
 import { fail } from "./lib/errors";
-import { endSession, isStale, keyLapsed } from "./lib/sessions";
+import { endSession, isStale, keyLapsed, openSession } from "./lib/sessions";
 import { roleOf, SUSPENDED_MESSAGE } from "./lib/viewer";
-
-/** Matches Convex Auth's default session lifetime, which `auth.ts` does not change. */
-const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
  * Looks up an API key by hash for the `apikey` sign-in provider, records its use, and returns the
@@ -42,10 +39,7 @@ export const redeem = internalMutation({
 
     if (current !== null) await endSession(ctx, current._id);
 
-    const sessionId = await ctx.db.insert("authSessions", {
-      userId: key.userId,
-      expirationTime: now + SESSION_MS,
-    });
+    const sessionId = await openSession(ctx, user);
 
     await ctx.db.patch(key._id, { lastUsedAt: now, sessionId });
 

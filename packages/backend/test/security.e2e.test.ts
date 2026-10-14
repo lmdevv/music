@@ -389,15 +389,35 @@ const expectInvisible = async (
  * Claims a library's real folder, as the media service does before every scan, with the folder's
  * identity and its parents' (made up here; the media service reads them with `stat`).
  */
-const claimRoot = (libraryId: string, realPath: string, rootIds: ReadonlyArray<string>) =>
+const claimRoot = (
+  libraryId: string,
+  realPath: string,
+  rootIds: ReadonlyArray<string>,
+  fsPath: string | null = null,
+) =>
   anonymous(server).convex.mutation(
     makeFunctionReference<
       "mutation",
-      { secret: string; libraryId: string; realPath: string; rootIds: ReadonlyArray<string> },
+      {
+        secret: string;
+        libraryId: string;
+        realPath: string;
+        rootIds: ReadonlyArray<string>;
+        fsPath: string | null;
+      },
       { ok: boolean; error?: string }
     >("media:claimRoot"),
-    { secret: mediaSecret, libraryId, realPath, rootIds },
+    { secret: mediaSecret, libraryId, realPath, rootIds, fsPath },
   );
+
+const pause = (ms: number) =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+/** The outcome of reading as each of `sessions`: a set of one code when they all agree. */
+const endedEverywhere = async (sessions: ReadonlyArray<Session>) =>
+  new Set(await Promise.all(sessions.map((one) => failureCode(one.music.read("account.me", {})))));
 
 describe.skipIf(server === "" || mediaSecret === "")("backend authorization", () => {
   let fixture: Fixture;
@@ -888,6 +908,7 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
         libraryId,
         realPath: "/",
         rootIds: [],
+        fsPath: null,
       }),
       visitor.mutation(makeFunctionReference<"mutation">("media:refuseRoot"), {
         secret,
@@ -1386,8 +1407,9 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       state: "invalid",
     });
 
-    // Their private library is still theirs to hear. Another admin can't touch it. A member can't
-    // run libraries, so the server's owner, who manages it, now decides who listens too.
+    // Their private library is still theirs to hear. Another admin can't touch it. The server's
+    // owner manages it, and may let fewer people in, never more: they could otherwise demote an
+    // admin, let themselves in, and promote them again.
     expect(await listed()).toMatchObject({ readable: false, path: null });
     await expectRunFailure(
       adminB,
@@ -1399,18 +1421,18 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       libraryId: vault.libraryId,
       name: `Vault kept ${id}`,
     });
-    expect(
-      await failureCode(
-        adminA.music.run("libraries.update", {
-          libraryId: vault.libraryId,
-          visibility: "restricted",
-        }),
-      ),
-    ).toBe("succeeded");
-    await adminA.music.run("libraries.update", {
-      libraryId: vault.libraryId,
-      visibility: "private",
-    });
+    await expectRunFailure(
+      adminA,
+      "libraries.update",
+      { libraryId: vault.libraryId, visibility: "restricted" },
+      "forbidden",
+    );
+    await expectRunFailure(
+      adminA,
+      "libraries.grant",
+      { libraryId: vault.libraryId, userId: (await adminA.music.read("account.me", {})).id },
+      "forbidden",
+    );
     expect((await keeper.music.read("libraries.list", {})).map((library) => library.id)).toContain(
       vault.libraryId,
     );
@@ -1420,6 +1442,66 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       { libraryId: vault.libraryId },
       "forbidden",
     );
+  });
+
+  it("suspends and resets while sign-ins pour in, and no session from before outlives either", async () => {
+    const { adminA } = fixture;
+
+    /**
+     * Signs in as `email` from `count` loops until `stop.done`, the way a script hammering the
+     * sign-in would, and collects every session that opened.
+     */
+    const hammer = (email: string, count: number, stop: { done: boolean }) => {
+      const sessions: Array<Session> = [];
+
+      const loop = async (): Promise<void> => {
+        if (stop.done) return;
+        const session = await passwordSignIn(server, email, PASSWORD).catch(() => null);
+
+        if (session !== null) sessions.push(session);
+
+        return loop();
+      };
+
+      return { sessions, done: Promise.all(Array.from({ length: count }, loop)) };
+    };
+
+    // Suspension, with 24 sign-ins at a time racing it.
+    const busy = `busy-${id}@music.test`;
+    const busyPerson = await invite(adminA, busy, "member");
+    const { id: busyId } = await busyPerson.music.read("account.me", {});
+
+    const suspendStop = { done: false };
+    const suspendRace = hammer(busy, 24, suspendStop);
+
+    await pause(400);
+    const suspended = await failureCode(adminA.music.run("people.suspend", { userId: busyId }));
+
+    suspendStop.done = true;
+    await suspendRace.done;
+
+    expect(suspended).toBe("succeeded");
+    expect(suspendRace.sessions.length).toBeGreaterThan(0);
+    expect(await endedEverywhere(suspendRace.sessions)).toEqual(new Set(["unauthenticated"]));
+
+    // A password reset, with 24 sign-ins on the old password racing it.
+    const rushed = `rushed-${id}@music.test`;
+    const rushedPerson = await invite(adminA, rushed, "member");
+    const { id: rushedId } = await rushedPerson.music.read("account.me", {});
+
+    const resetStop = { done: false };
+    const resetRace = hammer(rushed, 24, resetStop);
+
+    await pause(400);
+    const { token } = await adminA.music.run("people.reset", { userId: rushedId });
+    const after = await resetPassword(server, token, "after-the-race-1");
+
+    resetStop.done = true;
+    await resetRace.done;
+
+    expect(resetRace.sessions.length).toBeGreaterThan(0);
+    expect(await endedEverywhere(resetRace.sessions)).toEqual(new Set(["unauthenticated"]));
+    expect((await after.music.read("account.me", {})).id).toBe(rushedId);
   });
 
   it("removes a person with their sessions, keys, and data, and gives their libraries to the owner", async () => {

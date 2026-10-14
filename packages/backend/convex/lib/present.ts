@@ -1,4 +1,5 @@
 import type {
+  AccessControl,
   AlbumCard,
   ArtistCard,
   Device,
@@ -175,7 +176,7 @@ export const presentLibrary = (
   ownerName: string | null,
   readable: boolean,
   manageable: boolean,
-  accessEditable: boolean,
+  accessControl: AccessControl,
   scanning: boolean,
 ): (typeof Library)["Encoded"] => ({
   id: doc._id,
@@ -183,7 +184,7 @@ export const presentLibrary = (
   // A folder path is how a library is found and indexed again, so only its managers see it.
   path: manageable ? doc.path : null,
   manageable,
-  accessEditable,
+  accessControl,
   visibility: doc.visibility,
   ownerId: doc.ownerId,
   ownerName,

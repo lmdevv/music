@@ -99,6 +99,21 @@ const folderChanges = (
     ),
   );
 
+/**
+ * Whether a library's folder now resolves somewhere else than the last time it resolved, and
+ * records where. A folder that doesn't resolve right now (its link points at nothing for a
+ * while) keeps the last place it did, so a link that goes from A to nowhere to B is seen to move.
+ */
+export const movedSince = (
+  last: Ref.Ref<string | null>,
+  real: string | null,
+): Effect.Effect<boolean> =>
+  real === null
+    ? Effect.succeed(false)
+    : Ref.getAndSet(last, real).pipe(
+        Effect.map((previous) => previous !== null && previous !== real),
+      );
+
 const watchLibrary = Effect.fn("LibraryWatcher.watch")(
   function* (library: LibraryFolder) {
     const backend = yield* MediaBackend;
@@ -123,11 +138,7 @@ const watchLibrary = Effect.fn("LibraryWatcher.watch")(
 
     const retargeted = Files.realPath(library.path).pipe(
       Effect.orElseSucceed(() => null),
-      Effect.flatMap((real) =>
-        Ref.getAndSet(lastReal, real).pipe(
-          Effect.map((previous) => previous !== null && previous !== real),
-        ),
-      ),
+      Effect.flatMap((real) => movedSince(lastReal, real)),
     );
 
     const started = Effect.all([Ref.getAndSet(failures, 0), retargeted]).pipe(

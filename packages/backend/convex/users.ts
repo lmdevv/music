@@ -4,6 +4,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { fail } from "./lib/errors";
 import { inviterStillAllows } from "./lib/invites";
+import { openSession } from "./lib/sessions";
 import type { ReadCtx } from "./lib/viewer";
 
 /** What lets a sign-up in: being the first account, or an open invite for this email. */
@@ -98,6 +99,29 @@ export const createPasswordAccount = internalMutation({
     await ctx.db.insert("authAccounts", { userId, provider, providerAccountId: email, secret });
 
     return userId;
+  },
+});
+
+/**
+ * Opens the session for a password sign-in whose check (`retrieveAccount`) passed, in one
+ * transaction with a second look at the account: if its password changed since the check (a
+ * reset landed in between), or the person was suspended, no session opens. A session opened
+ * before such a change records the generation it was opened in, which the change ends
+ * (`endUserSessions`), so no sign-in that checked the old password outlives a reset.
+ */
+export const openPasswordSession = internalMutation({
+  args: { accountId: v.id("authAccounts"), secret: v.string() },
+  handler: async (ctx, { accountId, secret }) => {
+    const account = await ctx.db.get(accountId);
+
+    if (account?.secret !== secret) return { kind: "changed" } as const;
+    const user = await ctx.db.get(account.userId);
+
+    if (user === null) return { kind: "changed" } as const;
+
+    if (user.suspendedAt !== undefined) return { kind: "suspended" } as const;
+
+    return { kind: "open", userId: user._id, sessionId: await openSession(ctx, user) } as const;
   },
 });
 

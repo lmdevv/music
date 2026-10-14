@@ -314,6 +314,14 @@ export const LibraryVisibility = Schema.Literals(["shared", "restricted", "priva
 
 export type LibraryVisibility = typeof LibraryVisibility.Type;
 
+/**
+ * How someone may change who listens to a library (`libraryAccessControl`): any way, only to let
+ * fewer people in, or not at all.
+ */
+export const AccessControl = Schema.Literals(["full", "narrow", "none"]);
+
+export type AccessControl = typeof AccessControl.Type;
+
 export const Library = Schema.Struct({
   id: LibraryId,
   name: Schema.String,
@@ -321,8 +329,8 @@ export const Library = Schema.Struct({
   path: Schema.NullOr(Schema.String),
   /** Whether you can rename, rescan, or remove it (`canManageLibrary`). */
   manageable: Schema.Boolean,
-  /** Whether you can change who listens to it (`canChangeLibraryAccess`). */
-  accessEditable: Schema.Boolean,
+  /** How you can change who listens to it (`libraryAccessControl`). */
+  accessControl: AccessControl,
   visibility: LibraryVisibility,
   ownerId: UserId,
   /** Null when the owner's account is gone or has no name. */

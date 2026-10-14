@@ -2,7 +2,7 @@
  * Functions for the media service. Each takes the shared `MEDIA_SERVICE_SECRET`; none of them
  * decides user access. Convex never calls the media service; the service subscribes here.
  */
-import { chainsOverlap } from "@music/commands/folder-ids";
+import { chainsOverlap, fsPathsOverlap } from "@music/commands/folder-ids";
 import { isSystemFolder, SYSTEM_FOLDER_MESSAGE } from "@music/commands/system-folders";
 import { v } from "convex/values";
 
@@ -114,8 +114,10 @@ export const claimRoot = mutation({
     realPath: v.string(),
     /** The folder's identity and its parents' up to `/`, the folder first (see `folder-ids`). */
     rootIds: v.array(v.string()),
+    /** Where the folder is on its file system (see `folder-ids`); null without a mount table. */
+    fsPath: v.union(v.string(), v.null()),
   },
-  handler: async (ctx, { secret, libraryId, realPath, rootIds }) => {
+  handler: async (ctx, { secret, libraryId, realPath, rootIds, fsPath }) => {
     requireService(secret);
     const library = await ctx.db.get(libraryId);
     const real = normaliseLibraryPath(realPath);
@@ -132,7 +134,8 @@ export const claimRoot = mutation({
       (other) =>
         other._id !== libraryId &&
         (firstOverlap([other], real) !== null ||
-          (other.rootIds !== undefined && chainsOverlap(other.rootIds, rootIds))),
+          (other.rootIds !== undefined && chainsOverlap(other.rootIds, rootIds)) ||
+          (fsPath !== null && other.fsPath !== undefined && fsPathsOverlap(other.fsPath, fsPath))),
     );
 
     // The library added first keeps a folder two libraries name, whichever scan claims it first:
@@ -146,8 +149,14 @@ export const claimRoot = mutation({
 
     await Promise.all(overlapping.map(async (other) => unclaim(ctx, other)));
 
-    if (library.realPath !== real || library.rootIds?.join("/") !== rootIds.join("/")) {
-      await ctx.db.patch(libraryId, { realPath: real, rootIds: [...rootIds] });
+    const stored = fsPath ?? undefined;
+
+    if (
+      library.realPath !== real ||
+      library.rootIds?.join("/") !== rootIds.join("/") ||
+      library.fsPath !== stored
+    ) {
+      await ctx.db.patch(libraryId, { realPath: real, rootIds: [...rootIds], fsPath: stored });
     }
 
     return { ok: true } as const;
@@ -160,7 +169,7 @@ export const claimRoot = mutation({
  */
 const unclaim = async (ctx: MutationCtx, library: Doc<"libraries">): Promise<void> => {
   if (library.realPath !== undefined || library.rootIds !== undefined) {
-    await ctx.db.patch(library._id, { realPath: undefined, rootIds: undefined });
+    await ctx.db.patch(library._id, { realPath: undefined, rootIds: undefined, fsPath: undefined });
   }
 };
 

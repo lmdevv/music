@@ -109,7 +109,7 @@ describe("password reset links", () => {
 
     // Another account under the same email can't exist alongside, but the account is found by
     // the person, not by the email, so the password lands on theirs alone.
-    const userId = await backend.mutation(internal.passwordResets.redeem, {
+    const { userId } = await backend.mutation(internal.passwordResets.redeem, {
       hash: await sha256Hex(token),
       provider: "password",
       secret: "the-new-hash",
@@ -131,6 +131,40 @@ describe("password reset links", () => {
     ]);
     expect(after.used).toEqual([true]);
     await expect(member.music.read("account.me", {})).rejects.toThrow("session has ended");
+  });
+
+  it("leave no session from a password check that raced the reset", async () => {
+    const { backend, admin, member } = await household();
+
+    const account = await backend.run(async (ctx) =>
+      ctx.db
+        .query("authAccounts")
+        .withIndex("userIdAndProvider", (q) => q.eq("userId", member.id).eq("provider", "password"))
+        .unique(),
+    );
+
+    if (account?.secret === undefined) throw new Error("The member has no password");
+    const checked = { accountId: account._id, secret: account.secret };
+
+    // A sign-in that checked the old password and opened its session just before the reset.
+    const before = await backend.mutation(internal.users.openPasswordSession, checked);
+
+    if (before.kind !== "open") throw new Error("The session did not open");
+
+    const { token } = await admin.music.run("people.reset", { userId: member.userId });
+
+    expect(await failureCode(redeem(backend, token))).toBe("succeeded");
+
+    // That session ended with the reset, and one that checked the old password before the reset
+    // but opens its session after it opens none.
+    const raced = backend.withIdentity({ subject: `${member.id}|${before.sessionId}` });
+
+    await expect(raced.query(api.commands.read, { name: "account.me", args: {} })).rejects.toThrow(
+      "session has ended",
+    );
+    expect(await backend.mutation(internal.users.openPasswordSession, checked)).toEqual({
+      kind: "changed",
+    });
   });
 
   it("stop working once the person is promoted to admin", async () => {
@@ -288,55 +322,101 @@ describe("the promoteOwner migration", () => {
   });
 });
 
-describe("access to a demoted admin's libraries", () => {
-  it("passes to the server's owner, while other admins still can't change it", async () => {
+/** Lists `libraryId` as `user` sees it. */
+const listedAs = async (user: User, libraryId: string) =>
+  (await user.music.read("libraries.list", {})).find((library) => library.id === libraryId);
+
+describe("access to a library whose owner doesn't run libraries", () => {
+  it("never lets the server's owner in: demote, add themselves, promote fails", async () => {
     const { owner, admin } = await household();
+    const adminId = UserId.make(admin.id);
 
     const { libraryId } = await admin.music.run("libraries.create", {
-      name: "Theirs",
-      path: "/music/theirs",
-      visibility: "restricted",
+      name: "Diary",
+      path: "/music/diary",
+      visibility: "private",
     });
 
-    const listed = async (user: User) =>
-      (await user.music.read("libraries.list", {})).find((library) => library.id === libraryId);
+    // While its owner is an admin, the server's owner can't change who listens at all.
+    expect((await listedAs(owner, libraryId))?.accessControl).toBe("none");
 
-    // While its owner is an admin, only they change who listens.
-    expect((await listed(owner))?.accessEditable).toBe(false);
+    await owner.music.run("people.role", { userId: adminId, role: "member" });
+    expect((await listedAs(owner, libraryId))?.accessControl).toBe("narrow");
+
+    const widen = await Promise.all([
+      failureCode(owner.music.run("libraries.grant", { libraryId, userId: UserId.make(owner.id) })),
+      failureCode(owner.music.run("libraries.update", { libraryId, visibility: "restricted" })),
+      failureCode(owner.music.run("libraries.update", { libraryId, visibility: "shared" })),
+    ]);
+
+    expect(widen).toEqual(["forbidden", "forbidden", "forbidden"]);
+
+    await owner.music.run("people.role", { userId: adminId, role: "admin" });
+    expect(await listedAs(owner, libraryId)).toMatchObject({
+      readable: false,
+      accessControl: "none",
+    });
+  });
+
+  it("lets the server's owner let fewer people in, for a demoted or a suspended admin", async () => {
+    const { backend, owner, admin, member } = await household();
+    const adminId = UserId.make(admin.id);
+    const other = await signUp(backend, "admin");
+
+    const created = await Promise.all(
+      ["one", "two"].map(async (name) =>
+        admin.music.run("libraries.create", {
+          name,
+          path: `/music/${name}`,
+          visibility: "restricted",
+        }),
+      ),
+    );
+
+    const [one, two] = created.map((library) => library.libraryId);
+
+    if (one === undefined || two === undefined) throw new Error("The libraries were not created");
+
+    await Promise.all(
+      [one, two].map(async (libraryId) =>
+        admin.music.run("libraries.grant", { libraryId, userId: member.userId }),
+      ),
+    );
+
+    await owner.music.run("people.role", { userId: adminId, role: "member" });
+
+    // Narrowing: take someone out, make it private.
     expect(
-      await failureCode(owner.music.run("libraries.update", { libraryId, visibility: "shared" })),
-    ).toBe("forbidden");
-
-    await owner.music.run("people.role", { userId: UserId.make(admin.id), role: "member" });
-
-    // A member can't run libraries, so the server's owner now decides.
-    expect((await listed(owner))?.accessEditable).toBe(true);
-    expect(
-      await failureCode(owner.music.run("libraries.update", { libraryId, visibility: "shared" })),
+      await failureCode(
+        owner.music.run("libraries.revoke", { libraryId: one, userId: member.userId }),
+      ),
     ).toBe("succeeded");
     expect(
       await failureCode(
-        owner.music.run("libraries.grant", { libraryId, userId: UserId.make(admin.id) }),
+        owner.music.run("libraries.update", { libraryId: one, visibility: "private" }),
       ),
     ).toBe("succeeded");
-  });
-
-  it("stays with the library's own owner over other admins", async () => {
-    const { backend, owner, admin } = await household();
-    const other = await signUp(backend, "admin");
-
-    const { libraryId } = await admin.music.run("libraries.create", {
-      name: "Theirs",
-      path: "/music/theirs",
-      visibility: "shared",
-    });
-
-    await owner.music.run("people.role", { userId: UserId.make(admin.id), role: "member" });
-
-    // Another admin hears it (shared) and manages it, but doesn't decide who listens.
+    // Another admin manages nothing of it.
     expect(
-      await failureCode(other.music.run("libraries.update", { libraryId, visibility: "private" })),
+      await failureCode(
+        other.music.run("libraries.revoke", { libraryId: two, userId: member.userId }),
+      ),
+    ).not.toBe("succeeded");
+
+    // Suspended rather than demoted, the same holds.
+    await owner.music.run("people.role", { userId: adminId, role: "admin" });
+    await owner.music.run("people.suspend", { userId: adminId });
+    expect((await listedAs(owner, two))?.accessControl).toBe("narrow");
+    expect(
+      await failureCode(
+        owner.music.run("libraries.update", { libraryId: two, visibility: "shared" }),
+      ),
     ).toBe("forbidden");
+    expect(
+      await failureCode(
+        owner.music.run("libraries.revoke", { libraryId: two, userId: member.userId }),
+      ),
+    ).toBe("succeeded");
   });
 });
 
@@ -502,6 +582,48 @@ describe("password sign-up and sign-in", () => {
 });
 
 describe("library access", () => {
+  it("finds a grant however many a removed library left behind", async () => {
+    const { backend, owner, member } = await household();
+
+    // Libraries created first sort first in the grants index; removed without their purge
+    // having run, their grants stay a while.
+    const gone = await Promise.all(
+      ["gone-1", "gone-2", "gone-3"].map(async (name) =>
+        owner.music.run("libraries.create", {
+          name,
+          path: `/music/${name}`,
+          visibility: "restricted",
+        }),
+      ),
+    );
+
+    await Promise.all(
+      gone.map(async ({ libraryId }) =>
+        owner.music.run("libraries.grant", { libraryId, userId: member.userId }),
+      ),
+    );
+
+    await backend.run(async (ctx) => {
+      await Promise.all(
+        gone.map(async ({ libraryId }) => {
+          const id = ctx.db.normalizeId("libraries", libraryId);
+
+          if (id !== null) await ctx.db.delete(id);
+        }),
+      );
+    });
+
+    const kept = await owner.music.run("libraries.create", {
+      name: "Kept",
+      path: "/music/kept",
+      visibility: "restricted",
+    });
+
+    await owner.music.run("libraries.grant", { libraryId: kept.libraryId, userId: member.userId });
+
+    expect(await listedAs(member, kept.libraryId)).toMatchObject({ readable: true });
+  });
+
   it("names a library's owner by email to admins only", async () => {
     const { backend, owner, admin, member } = await household();
 

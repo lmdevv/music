@@ -10,36 +10,61 @@ import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { inviterStillAllows } from "./lib/invites";
-import { endSession } from "./lib/sessions";
+import { endSession, isStale } from "./lib/sessions";
 
 const PURGE_BATCH = 100;
 
 const cursor = v.union(v.string(), v.null());
 
 /**
- * Deletes a person's sessions created up to `before`, with their refresh tokens. `endUserSessions`
- * has already made them stop counting.
+ * Refresh tokens deleted per session in one `purgeSessions` batch; a session with more keeps its
+ * row, and the rest of its tokens, for the next batch.
+ */
+const TOKENS_PER_SESSION = 10;
+
+/**
+ * Deletes a person's ended sessions (`isStale`, or all of them once the person is removed), with
+ * their refresh tokens, a page at a time, rescheduling until it has been through them all.
+ * `endUserSessions` has already made them stop counting.
  */
 export const purgeSessions = internalMutation({
-  args: { userId: v.id("users"), before: v.number() },
-  handler: async (ctx, { userId, before }) => {
-    const session = await ctx.db
+  args: { userId: v.id("users"), cursor },
+  handler: async (ctx, { userId, cursor: from }) => {
+    const user = await ctx.db.get(userId);
+
+    const page = await ctx.db
       .query("authSessions")
-      .withIndex("userId", (q) => q.eq("userId", userId).lte("_creationTime", before))
-      .first();
+      .withIndex("userId", (q) => q.eq("userId", userId))
+      .paginate({ cursor: from, numItems: PURGE_BATCH });
 
-    if (session === null) return;
+    const ended = page.page.filter((session) => user === null || isStale(session, user));
 
-    const tokens = await ctx.db
-      .query("authRefreshTokens")
-      .withIndex("sessionId", (q) => q.eq("sessionId", session._id))
-      .take(PURGE_BATCH);
+    // Whether each session went; one with more tokens than a batch deletes stays a pass longer.
+    const gone = await Promise.all(
+      ended.map(async (session) => {
+        const tokens = await ctx.db
+          .query("authRefreshTokens")
+          .withIndex("sessionId", (q) => q.eq("sessionId", session._id))
+          .take(TOKENS_PER_SESSION);
 
-    await Promise.all(tokens.map((token) => ctx.db.delete(token._id)));
+        await Promise.all(tokens.map((token) => ctx.db.delete(token._id)));
 
-    if (tokens.length < PURGE_BATCH) await ctx.db.delete(session._id);
+        if (tokens.length === TOKENS_PER_SESSION) return false;
 
-    await ctx.scheduler.runAfter(0, internal.people.purgeSessions, { userId, before });
+        await ctx.db.delete(session._id);
+
+        return true;
+      }),
+    );
+
+    if (!page.isDone) {
+      await ctx.scheduler.runAfter(0, internal.people.purgeSessions, {
+        userId,
+        cursor: page.continueCursor,
+      });
+    } else if (gone.includes(false)) {
+      await ctx.scheduler.runAfter(0, internal.people.purgeSessions, { userId, cursor: null });
+    }
   },
 });
 

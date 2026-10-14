@@ -4,7 +4,11 @@
  */
 import { Effect, Option, Schema } from "effect";
 
+import { fsPathOf, parseMountinfo } from "./mounts.ts";
 import * as NodeFiles from "./platform/node-files.ts";
+
+/** The mount table of the service's own mount namespace. */
+const MOUNTINFO = "/proc/self/mountinfo";
 
 /** A file system operation failed. `missing` is true when the path does not exist. */
 export class FileError extends Schema.TaggedError<FileError>()("FileError", {
@@ -105,6 +109,16 @@ export const walkTree = (
 /** The canonical path of `path` through every link. Fails with `FileError` when it does not exist. */
 export const realPath = (path: string): Effect.Effect<string, FileError> =>
   attempt("realpath", path, () => NodeFiles.realPath(path));
+
+/**
+ * Where a resolved folder is on its file system (`major:minor:/path`, see `mounts.ts`), from
+ * `/proc/self/mountinfo`; null where there is no mount table to read (not Linux).
+ */
+export const fsPath = (path: string): Effect.Effect<string | null> =>
+  attempt("read", MOUNTINFO, () => NodeFiles.readWholeFile(MOUNTINFO)).pipe(
+    Effect.map((bytes) => fsPathOf(parseMountinfo(new TextDecoder().decode(bytes)), path)),
+    Effect.orElseSucceed(() => null),
+  );
 
 /** A folder's identity and its parents' up to `/`, the folder first (`NodeFiles.folderIds`). */
 export const folderIds = (path: string): Effect.Effect<ReadonlyArray<string>, FileError> =>

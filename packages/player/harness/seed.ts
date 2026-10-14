@@ -38,7 +38,13 @@ const upsertTracks = makeFunctionReference<
 
 const claimRoot = makeFunctionReference<
   "mutation",
-  { secret: string; libraryId: string; realPath: string; rootIds: ReadonlyArray<string> },
+  {
+    secret: string;
+    libraryId: string;
+    realPath: string;
+    rootIds: ReadonlyArray<string>;
+    fsPath: string | null;
+  },
   { ok: boolean }
 >("media:claimRoot");
 
@@ -81,6 +87,7 @@ export const seedSession = async (): Promise<ReadonlyArray<TrackId>> => {
     libraryId,
     realPath: fixturesDir,
     rootIds: [`harness:${libraryId}`],
+    fsPath: null,
   });
 
   await http.mutation(upsertTracks, {

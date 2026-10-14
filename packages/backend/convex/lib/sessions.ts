@@ -20,38 +20,49 @@ export const endSession = async (
   if ((await ctx.db.get(sessionId)) !== null) await ctx.db.delete(sessionId);
 };
 
+/** How long a session [music] opens itself lasts: Convex Auth's default, which `auth.ts` keeps. */
+export const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
+
 /**
- * Ends every session a person has, password and API key alike, at once and in constant work:
- * sessions created before now stop counting (`users.sessionsValidAfter`, checked by
- * `loadViewer`), and their rows are purged in scheduled batches. A person can sign in any number
- * of times, so deleting them all here could exceed a mutation's limits and block the suspension.
+ * Ends every session a person has, password and API key alike, at once and in constant work,
+ * touching only their user row: sessions created up to now stop counting
+ * (`users.sessionsValidAfter`), and so do sessions from an earlier generation
+ * (`users.sessionGeneration`), checked by `loadViewer`. The rows are purged in scheduled batches.
+ * It reads no session, so sign-ins committing meanwhile, however many, can't make it retry until
+ * it fails. Returns the new generation, for a session opened in the same mutation.
  */
-export const endUserSessions = async (ctx: MutationCtx, userId: Id<"users">): Promise<void> => {
-  // Reading the person's newest session puts the end of their session range in this mutation's
-  // read set, so a sign-in committing meanwhile makes it retry rather than slip past the cutoff.
-  // The cutoff then covers every session that exists, including one created this millisecond;
-  // anything created after this commits has a later creation time.
-  const newest = await ctx.db
-    .query("authSessions")
-    .withIndex("userId", (q) => q.eq("userId", userId))
-    .order("desc")
-    .first();
+export const endUserSessions = async (ctx: MutationCtx, userId: Id<"users">): Promise<number> => {
+  const user = await ctx.db.get(userId);
+  const generation = (user?.sessionGeneration ?? 0) + 1;
 
-  const cutoff = Math.max(Date.now(), newest?._creationTime ?? 0);
-
-  if ((await ctx.db.get(userId)) !== null) {
-    await ctx.db.patch(userId, { sessionsValidAfter: cutoff });
+  if (user !== null) {
+    await ctx.db.patch(userId, { sessionsValidAfter: Date.now(), sessionGeneration: generation });
   }
 
-  await ctx.scheduler.runAfter(0, internal.people.purgeSessions, { userId, before: cutoff });
+  await ctx.scheduler.runAfter(0, internal.people.purgeSessions, { userId, cursor: null });
+
+  return generation;
 };
 
-/** Whether a session was ended by `endUserSessions` but its row is not purged yet. */
+/** Opens a session for `user` in their current generation, as `SESSION_MS` long. */
+export const openSession = (
+  ctx: MutationCtx,
+  user: Doc<"users">,
+  generation = user.sessionGeneration ?? 0,
+): Promise<Id<"authSessions">> =>
+  ctx.db.insert("authSessions", {
+    userId: user._id,
+    expirationTime: Date.now() + SESSION_MS,
+    generation,
+  });
+
 /** Whether an API key was made before its person's keys stopped working (`keysValidAfter`). */
 export const keyLapsed = (
   key: Pick<Doc<"apiKeys">, "_creationTime">,
   user: Pick<Doc<"users">, "keysValidAfter">,
 ): boolean => user.keysValidAfter !== undefined && key._creationTime <= user.keysValidAfter;
 
+/** Whether a session was ended by `endUserSessions` but its row is not purged yet. */
 export const isStale = (session: Doc<"authSessions">, user: Doc<"users">): boolean =>
-  user.sessionsValidAfter !== undefined && session._creationTime <= user.sessionsValidAfter;
+  (user.sessionsValidAfter !== undefined && session._creationTime <= user.sessionsValidAfter) ||
+  (session.generation !== undefined && session.generation < (user.sessionGeneration ?? 0));
