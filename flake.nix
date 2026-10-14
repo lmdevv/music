@@ -120,7 +120,16 @@
               };
               inherit (nixpkgs.lib.importJSON ./package.json) version;
               backendVersion = (nixpkgs.lib.importJSON ./packages/backend/package.json).version;
+              # The container's Convex and Caddy ids, which init refuses at start.
+              reservedUid = evaluate { uid = 901; };
+              reservedGid = evaluate { gid = 902; };
+              refusesReserved =
+                evaluated:
+                builtins.any (nixpkgs.lib.hasInfix "uid and gid cannot be 901 or 902") (failed evaluated);
             in
+            assert expect (
+              refusesReserved reservedUid && refusesReserved reservedGid
+            ) "uid or gid 901/902 is not refused: ${toString (failed reservedUid)}";
             # The image a release is published under is the version the image reports.
             assert expect (
               version == backendVersion
