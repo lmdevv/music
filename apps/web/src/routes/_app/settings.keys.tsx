@@ -12,7 +12,7 @@ import { toast } from "sonner";
 
 import { SettingsHeader, TerminalHint } from "@/components/settings/settings-ui";
 import { resolveConvexUrl } from "@/config";
-import { cliLoginCommand, needsInsecure } from "@/lib/cli-login";
+import { cliLoginBase, cliLoginCommand, needsInsecure } from "@/lib/cli-login";
 import { useAction } from "@/lib/action";
 import { formatAgo, formatDate } from "@/lib/format";
 
@@ -100,12 +100,8 @@ function KeysSettings() {
               (with <code className="font-mono text-text">MUSIC_INSECURE=1</code>)
             </>
           ) : null}
-          , or run{" "}
-          <code className="font-mono text-text">
-            music login --server {serverUrl}
-            {insecure ? " --insecure" : ""}
-          </code>{" "}
-          and paste it at the hidden prompt.
+          , or run <code className="font-mono text-text">{cliLoginBase(serverUrl)}</code> and paste
+          it at the hidden prompt.
           {insecure
             ? " This server is plain http:// on another machine, so the key travels unencrypted; the CLI asks you to confirm that with --insecure."
             : ""}

@@ -16,10 +16,16 @@ describe("needsInsecure", () => {
 describe("cliLoginCommand", () => {
   it("pipes the key in, adding --insecure where the CLI would refuse", () => {
     expect(cliLoginCommand("https://music.example.com/convex")).toBe(
-      `printf '%s' "$KEY" | music login --server https://music.example.com/convex --key-stdin`,
+      `printf '%s' "$KEY" | music login --server 'https://music.example.com/convex' --key-stdin`,
     );
     expect(cliLoginCommand("http://music.lan/convex")).toBe(
-      `printf '%s' "$KEY" | music login --server http://music.lan/convex --key-stdin --insecure`,
+      `printf '%s' "$KEY" | music login --server 'http://music.lan/convex' --insecure --key-stdin`,
+    );
+  });
+
+  it("quotes the server so a ?, &, or ' in it stays one word", () => {
+    expect(cliLoginCommand("https://music.example.com/convex?a=1&b=it's")).toBe(
+      `printf '%s' "$KEY" | music login --server 'https://music.example.com/convex?a=1&b=it'\\''s' --key-stdin`,
     );
   });
 });

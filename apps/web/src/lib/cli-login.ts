@@ -18,6 +18,13 @@ export const needsInsecure = (server: string): boolean => {
   return url.protocol === "http:" && !isLoopbackHost(url.hostname);
 };
 
+/** `value` as one shell word: single-quoted, with any single quote in it escaped. */
+const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
+
+/** `music login --server <server>`, quoted for a shell, with `--insecure` where the CLI needs it. */
+export const cliLoginBase = (server: string): string =>
+  `music login --server ${shellQuote(server)}${needsInsecure(server) ? " --insecure" : ""}`;
+
 /** The `music login` command Settings → Keys suggests for this server, piping the key in. */
 export const cliLoginCommand = (server: string): string =>
-  `printf '%s' "$KEY" | music login --server ${server} --key-stdin${needsInsecure(server) ? " --insecure" : ""}`;
+  `printf '%s' "$KEY" | ${cliLoginBase(server)} --key-stdin`;
