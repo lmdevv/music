@@ -71,7 +71,7 @@ export function DesktopNowPlaying({ track, view, onView }: DesktopNowPlayingProp
             <Artwork
               url={track.artUrl}
               seed={track.albumId}
-              className="aspect-square w-[min(--spacing(140),58vh)] rounded-lg shadow-now-playing-art"
+              className="aspect-square w-now-playing-cover rounded-lg shadow-now-playing-art"
             />
             <div className="flex flex-col items-center gap-0.5 text-center">
               <h2 className="font-sans text-xl/xl font-heavy tracking-tight text-text">
@@ -146,7 +146,7 @@ export function DesktopNowPlaying({ track, view, onView }: DesktopNowPlayingProp
             <Artwork
               url={track.artUrl}
               seed={track.albumId}
-              className="aspect-square w-[min(--spacing(130),42vw,62vh)] rounded-lg shadow-now-playing-art"
+              className="aspect-square w-now-playing-art rounded-lg shadow-now-playing-art"
             />
             <div className="flex min-w-0 grow flex-col gap-9">
               <div className="flex flex-col gap-2.5">

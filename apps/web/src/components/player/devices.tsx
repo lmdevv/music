@@ -166,7 +166,7 @@ export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
     <div
       role="menu"
       aria-label="Play on"
-      className="flex max-h-[min(--spacing(110),60dvh)] flex-col gap-0.5 overflow-y-auto overscroll-contain"
+      className="flex max-h-dvh-device-list flex-col gap-0.5 overflow-y-auto overscroll-contain"
     >
       {row("here", {
         name: "This browser",
