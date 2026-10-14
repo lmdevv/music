@@ -4,12 +4,12 @@ import { useRun } from "@music/sdk/react";
 import { Tooltip } from "@music/ui/components/tooltip";
 import { cn } from "@music/ui/lib/utils";
 import { XIcon } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { Artwork, PlayingBars } from "@/components/library/artwork";
 import { useUi } from "@/components/shell/ui-state";
-import { toastFailure, useAction } from "@/lib/action";
+import { useAction } from "@/lib/action";
 import { formatDuration } from "@/lib/format";
 
 import { perform } from "./controls";
@@ -59,7 +59,7 @@ function QueueRow({
   readonly index: number;
   readonly tone?: "plain" | "glass";
   readonly current?: boolean;
-  /** Removes the song from the queue; rows without it (the current song) have no remove button. */
+  /** Removes the song from the queue; a row without it has no remove button. */
   readonly onRemove?: () => void;
 }) {
   const player = usePlayer();
@@ -114,28 +114,34 @@ function QueueRow({
               {formatDuration(track.durationMs)}
             </span>
           ) : null}
-          <Tooltip label="Remove from queue">
-            <button
-              type="button"
-              aria-label={`Remove ${track.title} from the queue`}
-              data-queue-remove
-              onClick={() => {
-                onRemove?.();
-              }}
-              className={cn(
-                "relative flex size-7 shrink-0 items-center justify-center rounded-full opacity-0 outline-none group-hover/queue:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50",
-                glass
-                  ? "text-text/70 hover:bg-text/10"
-                  : "text-text-muted hover:bg-border hover:text-text",
-              )}
-            >
-              <XIcon className="size-4" />
-            </button>
-          </Tooltip>
+          {onRemove === undefined ? null : (
+            <Tooltip label="Remove from queue">
+              <button
+                type="button"
+                aria-label={`Remove ${track.title} from the queue`}
+                data-queue-remove
+                onClick={onRemove}
+                className={cn(
+                  "relative flex size-7 shrink-0 items-center justify-center rounded-full opacity-0 outline-none group-hover/queue:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50",
+                  glass
+                    ? "text-text/70 hover:bg-text/10"
+                    : "text-text-muted hover:bg-border hover:text-text",
+                )}
+              >
+                <XIcon className="size-4" />
+              </button>
+            </Tooltip>
+          )}
         </>
       )}
     </div>
   );
+}
+
+/** A removal that landed: the row's place in the list, and the list's length before it. */
+interface RemovedRow {
+  readonly position: number;
+  readonly lengthBefore: number;
 }
 
 /**
@@ -154,27 +160,32 @@ export function QueueList({
   readonly tone?: "plain" | "glass";
   readonly className?: string;
 }) {
-  // The player's removeFromQueue turns a failure into its error state and resolves, so the list
-  // runs the command itself to learn whether the removal landed.
-  const remove = useRun("queue.remove");
+  const player = usePlayer();
   const list = useRef<HTMLDivElement>(null);
-  const removedAt = useRef<number | null>(null);
-  // Rows remount when the queue changes (their keys carry the queue position), so focus is placed
-  // once the list itself has changed, not on every render.
-  const signature = next.map((entry) => entry.track.id).join(" ");
+  // Set once a removal has landed (a failure shows as the player error and sets nothing). Focus
+  // moves when the list has actually shrunk, since the queue can reach this view a render later.
+  const [removed, setRemoved] = useState<RemovedRow | null>(null);
+  const handled = useRef<RemovedRow | null>(null);
 
   useEffect(() => {
-    const position = removedAt.current;
     const element = list.current;
 
-    if (position === null || element === null) return;
+    if (removed === null || handled.current === removed || element === null) return;
 
-    removedAt.current = null;
+    if (next.length >= removed.lengthBefore) return;
+
+    handled.current = removed;
 
     const buttons = element.querySelectorAll<HTMLElement>("[data-queue-remove]");
 
-    (buttons[Math.min(position, buttons.length - 1)] ?? element).focus();
-  }, [signature]);
+    (buttons[Math.min(removed.position, buttons.length - 1)] ?? element).focus();
+  }, [removed, next.length]);
+
+  const removeAt = async (index: number, position: number): Promise<void> => {
+    const lengthBefore = next.length;
+
+    if (await player.removeFromQueue(index)) setRemoved({ position, lengthBefore });
+  };
 
   return (
     <div ref={list} tabIndex={-1} className={cn("outline-none", className)}>
@@ -186,14 +197,7 @@ export function QueueList({
               track={entry.track}
               index={entry.index}
               tone={tone}
-              onRemove={() => {
-                removedAt.current = position;
-                // A removal that fails leaves the queue as it was; focus must not jump later.
-                remove({ index: entry.index }).catch((cause: unknown) => {
-                  removedAt.current = null;
-                  toastFailure(cause);
-                });
-              }}
+              onRemove={() => void removeAt(entry.index, position)}
             />
           ))}
     </div>
