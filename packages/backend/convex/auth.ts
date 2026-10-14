@@ -2,6 +2,7 @@ import { ConvexCredentials } from "@convex-dev/auth/providers/ConvexCredentials"
 import { convexAuth, retrieveAccount } from "@convex-dev/auth/server";
 import { ConvexError } from "convex/values";
 import { Scrypt } from "lucia";
+import { Text } from "@music/commands/text";
 import { Result, Schema } from "effect";
 
 import { internal } from "./_generated/api";
@@ -12,7 +13,8 @@ import { SUSPENDED_MESSAGE } from "./lib/viewer";
 /** The provider ID stored on every password account; it must never change. */
 const PASSWORD = "password";
 
-const Email = Schema.Trimmed.check(Schema.isMinLength(3));
+/** Cleaned like any typed text: an account without a name shows the part before the `@`. */
+const Email = Text.check(Schema.isMinLength(3));
 
 /**
  * The password provider's flows. `signUp` and `signIn` match Convex Auth's `Password` provider;
@@ -23,7 +25,7 @@ const PasswordParams = Schema.Union([
     flow: Schema.Literal("signUp"),
     email: Email,
     password: Schema.String,
-    name: Schema.optionalKey(Schema.Trimmed),
+    name: Schema.optionalKey(Text.check(Schema.isMaxLength(120))),
     inviteCode: Schema.optionalKey(Schema.Trimmed),
   }),
   Schema.Struct({ flow: Schema.Literal("signIn"), email: Email, password: Schema.String }),

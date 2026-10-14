@@ -57,6 +57,7 @@ const useEntityOptions = (
   const invites = useRead("invites.list", entity === "invite" ? {} : "skip");
   const devices = useRead("devices.list", entity === "device" ? {} : "skip");
   const people = useRead("people.list", entity === "person" ? {} : "skip");
+  const directory = useRead("people.directory", entity === "sharee" ? {} : "skip");
 
   const artist = useRead(
     "artists.get",
@@ -176,6 +177,25 @@ const useEntityOptions = (
         value: item.itemId,
         label: item.track.title,
         detail: item.track.artist,
+      }));
+
+    case "queueItem":
+      return player.queue.map((entry, position) => ({
+        key: entry.itemId,
+        value: entry.itemId,
+        label: entry.title,
+        detail:
+          position === player.index
+            ? "Playing now"
+            : `${entry.artist}${entry.autoplay ? " · Autoplay" : ""}`,
+      }));
+
+    case "sharee":
+      return (directory ?? []).map((person) => ({
+        key: person.id,
+        value: person.id,
+        label: person.name,
+        detail: roleLabel(person.role),
       }));
 
     case "library":

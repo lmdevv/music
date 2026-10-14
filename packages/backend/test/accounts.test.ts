@@ -855,3 +855,37 @@ describe("library access", () => {
     expect(found.tracks).toEqual([]);
   });
 });
+
+describe("names given at sign-up", () => {
+  it("lose their control characters", async () => {
+    const { backend, owner } = await household();
+    const { code: inviteCode } = await owner.music.run("invites.create", {});
+
+    const joined = await passwordFlow(backend, {
+      flow: "signUp",
+      email: "named@music.test",
+      password: PASSWORD,
+      name: "\u001b[31mMallory\u009b0m\u0007",
+      inviteCode,
+    });
+
+    expect((await joined.music.read("account.me", {})).name).toBe("[31mMallory0m");
+  });
+
+  it("lose them from the address too, which names an account given no name", async () => {
+    const { backend, owner } = await household();
+    const { code: inviteCode } = await owner.music.run("invites.create", {});
+
+    const joined = await passwordFlow(backend, {
+      flow: "signUp",
+      email: "\u001b]0;x\u0007evil@music.test",
+      password: PASSWORD,
+      inviteCode,
+    });
+
+    expect(await joined.music.read("account.me", {})).toMatchObject({
+      email: "]0;xevil@music.test",
+      name: "]0;xevil",
+    });
+  });
+});

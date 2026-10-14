@@ -3,7 +3,11 @@
  * media service functions, against convex-test.
  */
 import { DeviceId } from "@music/commands/ids";
+import type { CommandArgsEncoded, CommandResult, MutationName } from "@music/commands/registry";
+import { decodeCommandResult } from "@music/sdk/client";
 import { describe, expect, it } from "vitest";
+
+import { api } from "../convex/_generated/api";
 
 import {
   allTracks,
@@ -15,6 +19,8 @@ import {
   trackIds,
   upsertFiles,
 } from "./backend";
+import type { User } from "./backend";
+import { failure, failureCode } from "./harness";
 
 const DEVICE = DeviceId.make("test-device");
 
@@ -135,7 +141,8 @@ describe("playlists", () => {
       (await member.music.read("playlists.get", { playlistId })).playlist.artUrls,
     ).toHaveLength(1);
 
-    // The owner makes the library private: the member keeps the playlist but sees nothing of it.
+    // The owner makes the library private: the member keeps the playlist, and the song stays in
+    // it as an unavailable row, without its cover.
     await backend.run(async (ctx) => {
       const id = ctx.db.normalizeId("libraries", libraryId);
 
@@ -145,7 +152,13 @@ describe("playlists", () => {
     const [listed] = await member.music.read("playlists.list", {});
 
     expect(listed?.artUrls).toEqual([]);
-    expect((await member.music.read("playlists.get", { playlistId })).items).toEqual([]);
+    expect(
+      (await member.music.read("playlists.get", { playlistId })).items.map((item) => [
+        item.available,
+        item.reason,
+        item.track.artUrl,
+      ]),
+    ).toEqual([[false, "no_access", null]]);
   });
 });
 
@@ -200,7 +213,9 @@ describe("deleting a library", () => {
       playlistItems: (await ctx.db.query("playlistItems").collect()).length,
       likes: (await ctx.db.query("likes").collect()).length,
       history: (await ctx.db.query("history").collect()).length,
-      queues: (await ctx.db.query("playbackQueues").collect()).map((row) => row.queue),
+      queues: (await ctx.db.query("playbackQueues").collect()).map((row) =>
+        (row.items ?? []).map((item) => item.trackId),
+      ),
     }));
 
     expect(leftovers).toEqual({
@@ -269,4 +284,68 @@ describe("deleting a library", () => {
       expect(left).toEqual({ tracks: 0, albums: 0, artists: 0 });
     },
   );
+});
+
+/** Runs a command straight through the dispatcher, past the SDK, which cleans text as it encodes. */
+const raw = async <Name extends MutationName>(
+  user: User,
+  name: Name,
+  args: CommandArgsEncoded<Name>,
+): Promise<CommandResult<Name>> =>
+  decodeCommandResult(name, await user.as.mutation(api.commands.run, { name, args }));
+
+describe("typed names and descriptions", () => {
+  it("lose their control characters on every path that saves one", async () => {
+    const backend = makeBackend();
+    const owner = await signUp(backend, "owner");
+
+    const { playlistId } = await raw(owner, "playlists.create", {
+      name: "\u001b[2JRoad\u0000 trip",
+      description: "Line one\nline two\u009b",
+    });
+
+    await raw(owner, "libraries.create", { name: "Vinyl\u0007 rips", path: "/music/vinyl" });
+    await raw(owner, "account.rename", { name: "\u001b]0;Owner\u0007" });
+
+    const { playlist } = await owner.music.read("playlists.get", { playlistId });
+    const [library] = await owner.music.read("libraries.list", {});
+
+    expect([playlist.name, playlist.description]).toEqual(["[2JRoad trip", "Line one line two"]);
+    expect(library?.name).toBe("Vinyl rips");
+    expect((await owner.music.read("account.me", {})).name).toBe("]0;Owner");
+
+    await raw(owner, "playlists.update", { playlistId, description: "\u0085\u001b\t" });
+
+    expect(
+      (await owner.music.read("playlists.get", { playlistId })).playlist.description,
+    ).toBeNull();
+  });
+
+  it("refuse a library folder path with a control character, without repeating it", async () => {
+    const backend = makeBackend();
+    const owner = await signUp(backend, "owner");
+
+    // Alone, and with the other checks failing too: no leading slash, or a trailing space.
+    const outcomes = await Promise.all(
+      ["/music/\u001b]0;pwned\u0007", "music/\u001b]0;pwned\u0007", "/music/\u001b]0;pwned "].map(
+        (path) => failure(raw(owner, "libraries.create", { name: "Vinyl", path })),
+      ),
+    );
+
+    for (const outcome of outcomes) {
+      expect(outcome).toMatchObject({ code: "invalid_args" });
+      expect(JSON.stringify(outcome)).not.toContain("pwned");
+    }
+
+    expect(await owner.music.read("libraries.list", {})).toEqual([]);
+  });
+
+  it("refuse a name that is only control characters", async () => {
+    const backend = makeBackend();
+    const owner = await signUp(backend, "owner");
+
+    expect(await failureCode(raw(owner, "playlists.create", { name: "\u001b\u0007" }))).toBe(
+      "invalid_args",
+    );
+  });
 });

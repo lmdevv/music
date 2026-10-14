@@ -16,6 +16,7 @@ import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { randomToken, sha256Hex } from "../lib/crypto";
 import { fail } from "../lib/errors";
 import { findSession } from "../lib/playback";
+import { contributorOf } from "../lib/present";
 import { endUserSessions } from "../lib/sessions";
 import { listensBeyond, loadPerson, roleOf } from "../lib/viewer";
 import type { Viewer } from "../lib/viewer";
@@ -182,6 +183,17 @@ export const peopleQueries = {
     const users = await ctx.db.query("users").collect();
 
     return Promise.all(users.map((user) => presentPerson(ctx, user)));
+  },
+
+  // Names and roles only: sharing a playlist with someone should not show members each other's
+  // email addresses.
+  "people.directory": async (ctx, viewer) => {
+    const users = await ctx.db.query("users").collect();
+
+    return users
+      .filter((user) => user._id !== viewer.id && user.suspendedAt === undefined)
+      .map((user) => ({ id: user._id, name: contributorOf(user).name, role: roleOf(user) }))
+      .toSorted((left, right) => left.name.localeCompare(right.name));
   },
 } satisfies Partial<QueryHandlers>;
 

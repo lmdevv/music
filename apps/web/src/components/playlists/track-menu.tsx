@@ -1,7 +1,7 @@
 import type { TrackId } from "@music/commands/ids";
 import type { Playlist, Track } from "@music/commands/models";
 import { usePlayer } from "@music/player/react";
-import { useRead, useRun } from "@music/sdk/react";
+import { useRun } from "@music/sdk/react";
 import { Dialog, DialogContent, DialogFooter, DialogClose } from "@music/ui/components/dialog";
 import {
   DropdownMenu,
@@ -26,7 +26,9 @@ import { useUi } from "@/components/shell/ui-state";
 import { toastFailure } from "@/lib/action";
 import { formatCount, formatDuration, formatQuality } from "@/lib/format";
 import { isTyping } from "@/lib/keys";
+import { useCopyLink } from "@/lib/use-copy-link";
 import { useLike } from "@/lib/use-like";
+import { useWritablePlaylists } from "@/lib/use-writable-playlists";
 
 /** Queue actions that report their result as a toast. */
 export interface QueueActions {
@@ -72,7 +74,7 @@ export const useAddToPlaylist = (): ((
 };
 
 function PlaylistSubmenu({ tracks }: { readonly tracks: ReadonlyArray<Track> }) {
-  const playlists = useRead("playlists.list", {});
+  const playlists = useWritablePlaylists();
   const { openNewPlaylist } = useUi();
   const addToPlaylist = useAddToPlaylist();
   const [filter, setFilter] = useState("");
@@ -216,6 +218,7 @@ export function TrackMenu({
   const navigate = useNavigate();
   const { playNext, addToQueue } = useQueueActions();
   const { liked, toggle } = useLike(track);
+  const copyLink = useCopyLink();
   const [info, setInfo] = useState(false);
   const [open, setOpen] = useState(false);
 
@@ -291,6 +294,9 @@ export function TrackMenu({
             }
           >
             Go to artist
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => copyLink({ kind: "track", id: track.id })}>
+            Copy link
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setInfo(true)}>File info</DropdownMenuItem>
         </DropdownMenuContent>
