@@ -171,14 +171,15 @@ export function QueueList({
     if (removed === null || handled.current === removed || element === null) return;
 
     const active = document.activeElement;
-    // Inside Now Playing, the dialog takes focus when the removed row's button unmounts, so focus
-    // anywhere in the dialog around the list is still the user's place in the queue.
-    const area = element.closest("[role=dialog]") ?? element;
+    // Inside Now Playing the dialog itself takes focus when the removed row's button unmounts, so
+    // focus on that popup is free too; focus on any other control in it is the user's choice.
+    const popup = element.closest("[role=dialog]");
 
     const move = focusMove(removed, {
       now: Date.now(),
       trackIds: signature.length === 0 ? [] : signature.split(" "),
-      focusFree: active === null || active === document.body || area.contains(active),
+      focusFree:
+        active === null || active === document.body || active === popup || element.contains(active),
     });
 
     if (move === "wait") return;
@@ -192,11 +193,23 @@ export function QueueList({
     (buttons[Math.min(removed.position, buttons.length - 1)] ?? element).focus();
   }, [removed, signature]);
 
+  // One removal at a time: rows keep their old queue positions until the first one lands, so a
+  // second click (a double-click, or a quick click on another row) would remove the wrong song.
+  const removing = useRef(false);
+
   const removeAt = async (index: number, position: number, trackId: string): Promise<void> => {
+    if (removing.current) return;
+
+    removing.current = true;
+
     const countBefore = trackIds.filter((id) => id === trackId).length;
 
-    if (await player.removeFromQueue(index)) {
-      setRemoved({ position, trackId, countBefore, landedAt: Date.now() });
+    try {
+      if (await player.removeFromQueue(index)) {
+        setRemoved({ position, trackId, countBefore, landedAt: Date.now() });
+      }
+    } finally {
+      removing.current = false;
     }
   };
 
