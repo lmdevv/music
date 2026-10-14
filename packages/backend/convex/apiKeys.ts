@@ -3,7 +3,7 @@ import { v } from "convex/values";
 
 import { internalMutation } from "./_generated/server";
 import { fail } from "./lib/errors";
-import { endSession } from "./lib/sessions";
+import { endSession, isStale } from "./lib/sessions";
 import { roleOf, SUSPENDED_MESSAGE } from "./lib/viewer";
 
 /** Matches Convex Auth's default session lifetime, which `auth.ts` does not change. */
@@ -34,7 +34,7 @@ export const redeem = internalMutation({
     const now = Date.now();
     const current = key.sessionId === undefined ? null : await ctx.db.get(key.sessionId);
 
-    if (current !== null && current.expirationTime > now) {
+    if (current !== null && current.expirationTime > now && !isStale(current, user)) {
       await ctx.db.patch(key._id, { lastUsedAt: now });
 
       return { userId: key.userId, sessionId: current._id };

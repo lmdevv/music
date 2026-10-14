@@ -42,6 +42,12 @@ export default defineSchema({
     role: v.optional(role),
     /** Set while the account is suspended: it cannot sign in, and its keys stop working. */
     suspendedAt: v.optional(v.number()),
+    /**
+     * Sessions created before this time no longer count, whatever their tokens say. Suspension,
+     * unsuspension, and a password reset move it forward, which ends every session at once
+     * however many there are; the rows themselves are purged in batches afterwards.
+     */
+    sessionsValidAfter: v.optional(v.number()),
     /** Carried from the sign-up form to `createOrUpdateUser`; never stored on a created user. */
     inviteCode: v.optional(v.string()),
   })

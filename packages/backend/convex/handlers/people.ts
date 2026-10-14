@@ -233,6 +233,9 @@ export const peopleMutations = {
   "people.unsuspend": async (ctx, viewer, args) => {
     const user = await managedPerson(ctx, viewer, args.userId);
 
+    // A sign-in that raced the suspension made a session after it ended the others; it must not
+    // come back to life with the account.
+    await endUserSessions(ctx, user._id);
     await ctx.db.patch(user._id, { suspendedAt: undefined });
 
     return ok;

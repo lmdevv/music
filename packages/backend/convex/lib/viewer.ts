@@ -6,6 +6,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx } from "../_generated/server";
 import { fail } from "./errors";
 import { tableId } from "./ids";
+import { isStale } from "./sessions";
 
 export type ReadCtx = Pick<QueryCtx, "db" | "auth">;
 
@@ -59,6 +60,10 @@ export const loadViewer = async (ctx: ReadCtx): Promise<Viewer> => {
   const user = await ctx.db.get(userId);
 
   if (user === null) return fail("unauthenticated", "This account no longer exists");
+
+  if (isStale(session, user)) {
+    return fail("unauthenticated", "This session has ended; sign in again");
+  }
 
   // Suspending ends every session, so this only catches a sign-in racing the suspension.
   if (user.suspendedAt !== undefined) return fail("unauthenticated", SUSPENDED_MESSAGE);

@@ -1164,6 +1164,10 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
 
     await adminB.music.run("people.unsuspend", { userId });
 
+    // Unsuspending lets them sign in again; it does not bring old sessions back.
+    await expectReadFailure(person, "account.me", {}, "unauthenticated");
+    await expectReadFailure(cli, "account.me", {}, "unauthenticated");
+
     const back = await passwordSignIn(server, email, PASSWORD);
 
     expect((await back.music.read("account.me", {})).id).toBe(userId);
