@@ -135,6 +135,9 @@ const password = ConvexCredentials<DataModel>({
       throw cause;
     }
 
+    // Only now that the old password no longer works can no new session slip past this.
+    await ctx.runMutation(internal.passwordResets.finish, { userId });
+
     return { userId };
   },
   crypto: {

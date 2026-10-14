@@ -13,9 +13,10 @@ import { endUserSessions } from "./lib/sessions";
 import { SUSPENDED_MESSAGE } from "./lib/viewer";
 
 /**
- * Uses up the reset link with this token hash and ends every session its person has. Returns the
- * person and the password account to set the new password on, or fails saying why the link does
- * not work. Claiming before the password changes means a link works exactly once.
+ * Uses up the reset link with this token hash. Returns the person and the password account to set
+ * the new password on, or fails saying why the link does not work. Claiming before the password
+ * changes means a link works exactly once; `release` undoes the claim if the change fails, and
+ * `finish` ends the old sessions once it succeeds.
  */
 export const redeem = internalMutation({
   args: { hash: v.string() },
@@ -46,9 +47,20 @@ export const redeem = internalMutation({
     if (account === null) return fail("invalid_args", "This account has no password to reset");
 
     await ctx.db.patch(reset._id, { usedAt: Date.now() });
-    await endUserSessions(ctx, user._id);
 
     return { userId: user._id, accountId: account.providerAccountId };
+  },
+});
+
+/**
+ * Ends every session of a person whose password was just reset. It runs after the new password
+ * is stored, so a sign-in with the old password that raced the reset is ended too; the session
+ * the reset itself opens is created after this.
+ */
+export const finish = internalMutation({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }) => {
+    await endUserSessions(ctx, userId);
   },
 });
 
