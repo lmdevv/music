@@ -1,6 +1,6 @@
 import { getAuthSessionId, getAuthUserId } from "@convex-dev/auth/server";
 import type { Role } from "@music/commands/models";
-import { can } from "@music/commands/permissions";
+import { canManageLibrary } from "@music/commands/permissions";
 
 import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx } from "../_generated/server";
@@ -135,11 +135,13 @@ export const canRead = (viewer: Viewer, libraryId: Id<"libraries">): boolean =>
   viewer.libraryIds.has(libraryId);
 
 /**
- * Checks that the viewer can manage a library: admins rename, rescan, and remove every library,
- * and see that it exists, whether or not they may listen to it. Who may listen is the library
- * owner's alone to change (`canChangeLibraryAccess`).
+ * Checks that the viewer can rename, rescan, or remove a library (`canManageLibrary`): the server's
+ * owner every library, an admin the ones they can listen to. Admins see that the others exist,
+ * without their folder paths. Who may listen is the library owner's alone to change
+ * (`canChangeLibraryAccess`).
  */
-export const canManage = (viewer: Viewer): boolean => can(viewer.role, "admin");
+export const canManage = (viewer: Viewer, library: Doc<"libraries">): boolean =>
+  canManageLibrary(viewer.role, canRead(viewer, library._id));
 
 /** A person by wire ID, or a `not_found` failure. */
 export const loadPerson = async (ctx: ReadCtx, id: string): Promise<Doc<"users">> =>

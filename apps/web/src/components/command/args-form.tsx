@@ -179,12 +179,12 @@ const useEntityOptions = (
       }));
 
     case "library":
-      return (libraries ?? []).map((library) => ({
-        key: library.id,
-        value: library.id,
-        label: library.path,
-        detail: library.name,
-      }));
+      // Every library command needs a library you manage; the others have no folder to show.
+      return (libraries ?? []).flatMap((library) =>
+        library.path === null
+          ? []
+          : [{ key: library.id, value: library.id, label: library.path, detail: library.name }],
+      );
 
     case "job":
       return (jobs ?? [])

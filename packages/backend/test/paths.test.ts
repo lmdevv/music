@@ -89,7 +89,7 @@ describe("libraries.create", () => {
       admin.music.run("libraries.create", { name: "New", path: "/srv/secret/x" }),
     ).rejects.toThrow(/inside the folder of another library/u);
 
-    // Admins manage every folder, so they see the other admin's private one listed, unreadable.
+    // The other admin's private library is listed, unreadable and without its folder.
     expect(
       (await admin.music.read("libraries.list", {})).map((library) => [
         library.path,
@@ -97,7 +97,7 @@ describe("libraries.create", () => {
       ]),
     ).toEqual([
       ["/srv/music", true],
-      ["/srv/secret", false],
+      [null, false],
       ["/srv/music2", true],
     ]);
   });

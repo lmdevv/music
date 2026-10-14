@@ -317,14 +317,17 @@ export type LibraryVisibility = typeof LibraryVisibility.Type;
 export const Library = Schema.Struct({
   id: LibraryId,
   name: Schema.String,
-  path: Schema.String,
+  /** The folder on the server; null for a library you see but can't manage. */
+  path: Schema.NullOr(Schema.String),
+  /** Whether you can rename, rescan, or remove it (`canManageLibrary`). */
+  manageable: Schema.Boolean,
   visibility: LibraryVisibility,
   ownerId: UserId,
   /** Null when the owner's account is gone or has no name. */
   ownerName: Schema.NullOr(Schema.String),
   /**
-   * Whether you can listen to it. Admins also see the shared and restricted libraries they
-   * manage but were not added to; those are `false`.
+   * Whether you can listen to it. Admins also see that libraries they can't hear exist; those are
+   * `false`, with no `path`, and only the server's owner can manage them.
    */
   readable: Schema.Boolean,
   trackCount: Count,

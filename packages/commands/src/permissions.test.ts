@@ -5,6 +5,7 @@ import {
   assignableRoles,
   can,
   canManagePerson,
+  canManageLibrary,
   canTransferOwnership,
   capabilityLabel,
 } from "./permissions";
@@ -50,6 +51,13 @@ describe("permissions", () => {
     expect(canManagePerson(admin, admin)).toBe(false);
     expect(canManagePerson(owner, owner)).toBe(false);
     expect(canManagePerson(member, { id: "g", role: "guest" })).toBe(false);
+  });
+
+  it("lets admins manage only libraries they hear, and the owner every one", () => {
+    expect(canManageLibrary("owner", false)).toBe(true);
+    expect(canManageLibrary("admin", true)).toBe(true);
+    expect(canManageLibrary("admin", false)).toBe(false);
+    expect(canManageLibrary("member", true)).toBe(false);
   });
 
   it("transfers ownership only from the owner to an active admin", () => {

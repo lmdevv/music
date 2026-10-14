@@ -55,8 +55,10 @@ CLI, the web app, and this skill always agree.
   `admin`, or `owner`. Other callers get exit code 3 and `forbidden`.
 - Library visibility: `shared` is everyone but guests, `restricted` is only the people added with
   `music libraries grant`, and `private` is only the library's owner. Guests hear a shared library
-  once they are added to it. Only a library's own owner changes its visibility or who is added;
-  other admins can rename, rescan, and remove it (`forbidden` otherwise).
+  once they are added to it. Only a library's own owner changes its visibility or who is added
+  (`forbidden` otherwise). Admins rename, rescan, and remove libraries they can listen to, and the
+  server's owner every library; `music libraries list` shows other libraries with `path: null` and
+  `manageable: false`, and commands on them answer `not_found`.
 
 ## Recipes
 

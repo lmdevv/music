@@ -8,7 +8,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import { internal } from "../convex/_generated/api";
 import { enableAuth, joinWithPassword, passwordFlow } from "./auth";
-import { makeBackend, signUp } from "./backend";
+import { makeBackend, signUp, upsertFiles } from "./backend";
 import type { Backend, User } from "./backend";
 import { failure, failureCode } from "./harness";
 
@@ -164,11 +164,19 @@ describe("password resets around library access", () => {
 
 describe("password sign-up and sign-in", () => {
   it("refuses a sign-up for an email that already has an account, right password or not", async () => {
-    const { backend } = await household();
+    const { backend, owner } = await household();
+    const { code: inviteCode } = await owner.music.run("invites.create", {});
 
     const attempts = await Promise.all(
       [PASSWORD, "a-wrong-password"].map((password) =>
-        failure(passwordFlow(backend, { flow: "signUp", email: "member@music.test", password })),
+        failure(
+          passwordFlow(backend, {
+            flow: "signUp",
+            email: "member@music.test",
+            password,
+            inviteCode,
+          }),
+        ),
       ),
     );
 
@@ -177,14 +185,43 @@ describe("password sign-up and sign-in", () => {
 
   it("gives a suspended account no tokens through sign-up either", async () => {
     const { backend, owner, member } = await household();
+    const { code: inviteCode } = await owner.music.run("invites.create", {});
 
     await owner.music.run("people.suspend", { userId: member.userId });
 
     expect(
       await failure(
-        passwordFlow(backend, { flow: "signUp", email: "member@music.test", password: PASSWORD }),
+        passwordFlow(backend, {
+          flow: "signUp",
+          email: "member@music.test",
+          password: PASSWORD,
+          inviteCode,
+        }),
       ),
     ).toEqual(INVALID);
+  });
+
+  it("tells nobody without a valid invite whether an email has an account", async () => {
+    const { backend } = await household();
+
+    const signUpAs = (email: string, inviteCode?: string) =>
+      failureCode(
+        passwordFlow(
+          backend,
+          inviteCode === undefined
+            ? { flow: "signUp", email, password: PASSWORD }
+            : { flow: "signUp", email, password: PASSWORD, inviteCode },
+        ),
+      );
+
+    const codes = await Promise.all([
+      signUpAs("member@music.test"),
+      signUpAs("nobody@music.test"),
+      signUpAs("member@music.test", "not-an-invite"),
+      signUpAs("nobody@music.test", "not-an-invite"),
+    ]);
+
+    expect(codes).toEqual(["signup_closed", "signup_closed", "signup_closed", "signup_closed"]);
   });
 
   it("says the same for an unknown email and a wrong password", async () => {
@@ -228,7 +265,7 @@ describe("password sign-up and sign-in", () => {
 });
 
 describe("library access", () => {
-  it("lets only a library's own owner change who listens; other admins rename and rescan", async () => {
+  it("lets only a library's own owner change who listens", async () => {
     const { owner, admin, member } = await household();
 
     const { libraryId } = await owner.music.run("libraries.create", {
@@ -241,7 +278,7 @@ describe("library access", () => {
       (library) => library.id === libraryId,
     );
 
-    expect(asAdmin).toMatchObject({ readable: false });
+    expect(asAdmin).toMatchObject({ readable: false, manageable: false, path: null });
 
     const refused = await Promise.all(
       [
@@ -252,16 +289,97 @@ describe("library access", () => {
       ].map(failureCode),
     );
 
-    expect(refused).toEqual(["forbidden", "forbidden", "forbidden", "forbidden"]);
-
-    expect(
-      await failureCode(admin.music.run("libraries.update", { libraryId, name: "Renamed" })),
-    ).toBe("succeeded");
-    expect(await failureCode(admin.music.run("libraries.scan", { libraryId }))).toBe("succeeded");
+    // An admin who can't hear the library can't manage it at all, so it is not found.
+    expect(refused).toEqual(["not_found", "not_found", "not_found", "not_found"]);
 
     await owner.music.run("libraries.grant", { libraryId, userId: member.userId });
     expect((await member.music.read("libraries.list", {})).map((library) => library.id)).toContain(
       libraryId,
     );
+  });
+  it("lets an admin manage only libraries they can hear; the owner manages every one", async () => {
+    const { owner, admin } = await household();
+
+    const own = await admin.music.run("libraries.create", {
+      name: "Admin's",
+      path: "/music/admins",
+      visibility: "private",
+    });
+
+    const theirs = await owner.music.run("libraries.create", {
+      name: "Owner's",
+      path: "/music/owners",
+      visibility: "private",
+    });
+
+    // The admin's own: listed with its folder, and theirs to manage.
+    expect(
+      (await admin.music.read("libraries.list", {})).find(
+        (library) => library.id === own.libraryId,
+      ),
+    ).toMatchObject({ path: "/music/admins", manageable: true });
+    expect(
+      await failureCode(
+        admin.music.run("libraries.update", { libraryId: own.libraryId, name: "A" }),
+      ),
+    ).toBe("succeeded");
+
+    // The owner's private one: no folder, and every management action is not found.
+    const unheard = { libraryId: theirs.libraryId };
+
+    const refused = await Promise.all(
+      [
+        admin.music.run("libraries.scan", unheard),
+        admin.music.run("libraries.update", { ...unheard, name: "Mine now" }),
+        admin.music.run("libraries.delete", unheard),
+        admin.music.read("libraries.people", unheard),
+        admin.music.run("jobs.cancel", { jobId: theirs.jobId }),
+      ].map(failureCode),
+    );
+
+    expect(refused).toEqual(["not_found", "not_found", "not_found", "not_found", "not_found"]);
+    expect(await failureCode(admin.music.read("jobs.get", { jobId: theirs.jobId }))).toBe(
+      "not_found",
+    );
+
+    // The server's owner manages every library, the admin's private one included.
+    expect(await failureCode(owner.music.run("libraries.scan", { libraryId: own.libraryId }))).toBe(
+      "succeeded",
+    );
+    expect(
+      (await owner.music.read("libraries.list", {})).find(
+        (library) => library.id === own.libraryId,
+      ),
+    ).toMatchObject({ path: "/music/admins", manageable: true, readable: false });
+  });
+
+  it("stops the delete-and-re-add takeover of a library the admin can't hear", async () => {
+    const { backend, owner, admin } = await household();
+
+    const { libraryId } = await owner.music.run("libraries.create", {
+      name: "Diary",
+      path: "/music/diary",
+      visibility: "private",
+    });
+
+    await upsertFiles(backend, libraryId, [{ path: "diary.flac", title: "Private Song" }]);
+
+    const listed = (await admin.music.read("libraries.list", {})).find(
+      (library) => library.id === libraryId,
+    );
+
+    // 1. The folder isn't shown. 2. Deleting it fails. 3. Adding its folder again fails too.
+    expect(listed?.path).toBeNull();
+    expect(await failureCode(admin.music.run("libraries.delete", { libraryId }))).toBe("not_found");
+    expect(
+      await failureCode(
+        admin.music.run("libraries.create", { name: "Mine", path: "/music/diary" }),
+      ),
+    ).toBe("conflict");
+
+    // 4. So nothing of it becomes searchable to the admin.
+    const found = await admin.music.read("search", { query: "Private Song", limit: 10 });
+
+    expect(found.tracks).toEqual([]);
   });
 });

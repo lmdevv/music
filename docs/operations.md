@@ -196,9 +196,10 @@ Every service runs as its own unprivileged user; only the start-up script runs a
   and keep their own playlists, likes, history, and API keys. `guest`s only hear the libraries
   they were added to and have no API keys.
 - **Libraries.** `shared` is everyone but guests, `restricted` is only the people added, and
-  `private` is only the library's owner. Admins can rename, rescan, and remove any library and see
-  that it exists, but only a library's own owner changes who listens to it. When someone is
-  removed, their libraries move to the server's owner.
+  `private` is only the library's owner. Admins rename, rescan, and remove the libraries they can
+  listen to; the server's owner manages every library. Admins see that the other libraries exist
+  (name, owner, visibility, song count) but not their folders. Only a library's own owner changes
+  who listens to it. When someone is removed, their libraries move to the server's owner.
 - **Suspend and remove** end the person's sessions and API key sign-ins at once.
 - **Password reset without email.** An admin makes a one-time link in Settings → People (or
   `music people reset <user-id>`); it lasts 24 hours, and stops working if its maker loses the
@@ -213,6 +214,12 @@ Every service runs as its own unprivileged user; only the start-up script runs a
 
   Open `https://<your host>` + the `path` it prints.
 
+- **Known limit: sign-in rate limit.** After 10 wrong passwords an existing account answers
+  "Too many failed sign-ins" for a while; an email with no account never does. Someone who tries
+  more than 10 passwords can tell the two apart.
+- **Known limit: folder paths.** Adding a library refuses a folder that is, is inside, or contains
+  another library's folder (so no files are indexed twice), naming a library you can't hear only
+  as "another library". An admin who guesses folder paths can learn that one is taken.
 - **Known limit: signed stream URLs.** A stream or artwork URL is signed for whoever asked for it
   and works without a session until it expires: up to 6 hours for streams (artwork URLs follow a
   weekly schedule). After someone is suspended, removed, or loses access to a library, URLs they

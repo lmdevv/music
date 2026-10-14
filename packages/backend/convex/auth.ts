@@ -122,10 +122,14 @@ const password = ConvexCredentials<DataModel>({
 
       // Convex Auth's `createAccount` signs in an existing account when the password matches,
       // without the sign-in rate limit: sign-up would be an unlimited password oracle, and a way
-      // around suspension. An existing email is refused like any failed sign-in.
-      if (await ctx.runQuery(internal.users.hasPasswordAccount, { email })) {
-        return invalidCredentials();
-      }
+      // around suspension. So an existing email is refused like any failed sign-in, but only
+      // after the invite checks pass, so that without a valid invite every email reads alike.
+      const check = await ctx.runQuery(internal.users.checkSignUp, {
+        email,
+        inviteCode: inviteCode ?? null,
+      });
+
+      if (check.accountExists) return invalidCredentials();
 
       const { user } = await createAccount(ctx, {
         provider: PASSWORD,

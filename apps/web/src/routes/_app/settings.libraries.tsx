@@ -1,6 +1,6 @@
 import type { UserId } from "@music/commands/ids";
-import type { Job, Library, LibraryVisibility } from "@music/commands/models";
-import { can, roleLabel } from "@music/commands/permissions";
+import type { Job, Library, LibraryVisibility, User } from "@music/commands/models";
+import { can, canRemoveLibrary, roleLabel } from "@music/commands/permissions";
 import { useRead, useRun } from "@music/sdk/react";
 import { Button } from "@music/ui/components/button";
 import { Chip } from "@music/ui/components/chip";
@@ -40,10 +40,10 @@ function LibrariesSettings() {
 
   if (!can(me.role, "admin")) return <AdminOnly />;
 
-  return <Libraries myId={me.id} />;
+  return <Libraries me={me} />;
 }
 
-function Libraries({ myId }: { readonly myId: UserId }) {
+function Libraries({ me }: { readonly me: User }) {
   const libraries = useRead("libraries.list", {});
   const jobs = useRead("jobs.list", {});
   const { add } = Route.useSearch();
@@ -83,7 +83,7 @@ function Libraries({ myId }: { readonly myId: UserId }) {
             <LibraryCard
               key={library.id}
               library={library}
-              myId={myId}
+              me={me}
               // Jobs come newest first, so this is the folder's latest scan.
               latest={(jobs ?? []).find((job) => job.libraryId === library.id)}
             />
@@ -125,11 +125,11 @@ function Stat({
 
 function LibraryCard({
   library,
-  myId,
+  me,
   latest,
 }: {
   readonly library: Library;
-  readonly myId: UserId;
+  readonly me: User;
   /** The folder's most recent scan job, if any. */
   readonly latest: Job | undefined;
 }) {
@@ -140,10 +140,13 @@ function LibraryCard({
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState<"name" | "access" | null>(null);
   const busy = job !== undefined || library.scanning;
+  const myId = me.id;
   const owner = library.ownerId === myId ? "you" : (library.ownerName ?? "its owner");
+  // Removing a library frees its folder, so only its owner or the server's owner may.
+  const removable = canRemoveLibrary(me, library);
 
   const [rescan, rescanning] = useAction(() => scan({ libraryId: library.id }), {
-    success: () => `Rescanning ${library.path}`,
+    success: () => `Rescanning ${label}`,
   });
 
   const [removeLibrary, removing] = useAction(
@@ -151,28 +154,39 @@ function LibraryCard({
       await remove({ libraryId: library.id });
       setConfirming(false);
     },
-    { success: () => `Removed ${library.path} from the index` },
+    { success: () => `Removed ${label} from the index` },
   );
 
   const percent = job === undefined ? null : jobPercent(job);
+  // Only a library's managers see its folder; everyone else knows it by name.
+  const label = library.path ?? library.name;
 
   return (
     <section
-      aria-label={library.path}
+      aria-label={label}
       className="flex flex-col gap-3.5 rounded-lg border border-border p-5"
     >
       <div className="flex flex-wrap items-center gap-3">
         <FolderIcon aria-hidden className="size-5 text-text" />
         <span className="flex min-w-0 grow basis-40 flex-col gap-px">
-          <span className="truncate font-mono text-md/base text-text">{library.path}</span>
+          <span
+            className={cn(
+              "truncate text-md/base text-text",
+              library.path === null ? "font-sans font-semibold" : "font-mono",
+            )}
+          >
+            {label}
+          </span>
           <span className="truncate font-sans text-sm/xs text-text-muted">
-            {library.name}
-            {library.ownerId === myId ? "" : ` · added by ${owner}`}
+            {library.path === null ? "" : library.name}
+            {library.ownerId === myId
+              ? ""
+              : `${library.path === null ? "" : " · "}added by ${owner}`}
           </span>
         </span>
         <button
           type="button"
-          aria-label={`Who can listen to ${library.path}: ${visibilityLabel(library.visibility, owner)}`}
+          aria-label={`Who can listen to ${label}: ${visibilityLabel(library.visibility, owner)}`}
           onClick={() => setEditing("access")}
           className={cn(
             "cursor-pointer rounded-full px-2.5 py-1 font-sans text-sm/xs font-medium text-text outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
@@ -181,39 +195,52 @@ function LibraryCard({
         >
           {visibilityLabel(library.visibility, owner)}
         </button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="px-2 text-text"
-          disabled={busy}
-          pending={rescanning}
-          onClick={() => void rescan()}
-        >
-          {busy ? "Scanning…" : "Rescan"}
-        </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            aria-label={`More actions for ${library.path}`}
-            className="flex size-8 items-center justify-center rounded-full text-text-muted hover:bg-surface hover:text-text"
+        {library.manageable ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="px-2 text-text"
+            disabled={busy}
+            pending={rescanning}
+            onClick={() => void rescan()}
           >
-            <MoreHorizontalIcon className="size-5" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent>
-            <DropdownMenuItem onClick={() => setEditing("name")}>Rename…</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setEditing("access")}>
-              Who can listen…
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem tone="danger" onClick={() => setConfirming(true)}>
-              Remove from [music]…
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            {busy ? "Scanning…" : "Rescan"}
+          </Button>
+        ) : null}
+        {library.manageable ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              aria-label={`More actions for ${label}`}
+              className="flex size-8 items-center justify-center rounded-full text-text-muted hover:bg-surface hover:text-text"
+            >
+              <MoreHorizontalIcon className="size-5" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={() => setEditing("name")}>Rename…</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setEditing("access")}>
+                Who can listen…
+              </DropdownMenuItem>
+              {removable ? <DropdownMenuSeparator /> : null}
+              {removable ? (
+                <DropdownMenuItem tone="danger" onClick={() => setConfirming(true)}>
+                  Remove from [music]…
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
       </div>
       <div className="flex flex-wrap gap-x-row gap-y-3 pl-8">
         <Stat value={formatCount(library.trackCount)} label="songs" />
         {library.readable ? null : (
-          <Stat value="Not for you" label="you manage it; only its owner can let you listen" />
+          <Stat
+            value="Not for you"
+            label={
+              library.manageable
+                ? "you manage it; only its owner can let you listen"
+                : "only the server's owner manages a library you can't hear"
+            }
+          />
         )}
         <Stat
           value={library.lastScanAt === null ? "Never" : formatAgo(library.lastScanAt)}
@@ -240,11 +267,11 @@ function LibraryCard({
         )}
       </div>
       {percent === null ? null : (
-        <ProgressBar percent={percent} className="ml-8 h-0.75" label={`Scanning ${library.path}`} />
+        <ProgressBar percent={percent} className="ml-8 h-0.75" label={`Scanning ${label}`} />
       )}
       <Dialog open={confirming} onOpenChange={setConfirming}>
         <DialogContent
-          title={`Remove ${library.path}?`}
+          title={`Remove ${label}?`}
           description="Its songs leave the library, playlists, and likes. The files on disk stay untouched."
         >
           <DialogFooter>
@@ -264,6 +291,7 @@ function LibraryCard({
             library={library}
             owner={owner}
             mine={library.ownerId === myId}
+            removable={removable}
             onDone={() => setEditing(null)}
           />
         ) : null}
@@ -310,7 +338,7 @@ function RenameForm({
   return (
     <DialogContent
       title="Rename library folder"
-      description={`The name people see for ${library.path}. The folder on disk keeps its name.`}
+      description={`The name people see for ${library.path ?? library.name}. The folder on disk keeps its name.`}
     >
       <form className="flex flex-col gap-6" onSubmit={submit}>
         <div className="flex flex-col gap-1.5">
@@ -349,11 +377,21 @@ const VISIBILITY_HINTS: Readonly<Record<LibraryVisibility, (owner: string) => st
       : `Only ${owner}.`,
 };
 
+/** What a viewer who doesn't own a library may still do with it, for the access dialog. */
+const stillCan = (library: Library, removable: boolean): string => {
+  if (removable) return "You can still rename, rescan, or remove it.";
+
+  return library.manageable
+    ? "You can still rename or rescan it."
+    : "Only the server's owner manages a library you can't hear.";
+};
+
 /** Who can listen to a library: its visibility and the people added to it. */
 function AccessForm({
   library,
   owner,
   mine,
+  removable,
   onDone,
 }: {
   readonly library: Library;
@@ -361,13 +399,22 @@ function AccessForm({
   readonly owner: string;
   /** Whether the viewer owns the library, the only one who may change who listens. */
   readonly mine: boolean;
+  /** Whether the viewer may remove the library (`canRemoveLibrary`). */
+  readonly removable: boolean;
   readonly onDone: () => void;
 }) {
   const update = useRun("libraries.update");
   const grant = useRun("libraries.grant");
   const revoke = useRun("libraries.revoke");
-  const people = useRead("people.list", {});
-  const added = useRead("libraries.people", { libraryId: library.id });
+  // Only a library's managers may read its access list (anyone else gets not_found, which would
+  // take the whole screen down), and only its owner adds people.
+  const people = useRead("people.list", mine ? {} : "skip");
+
+  const added = useRead(
+    "libraries.people",
+    library.manageable ? { libraryId: library.id } : "skip",
+  );
+
   const visibility = library.visibility;
 
   const [setVisibility, changing] = useAction(
@@ -388,7 +435,7 @@ function AccessForm({
   );
 
   return (
-    <DialogContent title="Who can listen" description={library.path}>
+    <DialogContent title="Who can listen" description={library.path ?? library.name}>
       <div className="flex flex-col gap-1.5">
         <div role="group" aria-label="Who can listen" className="flex flex-wrap gap-2">
           {(["shared", "restricted", "private"] as const).map((option) => (
@@ -405,12 +452,11 @@ function AccessForm({
         <FieldHint>{VISIBILITY_HINTS[visibility](owner)}</FieldHint>
         {mine ? null : (
           <FieldHint>
-            Only {owner} can change who listens to this folder. You can still rename, rescan, or
-            remove it.
+            Only {owner} can change who listens to this folder. {stillCan(library, removable)}
           </FieldHint>
         )}
       </div>
-      {visibility === "private" ? null : (
+      {visibility === "private" || !library.manageable ? null : (
         <div className="flex flex-col gap-2">
           <span className="font-sans text-sm/xs font-medium text-text">
             {visibility === "shared" ? "Guests who can listen" : "People who can listen"}

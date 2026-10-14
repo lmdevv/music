@@ -55,9 +55,12 @@ const activeJob = async (ctx: QueryCtx, libraryId: Id<"libraries">): Promise<Doc
     .withIndex("by_library_status", (q) => q.eq("libraryId", libraryId).eq("status", "pending"))
     .first());
 
-/** Whether the viewer may see a library at all: to listen to it, or to manage it. */
+/**
+ * Whether the viewer may see a library's jobs: to listen to it, or to manage it. Admins also see
+ * that other libraries exist (`libraries.list`), but not their jobs, folders, or contents.
+ */
 const canSee = (viewer: Viewer, library: Doc<"libraries">): boolean =>
-  canRead(viewer, library._id) || canManage(viewer);
+  canRead(viewer, library._id) || canManage(viewer, library);
 
 /** A library the viewer manages (see `canManage`), or `not_found`. */
 const managedLibrary = async (
@@ -67,7 +70,9 @@ const managedLibrary = async (
 ): Promise<Doc<"libraries">> => {
   const library = await ctx.db.get(tableId(ctx, "libraries", id));
 
-  if (library === null || !canManage(viewer)) return fail("not_found", "Library not found");
+  if (library === null || !canManage(viewer, library)) {
+    return fail("not_found", "Library not found");
+  }
 
   return library;
 };
@@ -153,6 +158,7 @@ export const adminQueries = {
           library,
           await ctx.db.get(library.ownerId),
           canRead(viewer, library._id),
+          canManage(viewer, library),
           (await activeJob(ctx, library._id)) !== null,
         ),
       ),

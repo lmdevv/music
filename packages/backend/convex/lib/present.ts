@@ -163,11 +163,14 @@ export const presentLibrary = (
   doc: Doc<"libraries">,
   owner: Doc<"users"> | null,
   readable: boolean,
+  manageable: boolean,
   scanning: boolean,
 ): (typeof Library)["Encoded"] => ({
   id: doc._id,
   name: doc.name,
-  path: doc.path,
+  // A folder path is how a library is found and indexed again, so only its managers see it.
+  path: manageable ? doc.path : null,
+  manageable,
   visibility: doc.visibility,
   ownerId: doc.ownerId,
   ownerName: owner?.name ?? owner?.email ?? null,

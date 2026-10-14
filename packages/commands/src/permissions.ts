@@ -59,10 +59,17 @@ export const canManagePerson = (actor: PersonRef, target: PersonRef): boolean =>
   (target.role !== "admin" || can(actor.role, "owner"));
 
 /**
+ * Whether someone may rename, rescan, or remove a library: the server's owner may for every
+ * library, and an admin only for libraries they can listen to. An admin who could remove a library
+ * they can't hear could add its folder again as their own and index the same files.
+ */
+export const canManageLibrary = (role: Role, readable: boolean): boolean =>
+  can(role, "owner") || (can(role, "admin") && readable);
+
+/**
  * Whether `actor` may change who listens to a library: its visibility and its access list. Only
  * the library's own owner may, so no admin can let themselves or anyone else into a library that
- * is not theirs. Admins still rename, rescan, and remove every library. A library whose owner is
- * removed moves to the server's owner, who then decides.
+ * is not theirs. A library whose owner is removed moves to the server's owner, who then decides.
  */
 export const canChangeLibraryAccess = (
   actor: PersonRef,
