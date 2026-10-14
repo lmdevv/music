@@ -1,6 +1,14 @@
 import { createCn } from "cn/config";
 
-const borderWidths = [{ border: ["hairline", "field"] }];
+const BORDER_WIDTHS = ["hairline", "field"];
+
+/** tailwind-merge's border-width groups (`border-w`, `border-w-t`, …) with the token widths. */
+const borderWidthGroups = Object.fromEntries(
+  ["", "x", "y", "t", "r", "b", "l"].map((side) => [
+    side === "" ? "border-w" : `border-w-${side}`,
+    [{ [side === "" ? "border" : `border-${side}`]: BORDER_WIDTHS }],
+  ]),
+);
 
 /**
  * Joins class names and resolves Tailwind conflicts. It knows the token names in
@@ -55,13 +63,7 @@ export const cn = createCn({
       blur: ["scrim"],
     },
     classGroups: {
-      "border-w": borderWidths,
-      "border-w-x": [{ "border-x": ["hairline", "field"] }],
-      "border-w-y": [{ "border-y": ["hairline", "field"] }],
-      "border-w-t": [{ "border-t": ["hairline", "field"] }],
-      "border-w-r": [{ "border-r": ["hairline", "field"] }],
-      "border-w-b": [{ "border-b": ["hairline", "field"] }],
-      "border-w-l": [{ "border-l": ["hairline", "field"] }],
+      ...borderWidthGroups,
     },
   },
 });
