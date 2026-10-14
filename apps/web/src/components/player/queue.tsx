@@ -154,7 +154,9 @@ export function QueueList({
   readonly tone?: "plain" | "glass";
   readonly className?: string;
 }) {
-  const player = usePlayer();
+  // The player's removeFromQueue turns a failure into its error state and resolves, so the list
+  // runs the command itself to learn whether the removal landed.
+  const remove = useRun("queue.remove");
   const list = useRef<HTMLDivElement>(null);
   const removedAt = useRef<number | null>(null);
   // Rows remount when the queue changes (their keys carry the queue position), so focus is placed
@@ -187,7 +189,7 @@ export function QueueList({
               onRemove={() => {
                 removedAt.current = position;
                 // A removal that fails leaves the queue as it was; focus must not jump later.
-                player.removeFromQueue(entry.index).catch((cause: unknown) => {
+                remove({ index: entry.index }).catch((cause: unknown) => {
                   removedAt.current = null;
                   toastFailure(cause);
                 });
