@@ -224,6 +224,8 @@ test("an admin sees another admin's private library read-only, and the screen st
   await page.goto("/settings/libraries?add=1");
   await page.getByRole("textbox", { name: "Library folder" }).fill(`/${folder}`);
   await page.getByRole("button", { name: "Only me" }).click();
+  // The server's owner manages every library, so nobody else can rename or rescan this one.
+  await expect(page.getByText("Only you.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Add and scan" }).click();
 
   const own = page.getByRole("region", { name: `/${folder}` });

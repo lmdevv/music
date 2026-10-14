@@ -94,7 +94,11 @@ function Libraries({ me }: { readonly me: User }) {
         label="From a terminal"
         command="music libraries list · music libraries scan --help"
       />
-      <AddLibraryDialog open={adding} onOpenChange={setAdding} />
+      <AddLibraryDialog
+        open={adding}
+        onOpenChange={setAdding}
+        serverOwner={can(me.role, "owner")}
+      />
     </div>
   );
 }
@@ -291,6 +295,7 @@ function LibraryCard({
             library={library}
             owner={owner}
             mine={library.ownerId === myId}
+            serverOwner={can(me.role, "owner")}
             removable={removable}
             onDone={() => setEditing(null)}
           />
@@ -368,13 +373,21 @@ function RenameForm({
   );
 }
 
-const VISIBILITY_HINTS: Readonly<Record<LibraryVisibility, (owner: string) => string>> = {
+/**
+ * Who hears a private library, said to its owner. Admins manage only libraries they hear, so
+ * besides its owner only the server's owner may rename or rescan it, and never listen.
+ */
+const privateHint = (serverOwner: boolean): string =>
+  serverOwner
+    ? "Only you."
+    : "Only you. The server's owner can rename or rescan it, but can't listen or let anyone in.";
+
+const VISIBILITY_HINTS: Readonly<
+  Record<LibraryVisibility, (owner: string, serverOwner: boolean) => string>
+> = {
   shared: () => "Everyone on the server except guests, and the guests added below.",
   restricted: (owner) => `Only the people below, and ${owner}.`,
-  private: (owner) =>
-    owner === "you"
-      ? "Only you. Other admins can rename or rescan it, but can't listen or let anyone in."
-      : `Only ${owner}.`,
+  private: (owner, serverOwner) => (owner === "you" ? privateHint(serverOwner) : `Only ${owner}.`),
 };
 
 /** What a viewer who doesn't own a library may still do with it, for the access dialog. */
@@ -391,6 +404,7 @@ function AccessForm({
   library,
   owner,
   mine,
+  serverOwner,
   removable,
   onDone,
 }: {
@@ -399,6 +413,8 @@ function AccessForm({
   readonly owner: string;
   /** Whether the viewer owns the library, the only one who may change who listens. */
   readonly mine: boolean;
+  /** Whether the viewer owns the server, and so manages every library. */
+  readonly serverOwner: boolean;
   /** Whether the viewer may remove the library (`canRemoveLibrary`). */
   readonly removable: boolean;
   readonly onDone: () => void;
@@ -449,7 +465,7 @@ function AccessForm({
             </Chip>
           ))}
         </div>
-        <FieldHint>{VISIBILITY_HINTS[visibility](owner)}</FieldHint>
+        <FieldHint>{VISIBILITY_HINTS[visibility](owner, serverOwner)}</FieldHint>
         {mine ? null : (
           <FieldHint>
             Only {owner} can change who listens to this folder. {stillCan(library, removable)}
@@ -522,18 +538,22 @@ function AccessForm({
   );
 }
 
-const ADD_VISIBILITY_HINTS: Readonly<Record<LibraryVisibility, string>> = {
-  shared: "Everyone but guests. You can add guests from the folder's menu.",
-  restricted: "Only the people you add from the folder's menu after it's created.",
-  private: "Only you. Other admins can rename or rescan it, but can't listen or let anyone in.",
-};
+const ADD_VISIBILITY_HINTS: Readonly<Record<LibraryVisibility, (serverOwner: boolean) => string>> =
+  {
+    shared: () => "Everyone but guests. You can add guests from the folder's menu.",
+    restricted: () => "Only the people you add from the folder's menu after it's created.",
+    private: privateHint,
+  };
 
 function AddLibraryDialog({
   open,
   onOpenChange,
+  serverOwner,
 }: {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
+  /** Whether the viewer owns the server, and so manages every library. */
+  readonly serverOwner: boolean;
 }) {
   const create = useRun("libraries.create");
   const [path, setPath] = useState("");
@@ -610,7 +630,7 @@ function AddLibraryDialog({
                 Only me
               </Chip>
             </div>
-            <FieldHint>{ADD_VISIBILITY_HINTS[visibility]}</FieldHint>
+            <FieldHint>{ADD_VISIBILITY_HINTS[visibility](serverOwner)}</FieldHint>
           </div>
           <DialogFooter>
             <DialogClose render={<Button variant="ghost" type="button" />}>Cancel</DialogClose>
