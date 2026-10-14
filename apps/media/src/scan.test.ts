@@ -28,8 +28,9 @@ const setup = Effect.gen(function* () {
   const control = yield* MemoryMediaBackendControl.pipe(Effect.provideContext(context));
   const libraryId = yield* control.addLibrary(library.root);
   const progress = yield* Ref.make<JobProgress>({ done: 0 });
+  const releasedArt = yield* Ref.make<ReadonlySet<string>>(new Set());
 
-  const scan = scanLibrary({ id: libraryId, path: library.root }, progress).pipe(
+  const scan = scanLibrary({ id: libraryId, path: library.root }, progress, releasedArt).pipe(
     Effect.provideContext(context),
   );
 
@@ -54,7 +55,6 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           moved: 0,
           missing: 0,
           failed: 0,
-          releasedArt: new Set(),
         });
         expect(yield* Ref.get(progress)).toMatchObject({ done: 10, total: 10 });
         const tracks = yield* control.tracks;
@@ -146,7 +146,6 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           moved: 0,
           missing: 0,
           failed: 0,
-          releasedArt: new Set(),
         });
 
         const bytes = yield* Files.readWholeFile(join(root, path));
@@ -157,7 +156,6 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           moved: 0,
           missing: 1,
           failed: 0,
-          releasedArt: new Set(),
         });
         expect((yield* trackAt(path))?.missing).toBe(true);
 
@@ -168,7 +166,6 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           moved: 0,
           missing: 0,
           failed: 0,
-          releasedArt: new Set(),
         });
         expect((yield* trackAt(path))?.missing).toBe(false);
       }),
@@ -200,7 +197,6 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           moved: 4,
           missing: 0,
           failed: 0,
-          releasedArt: new Set(),
         });
         expect((yield* trackAt("Aurora Tones/First Light/Dawn.flac"))?.id).toBe(dawn?.id);
         expect((yield* trackAt("Moved/Night Drive/01 Neon.mp3"))?.id).toBe(neon?.id);
@@ -212,7 +208,6 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           moved: 0,
           missing: 0,
           failed: 0,
-          releasedArt: new Set(),
         });
       }),
     ));
@@ -307,7 +302,6 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           moved: 0,
           missing: 0,
           failed: 1,
-          releasedArt: new Set(),
         });
 
         expect((yield* trackAt("Loose/untitled take.mp3"))?.scanned).toMatchObject({
@@ -347,7 +341,6 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           moved: 0,
           missing: 0,
           failed: 0,
-          releasedArt: new Set(),
         });
 
         const paths = (yield* control.tracks).map((track) => track.scanned.path);
@@ -500,9 +493,11 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const progress = yield* Ref.make<JobProgress>({ done: 0 });
 
         expect(
-          yield* scanLibrary({ id: libraryId, path: empty }, progress).pipe(
-            Effect.provideContext(context),
-          ),
+          yield* scanLibrary(
+            { id: libraryId, path: empty },
+            progress,
+            yield* Ref.make<ReadonlySet<string>>(new Set()),
+          ).pipe(Effect.provideContext(context)),
         ).toMatchObject({ files: 0, missing: 0 });
       }),
     ));
@@ -517,10 +512,11 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const libraryId = yield* control.addLibrary(missing);
         const progress = yield* Ref.make<JobProgress>({ done: 0 });
 
-        const error = yield* scanLibrary({ id: libraryId, path: missing }, progress).pipe(
-          Effect.provideContext(context),
-          Effect.flip,
-        );
+        const error = yield* scanLibrary(
+          { id: libraryId, path: missing },
+          progress,
+          yield* Ref.make<ReadonlySet<string>>(new Set()),
+        ).pipe(Effect.provideContext(context), Effect.flip);
 
         expect(error).toBeInstanceOf(LibraryUnavailable);
         expect(error.message).toContain(missing);

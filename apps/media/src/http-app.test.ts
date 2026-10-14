@@ -140,7 +140,9 @@ const setupWith = Effect.fn("Test.setup")(function* (ffmpegPath: string) {
   const libraryId = yield* control.addLibrary(root);
   const progress = yield* Ref.make<JobProgress>({ done: 0 });
 
-  const scan = scanLibrary({ id: libraryId, path: root }, progress).pipe(
+  const releasedArt = yield* Ref.make<ReadonlySet<string>>(new Set());
+
+  const scan = scanLibrary({ id: libraryId, path: root }, progress, releasedArt).pipe(
     Effect.provideContext(context),
   );
 

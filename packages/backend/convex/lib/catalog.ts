@@ -1,6 +1,5 @@
 import { foldSearchText } from "@music/commands/search-text";
 
-import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import { bumpLibraryCounts } from "./stats";
@@ -130,8 +129,8 @@ export interface CatalogBatch {
   /** Hides a file that disappeared from disk. Likes and playlists keep pointing at it. */
   readonly markMissing: (path: string) => Promise<void>;
   /**
-   * Applies the batch's count changes: album, artist, and library counters, and an album with no
-   * playable songs left is checked for deletion once the batch commits.
+   * Applies the batch's count changes: album, artist, and library counters. An album left with
+   * no playable songs that no song points at any more is deleted (see `deleteEmptyAlbum`).
    *
    * @returns The artwork hashes some track, album, or artist stopped using in this batch. Others
    *   may still use them; the media service asks `media:artInUse` before deleting any.
@@ -387,49 +386,45 @@ export const catalogBatch = (ctx: MutationCtx, libraryId: Id<"libraries">): Cata
   const finish = async (): Promise<ReadonlyArray<string>> => {
     const library = { tracks: 0, albums: 0, artists: 0, durationMs: 0 };
     const artistSteps = new Map<Id<"artists">, number>();
+    const vanished: Array<Id<"albums">> = [];
 
-    // One after another: two albums of one artist both change its album count.
-    await inOrder([...deltas], async ([albumId, delta]) => {
-      const album = await ctx.db.get(albumId);
+    // Albums are independent; their artists' counts are summed here and written below.
+    await Promise.all(
+      [...deltas].map(async ([albumId, delta]) => {
+        const album = await ctx.db.get(albumId);
 
-      if (album === null) return;
-      const trackCount = Math.max(0, album.trackCount + delta.tracks);
-      await ctx.db.patch(albumId, {
-        trackCount,
-        durationMs: Math.max(0, album.durationMs + delta.durationMs),
-      });
-      library.tracks += delta.tracks;
-      library.durationMs += delta.durationMs;
-      const appeared = album.trackCount === 0 && trackCount > 0;
-      const vanished = album.trackCount > 0 && trackCount === 0;
+        if (album === null) return;
+        const trackCount = Math.max(0, album.trackCount + delta.tracks);
+        await ctx.db.patch(albumId, {
+          trackCount,
+          durationMs: Math.max(0, album.durationMs + delta.durationMs),
+        });
+        library.tracks += delta.tracks;
+        library.durationMs += delta.durationMs;
+        const appeared = album.trackCount === 0 && trackCount > 0;
 
-      if (!appeared && !vanished) return;
+        if (!appeared && !(album.trackCount > 0 && trackCount === 0)) return;
 
-      // A retag can move an album's last song elsewhere; check it once this write commits.
-      if (vanished) {
-        release(album.artHash, undefined);
-        await ctx.scheduler.runAfter(0, internal.maintenance.pruneEmptyAlbum, { albumId });
-      }
+        if (!appeared) vanished.push(albumId);
+        const step = appeared ? 1 : -1;
+        library.albums += step;
+        artistSteps.set(album.artistId, (artistSteps.get(album.artistId) ?? 0) + step);
+      }),
+    );
 
-      const step = appeared ? 1 : -1;
-      library.albums += step;
-      artistSteps.set(album.artistId, (artistSteps.get(album.artistId) ?? 0) + step);
-    });
+    await Promise.all(
+      [...artistSteps].map(async ([artistId, step]) => {
+        const artist = step === 0 ? null : await ctx.db.get(artistId);
 
-    await inOrder([...artistSteps], async ([artistId, step]) => {
-      const artist = step === 0 ? null : await ctx.db.get(artistId);
+        if (artist === null) return;
+        const albumCount = Math.max(0, artist.albumCount + step);
+        await ctx.db.patch(artist._id, { albumCount });
 
-      if (artist === null) return;
-      const albumCount = Math.max(0, artist.albumCount + step);
-      await ctx.db.patch(artist._id, { albumCount });
+        if (artist.albumCount === 0 && albumCount > 0) library.artists += 1;
 
-      if (artist.albumCount === 0 && albumCount > 0) library.artists += 1;
-
-      if (artist.albumCount > 0 && albumCount === 0) {
-        library.artists -= 1;
-        release(artist.artHash, undefined);
-      }
-    });
+        if (artist.albumCount > 0 && albumCount === 0) library.artists -= 1;
+      }),
+    );
 
     if (
       library.tracks !== 0 ||
@@ -440,8 +435,60 @@ export const catalogBatch = (ctx: MutationCtx, libraryId: Id<"libraries">): Cata
       await bumpLibraryCounts(ctx, libraryId, library);
     }
 
+    // Every write of the batch is done, so an album no song points at any more (a retag moved its
+    // songs) goes now, and its art is released only once no row holds it. One after another: two
+    // albums of one artist may both be its last.
+    await inOrder(vanished, async (albumId) => {
+      for (const hash of await deleteEmptyAlbum(ctx, albumId)) release(hash, undefined);
+    });
+
     return [...released];
   };
 
   return { upsert, move, markMissing, finish };
+};
+
+/**
+ * Deletes an album without playable songs once no song points at it any more, as after a retag
+ * moved its songs to another album, and then its artist if nothing points at that either. An
+ * album whose songs are only missing keeps its row, so the songs find it again when their files
+ * come back.
+ *
+ * @returns The artwork the deleted album and artist held.
+ */
+export const deleteEmptyAlbum = async (
+  ctx: MutationCtx,
+  albumId: Id<"albums">,
+): Promise<ReadonlyArray<string>> => {
+  const album = await ctx.db.get(albumId);
+
+  if (album === null || album.trackCount > 0) return [];
+
+  const song = await ctx.db
+    .query("tracks")
+    .withIndex("by_album", (q) => q.eq("albumId", album._id))
+    .first();
+
+  if (song !== null) return [];
+  await ctx.db.delete(album._id);
+  const held = album.artHash === undefined ? [] : [album.artHash];
+  const artist = await ctx.db.get(album.artistId);
+
+  if (artist === null || artist.albumCount > 0) return held;
+
+  const [otherAlbum, otherSong] = await Promise.all([
+    ctx.db
+      .query("albums")
+      .withIndex("by_artist", (q) => q.eq("artistId", artist._id))
+      .first(),
+    ctx.db
+      .query("tracks")
+      .withIndex("by_artist", (q) => q.eq("artistId", artist._id))
+      .first(),
+  ]);
+
+  if (otherAlbum !== null || otherSong !== null) return held;
+  await ctx.db.delete(artist._id);
+
+  return artist.artHash === undefined ? held : [...held, artist.artHash];
 };

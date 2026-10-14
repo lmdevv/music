@@ -143,6 +143,28 @@ describe("a scan batch", () => {
   });
 });
 
+describe("an album a retag empties", () => {
+  it("is deleted with its batch, and only then its art is released", async () => {
+    const backend = makeBackend();
+    const admin = await signUp(backend, "admin");
+    const created = await admin.music.run("libraries.create", { name: "Big", path: "/big" });
+    const libraryId = await libraryOf(backend, created.libraryId);
+
+    await writeBatch(backend, libraryId, [song(1, COVER)]);
+
+    // The album's only song is retagged into another album by another artist, with new art.
+    const moved = await writeBatch(backend, libraryId, [
+      { ...song(1, OTHER_COVER), album: "Other", artist: "Someone" },
+    ]);
+
+    expect(moved.released).toEqual([COVER]);
+    expect(await art(backend)).toEqual({ albums: [OTHER_COVER], artists: [OTHER_COVER] });
+    expect(
+      await backend.query(api.media.artInUse, { secret: MEDIA_SECRET, hashes: [COVER] }),
+    ).toEqual({ inUse: [] });
+  });
+});
+
 describe("library counters", () => {
   it("live in their own row, so a scan batch never rewrites the library", async () => {
     const backend = makeBackend();

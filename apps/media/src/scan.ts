@@ -104,12 +104,10 @@ export interface ScanSummary {
   readonly moved: number;
   readonly missing: number;
   readonly failed: number;
-  /** Artwork the scan's writes stopped using somewhere; `collectReleasedArt` checks it. */
-  readonly releasedArt: ReadonlySet<string>;
 }
 
 /** A one-line description of a scan result for the jobs list. */
-export const describeScan = (summary: Omit<ScanSummary, "releasedArt">): string => {
+export const describeScan = (summary: ScanSummary): string => {
   const parts = [`${summary.files} files`, `${summary.updated} updated`];
 
   if (summary.moved > 0) parts.push(`${summary.moved} moved`);
@@ -187,7 +185,9 @@ const knownFingerprints = Effect.fn("Scan.knownFingerprints")(function* (
 });
 
 /**
- * Scans `library`, writing progress into `progress` as it goes. Unreadable files are skipped and
+ * Scans `library`, writing progress into `progress` as it goes, and adding the artwork each
+ * saved batch stopped using somewhere to `releasedArt` (for `collectReleasedArt`) as soon as the
+ * batch is written, so it counts even when the scan fails or is cancelled later. Unreadable files are skipped and
  * counted; they are retried on the next scan because Convex never learns their fingerprint.
  *
  * @returns The scan's counts, or `LibraryUnavailable` when the folder cannot be read, or
@@ -196,6 +196,7 @@ const knownFingerprints = Effect.fn("Scan.knownFingerprints")(function* (
 export const scanLibrary = Effect.fn("Scan.library")(function* (
   library: ScanTarget,
   progress: Ref.Ref<JobProgress>,
+  releasedArt: Ref.Ref<ReadonlySet<string>>,
 ) {
   const backend = yield* MediaBackend;
   const { dataDir } = yield* MediaConfig;
@@ -315,7 +316,11 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
   const claimed = new Set<string>();
   let moved = 0;
 
-  const releasedArt = new Set<string>();
+  const release = (hashes: ReadonlyArray<string>) =>
+    hashes.length === 0
+      ? Effect.void
+      : Ref.update(releasedArt, (current) => new Set([...current, ...hashes]));
+
   let done = 0;
   let failed = 0;
 
@@ -334,14 +339,14 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
     failed += read.length - tracks.length;
 
     if (upserts.length > 0) {
-      for (const hash of yield* backend.upsertTracks(library.id, upserts)) releasedArt.add(hash);
+      yield* release(yield* backend.upsertTracks(library.id, upserts));
     }
 
     if (moves.length > 0) {
       const outcome = yield* backend.moveTracks(library.id, moves);
       moved += outcome.moved;
 
-      for (const hash of outcome.released) releasedArt.add(hash);
+      yield* release(outcome.released);
     }
 
     for (const { from } of moves) claimed.add(from);
@@ -365,7 +370,7 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
     .map((file) => file.path);
 
   for (const batch of chunks(gone, MISSING_BATCH)) {
-    for (const hash of yield* backend.markMissing(library.id, batch)) releasedArt.add(hash);
+    yield* release(yield* backend.markMissing(library.id, batch));
   }
 
   const summary: ScanSummary = {
@@ -374,7 +379,6 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
     moved,
     missing: gone.length,
     failed,
-    releasedArt,
   };
 
   yield* Ref.set(progress, {

@@ -3,6 +3,7 @@
  * decides user access. Convex never calls the media service; the service subscribes here.
  */
 import { chainsOverlap, fsPathsOverlap } from "@music/commands/folder-ids";
+import { ART_IN_USE_MAX } from "@music/commands/media-limits";
 import { isSystemFolder, SYSTEM_FOLDER_MESSAGE } from "@music/commands/system-folders";
 import { v } from "convex/values";
 
@@ -20,9 +21,6 @@ const LEASE_MS = 60_000;
 const FINGERPRINT_PAGE = 1000;
 
 const ART_PAGE = 1000;
-
-/** Most hashes one `artInUse` call checks: three index lookups each. */
-const ART_CHECK = 200;
 
 const scannedTrack = v.object({
   path: v.string(),
@@ -376,8 +374,8 @@ export const artInUse = query({
   handler: async (ctx, { secret, hashes }) => {
     requireService(secret);
 
-    if (hashes.length > ART_CHECK) {
-      return fail("invalid_args", `Check at most ${ART_CHECK} hashes at once`);
+    if (hashes.length > ART_IN_USE_MAX) {
+      return fail("invalid_args", `Check at most ${ART_IN_USE_MAX} hashes at once`);
     }
 
     const used = await Promise.all(
