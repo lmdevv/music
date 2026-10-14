@@ -510,7 +510,7 @@ export const commands = {
     result: Ok,
   }),
   "libraries.update": command({
-    summary: "Rename a library folder or change who can listen to it",
+    summary: "Rename a library folder, or (its owner only) change who can listen to it",
     group: "libraries",
     kind: "mutation",
     access: "admin",
@@ -532,7 +532,8 @@ export const commands = {
     result: Schema.Array(LibraryMember),
   }),
   "libraries.grant": command({
-    summary: "Let someone listen to a restricted library folder, or a guest to a shared one",
+    summary:
+      "Let someone listen to a restricted library folder you own, or a guest to a shared one",
     group: "libraries",
     kind: "mutation",
     access: "admin",
@@ -541,7 +542,7 @@ export const commands = {
     result: Ok,
   }),
   "libraries.revoke": command({
-    summary: "Take someone off a library folder's access list",
+    summary: "Take someone off the access list of a library folder you own",
     group: "libraries",
     kind: "mutation",
     access: "admin",

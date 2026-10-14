@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import { query } from "./_generated/server";
 import { sha256Hex } from "./lib/crypto";
 import { inviterStillAllows } from "./lib/invites";
-import { resetByHash } from "./lib/resets";
+import { resetByHash, resetStillAllowed } from "./lib/resets";
 
 /** First-run state for the welcome screen. Public: it reveals only whether setup is done. */
 export const status = query({
@@ -74,6 +74,8 @@ export const passwordReset = query({
     if (found.usedAt !== undefined) return { state: "used" as const, ...details };
 
     if (found.expiresAt < Date.now()) return { state: "expired" as const, ...details };
+
+    if (!(await resetStillAllowed(ctx, found, user))) return { state: "invalid" as const };
 
     return { state: "open" as const, ...details };
   },

@@ -9,7 +9,7 @@ import { v } from "convex/values";
 import { internalMutation } from "./_generated/server";
 import { createPasswordReset } from "./handlers/people";
 import { fail } from "./lib/errors";
-import { resetByHash } from "./lib/resets";
+import { resetByHash, resetStillAllowed } from "./lib/resets";
 import { endUserSessions } from "./lib/sessions";
 import { SUSPENDED_MESSAGE } from "./lib/viewer";
 
@@ -36,6 +36,10 @@ export const redeem = internalMutation({
     if (user === null) return fail("invalid_args", "This reset link is not valid");
 
     if (user.suspendedAt !== undefined) return fail("forbidden", SUSPENDED_MESSAGE);
+
+    if (!(await resetStillAllowed(ctx, reset, user))) {
+      return fail("invalid_args", "This reset link is no longer valid; ask an admin for a new one");
+    }
 
     const account = await ctx.db
       .query("authAccounts")

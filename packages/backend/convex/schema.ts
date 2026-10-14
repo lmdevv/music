@@ -80,7 +80,8 @@ export default defineSchema({
   })
     .index("by_hash", ["hash"])
     .index("by_user", ["userId"])
-    .index("by_expires", ["expiresAt"]),
+    .index("by_expires", ["expiresAt"])
+    .index("by_creator", ["createdBy"]),
 
   apiKeys: defineTable({
     userId: v.id("users"),

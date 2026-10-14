@@ -1,4 +1,4 @@
-import { assignableRoles, can } from "@music/commands/permissions";
+import { assignableRoles, can, canChangeLibraryAccess } from "@music/commands/permissions";
 import { Match } from "effect";
 
 import { internal } from "../_generated/api";
@@ -56,24 +56,10 @@ const activeJob = async (ctx: QueryCtx, libraryId: Id<"libraries">): Promise<Doc
     .first());
 
 /** Whether the viewer may see a library at all: to listen to it, or to manage it. */
-const canSee = async (ctx: QueryCtx, viewer: Viewer, library: Doc<"libraries">): Promise<boolean> =>
-  canRead(viewer, library._id) || canManage(ctx, viewer, library);
+const canSee = (viewer: Viewer, library: Doc<"libraries">): boolean =>
+  canRead(viewer, library._id) || canManage(viewer);
 
-/** The libraries among `libraries` the viewer may see, in order. */
-const seeable = async (
-  ctx: QueryCtx,
-  viewer: Viewer,
-  libraries: ReadonlyArray<Doc<"libraries">>,
-): Promise<ReadonlyArray<Doc<"libraries">>> => {
-  const visible = await Promise.all(libraries.map((library) => canSee(ctx, viewer, library)));
-
-  return libraries.filter((_library, index) => visible[index] === true);
-};
-
-/**
- * A library the viewer manages (see `canManage`). Another admin's private library stays
- * invisible, so it is `not_found` like any other ID.
- */
+/** A library the viewer manages (see `canManage`), or `not_found`. */
 const managedLibrary = async (
   ctx: QueryCtx,
   viewer: Viewer,
@@ -81,11 +67,16 @@ const managedLibrary = async (
 ): Promise<Doc<"libraries">> => {
   const library = await ctx.db.get(tableId(ctx, "libraries", id));
 
-  if (library === null || !(await canManage(ctx, viewer, library))) {
-    return fail("not_found", "Library not found");
-  }
+  if (library === null || !canManage(viewer)) return fail("not_found", "Library not found");
 
   return library;
+};
+
+/** Fails unless the viewer may change who listens to `library`: only its owner may. */
+const checkAccessOwner = (viewer: Viewer, library: Doc<"libraries">): void => {
+  if (!canChangeLibraryAccess(viewer, library)) {
+    fail("forbidden", "Only the library's owner can change who listens to it");
+  }
 };
 
 /** A job on a library the viewer can see. */
@@ -93,7 +84,7 @@ const visibleJob = async (ctx: QueryCtx, viewer: Viewer, id: string): Promise<Do
   const job = await ctx.db.get(tableId(ctx, "jobs", id));
   const library = job === null ? null : await ctx.db.get(job.libraryId);
 
-  if (job === null || library === null || !(await canSee(ctx, viewer, library))) {
+  if (job === null || library === null || !canSee(viewer, library)) {
     return fail("not_found", "Job not found");
   }
 
@@ -153,7 +144,7 @@ export const adminQueries = {
   "libraries.list": async (ctx, viewer) => {
     // Members see what they can hear; admins also see what they manage but cannot hear.
     const listed = can(viewer.role, "admin")
-      ? await seeable(ctx, viewer, await ctx.db.query("libraries").collect())
+      ? await ctx.db.query("libraries").collect()
       : viewer.libraries;
 
     return Promise.all(
@@ -195,7 +186,7 @@ export const adminQueries = {
       const pending = (async () => {
         const library = await ctx.db.get(libraryId);
 
-        return library !== null && (await canSee(ctx, viewer, library)) ? library : null;
+        return library !== null && canSee(viewer, library) ? library : null;
       })();
 
       seen.set(libraryId, pending);
@@ -278,7 +269,10 @@ export const adminMutations = {
 
     if (args.name !== undefined) patch.name = args.name;
 
-    if (args.visibility !== undefined) patch.visibility = args.visibility;
+    if (args.visibility !== undefined && args.visibility !== library.visibility) {
+      checkAccessOwner(viewer, library);
+      patch.visibility = args.visibility;
+    }
 
     await ctx.db.patch(library._id, patch);
 
@@ -287,6 +281,8 @@ export const adminMutations = {
 
   "libraries.grant": async (ctx, viewer, args) => {
     const library = await managedLibrary(ctx, viewer, args.libraryId);
+
+    checkAccessOwner(viewer, library);
     const user = await loadPerson(ctx, args.userId);
 
     if (library.visibility === "private") {
@@ -311,6 +307,8 @@ export const adminMutations = {
 
   "libraries.revoke": async (ctx, viewer, args) => {
     const library = await managedLibrary(ctx, viewer, args.libraryId);
+
+    checkAccessOwner(viewer, library);
     const grant = await grantOf(ctx, library._id, tableId(ctx, "users", args.userId));
 
     if (grant !== null) await ctx.db.delete(grant._id);

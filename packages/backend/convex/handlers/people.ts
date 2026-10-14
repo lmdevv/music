@@ -114,6 +114,21 @@ const keepAnAdmin = async (ctx: QueryCtx, leaving: Doc<"users">): Promise<void> 
 };
 
 /**
+ * Voids the password reset links around a change to a person: the ones made for them, since who
+ * may reset them can change with it, and, in batches, the ones they made, since their own rights
+ * changed. Redemption re-checks both anyway (`resetStillAllowed`).
+ */
+const voidResets = async (ctx: MutationCtx, personId: Id<"users">): Promise<void> => {
+  const own = await ctx.db
+    .query("passwordResets")
+    .withIndex("by_user", (q) => q.eq("userId", personId))
+    .take(10);
+
+  await Promise.all(own.map((reset) => ctx.db.delete(reset._id)));
+  await ctx.scheduler.runAfter(0, internal.people.deleteResetsBy, { creatorId: personId });
+};
+
+/**
  * Tidies the invite list after someone loses the right to their open invites. Sign-up already
  * refuses those invites (`inviterStillAllows`), so this can run later, in batches.
  */
@@ -182,6 +197,7 @@ export const peopleMutations = {
 
     await ctx.db.patch(user._id, { role: args.role });
     await revokeLapsedInvites(ctx, user._id);
+    await voidResets(ctx, user._id);
 
     // Guests have no API keys. Key sign-in refuses guests at once; the keys are revoked, and the
     // sessions they opened ended, in batches, so a promotion does not revive them. Password
@@ -203,6 +219,7 @@ export const peopleMutations = {
 
     await ctx.db.patch(user._id, { suspendedAt: user.suspendedAt ?? Date.now() });
     await revokeLapsedInvites(ctx, user._id);
+    await voidResets(ctx, user._id);
 
     // API keys stay, refusing to sign in until the person is unsuspended. Stream URLs already
     // signed keep working until they expire, as after any revocation.
@@ -274,6 +291,7 @@ export const peopleMutations = {
 
     await ctx.db.delete(user._id);
     await revokeLapsedInvites(ctx, user._id);
+    await voidResets(ctx, user._id);
     await ctx.scheduler.runAfter(0, internal.people.purgeRemovedUser, { userId: user._id, heir });
 
     return ok;
@@ -289,6 +307,7 @@ export const peopleMutations = {
 
     await ctx.db.patch(user._id, { role: "owner" });
     await ctx.db.patch(viewer.id, { role: "admin" });
+    await Promise.all([voidResets(ctx, user._id), voidResets(ctx, viewer.id)]);
 
     return ok;
   },

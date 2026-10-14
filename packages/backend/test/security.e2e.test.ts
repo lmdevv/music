@@ -300,8 +300,9 @@ const setup = async (): Promise<Fixture> => {
 };
 
 /**
- * Checks that `viewer` cannot see or use anything in the private library `hidden`, through every
- * command that lists, searches, or takes an ID of library-owned data.
+ * Checks that `viewer` cannot hear or use anything in the library `hidden`, through every command
+ * that lists, searches, or takes an ID of library-owned data. An admin manages every library, so
+ * they see that it exists (unreadable) and its jobs, and nothing in it.
  */
 const expectInvisible = async (
   viewer: Session,
@@ -309,11 +310,14 @@ const expectInvisible = async (
   visible: Fixture["shared"],
 ): Promise<void> => {
   const { track } = hidden;
+  const manager = can((await viewer.music.read("account.me", {})).role, "admin");
   const libraries = await viewer.music.read("libraries.list", {});
-  const libraryIds = libraries.map((library) => library.id);
+  const listed = libraries.find((library) => library.id === hidden.libraryId);
 
-  expect(libraryIds).toContain(visible.libraryId);
-  expect(libraryIds).not.toContain(hidden.libraryId);
+  expect(libraries.map((library) => library.id)).toContain(visible.libraryId);
+
+  if (manager) expect(listed).toMatchObject({ readable: false });
+  else expect(listed).toBeUndefined();
 
   const search = await viewer.music.read("search", { query: TOKEN, limit: 50 });
 
@@ -370,6 +374,7 @@ const expectInvisible = async (
     "not_found",
   );
 
+  if (manager) return;
   const jobs = await viewer.music.read("jobs.list", {});
 
   expect(jobs.map((job) => job.libraryId)).not.toContain(hidden.libraryId);
@@ -403,19 +408,35 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     await expectInvisible(fixture.member, fixture.beta, fixture.shared);
   });
 
-  it("hides another admin's private library from an admin, including its jobs", async () => {
+  it("keeps another admin's private library unheard and closed to an admin who manages it", async () => {
     const { adminA, adminB, alpha, beta, shared } = fixture;
+    const { id: adminBId } = await adminB.music.read("account.me", {});
 
     await expectInvisible(adminB, alpha, shared);
     await expectInvisible(adminA, beta, shared);
 
-    await expectRunFailure(adminB, "libraries.scan", { libraryId: alpha.libraryId }, "not_found");
-    await expectRunFailure(adminB, "jobs.cancel", { jobId: alpha.jobId }, "not_found");
-    await expectRunFailure(adminB, "libraries.delete", { libraryId: alpha.libraryId }, "not_found");
+    // An admin runs the server's folders, but who listens is the library owner's call alone.
+    await expectRunFailure(
+      adminB,
+      "libraries.update",
+      { libraryId: alpha.libraryId, visibility: "shared" },
+      "forbidden",
+    );
+    await expectRunFailure(
+      adminB,
+      "libraries.grant",
+      { libraryId: alpha.libraryId, userId: adminBId },
+      "forbidden",
+    );
+    expect(
+      await failureCode(adminB.music.run("libraries.scan", { libraryId: alpha.libraryId })),
+    ).toBe("succeeded");
 
     const own = await adminA.music.read("libraries.list", {});
 
-    expect(own.map((library) => library.id)).toContain(alpha.libraryId);
+    expect(own.find((library) => library.id === alpha.libraryId)).toMatchObject({
+      readable: true,
+    });
   });
 
   it("finds accented names typed without accents, only in libraries the viewer can read", async () => {
@@ -1093,7 +1114,14 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       "not_found",
     );
 
-    await adminB.music.run("libraries.grant", { libraryId: gamma.libraryId, userId: memberId });
+    // Only its owner lets people in.
+    await expectRunFailure(
+      adminB,
+      "libraries.grant",
+      { libraryId: gamma.libraryId, userId: memberId },
+      "forbidden",
+    );
+    await adminA.music.run("libraries.grant", { libraryId: gamma.libraryId, userId: memberId });
     expect(
       (await adminB.music.read("libraries.people", { libraryId: gamma.libraryId })).map(
         (person) => person.id,
@@ -1108,12 +1136,22 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
         .trackId,
     ).toBe(hidden.track.id);
 
-    await adminB.music.run("libraries.revoke", { libraryId: gamma.libraryId, userId: memberId });
+    await expectRunFailure(
+      adminB,
+      "libraries.revoke",
+      { libraryId: gamma.libraryId, userId: memberId },
+      "forbidden",
+    );
+    await adminA.music.run("libraries.revoke", { libraryId: gamma.libraryId, userId: memberId });
     await expectInvisible(member, hidden, shared);
 
+    // Another admin may rename it; only its owner opens it up.
     await adminB.music.run("libraries.update", {
       libraryId: gamma.libraryId,
       name: `Gamma for all ${id}`,
+    });
+    await adminA.music.run("libraries.update", {
+      libraryId: gamma.libraryId,
       visibility: "shared",
     });
 
@@ -1123,19 +1161,21 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       ),
     ).toMatchObject({ name: `Gamma for all ${id}`, readable: true });
 
-    // Private puts it back with its owner alone, out of other admins' reach.
+    // Private puts it back with its owner alone: another admin still sees it, unheard and shut.
     await adminA.music.run("libraries.update", {
       libraryId: gamma.libraryId,
       visibility: "private",
     });
     expect(
-      (await adminB.music.read("libraries.list", {})).map((library) => library.id),
-    ).not.toContain(gamma.libraryId);
+      (await adminB.music.read("libraries.list", {})).find(
+        (library) => library.id === gamma.libraryId,
+      ),
+    ).toMatchObject({ readable: false });
     await expectRunFailure(
       adminB,
       "libraries.update",
       { libraryId: gamma.libraryId, visibility: "shared" },
-      "not_found",
+      "forbidden",
     );
     await expectRunFailure(
       adminA,
@@ -1266,7 +1306,7 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     await expectReadFailure(person, "people.list", {}, "forbidden");
   });
 
-  it("takes an admin's invites and sole say over private libraries when they step down", async () => {
+  it("takes an admin's invites when they step down, and leaves their private library theirs", async () => {
     const { adminA, adminB } = fixture;
     const keeper = await invite(adminA, `keeper-${id}@music.test`, "admin");
     const { id: keeperId } = await keeper.music.read("account.me", {});
@@ -1280,9 +1320,11 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     });
 
     const listed = async () =>
-      (await adminB.music.read("libraries.list", {})).map((library) => library.id);
+      (await adminB.music.read("libraries.list", {})).find(
+        (library) => library.id === vault.libraryId,
+      );
 
-    expect(await listed()).not.toContain(vault.libraryId);
+    expect(await listed()).toMatchObject({ readable: false });
 
     await adminA.music.run("people.role", { userId: keeperId, role: "member" });
 
@@ -1300,12 +1342,18 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       state: "invalid",
     });
 
-    // Their private library is still theirs to hear, and now admins can manage it.
-    expect(await listed()).toContain(vault.libraryId);
+    // Their private library is still theirs to hear. Admins rename it but can't open it up.
+    expect(await listed()).toMatchObject({ readable: false });
     await adminB.music.run("libraries.update", {
       libraryId: vault.libraryId,
       name: `Vault kept ${id}`,
     });
+    await expectRunFailure(
+      adminB,
+      "libraries.update",
+      { libraryId: vault.libraryId, visibility: "shared" },
+      "forbidden",
+    );
     expect((await keeper.music.read("libraries.list", {})).map((library) => library.id)).toContain(
       vault.libraryId,
     );
@@ -1354,14 +1402,23 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       leaverId,
     );
 
-    const inherited = (await adminA.music.read("libraries.list", {})).find(
-      (library) => library.id === delta.libraryId,
-    );
+    // Ownership moves in the batched clean-up right after the removal.
+    const listedTo = async (session: Session) =>
+      (await session.music.read("libraries.list", {})).find(
+        (library) => library.id === delta.libraryId,
+      );
 
-    expect(inherited).toMatchObject({ ownerId, visibility: "private", readable: true });
-    expect(
-      (await adminB.music.read("libraries.list", {})).map((library) => library.id),
-    ).not.toContain(delta.libraryId);
+    await expect
+      .poll(() => listedTo(adminA))
+      .toMatchObject({ ownerId, visibility: "private", readable: true });
+    // Now the owner's private library: other admins see it exists, and can't hear it.
+    expect(await listedTo(adminB)).toMatchObject({ readable: false });
+    await expectRunFailure(
+      adminB,
+      "libraries.update",
+      { libraryId: delta.libraryId, visibility: "shared" },
+      "forbidden",
+    );
 
     // The email can join again, as someone new with nothing of the old account.
     const again = await invite(adminA, email, "member");
@@ -1397,5 +1454,55 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       message: "This reset link was already used",
     });
     expect(await lookup(reset.token)).toMatchObject({ state: "used" });
+  });
+
+  it("voids a reset link once its maker loses the right to reset that person", async () => {
+    const { adminA } = fixture;
+    const issuer = await invite(adminA, `issuer-${id}@music.test`, "admin");
+    const { id: issuerId } = await issuer.music.read("account.me", {});
+    const target = await invite(adminA, `target-${id}@music.test`, "member");
+    const { id: targetId } = await target.music.read("account.me", {});
+    const { token } = await issuer.music.run("people.reset", { userId: targetId });
+
+    await adminA.music.run("people.suspend", { userId: issuerId });
+
+    expect(await anonymous(server).convex.query(passwordResetLookup, { token })).toEqual({
+      state: "invalid",
+    });
+    expect(await failureCode(resetPassword(server, token, "taken-over-1"))).toBe("invalid_args");
+    expect(await failureCode(passwordSignIn(server, `target-${id}@music.test`, PASSWORD))).toBe(
+      "succeeded",
+    );
+  });
+
+  it("voids a reset link made for someone who has since become an admin", async () => {
+    const { adminA, adminB } = fixture;
+    const rising = await invite(adminA, `rising-${id}@music.test`, "member");
+    const { id: risingId } = await rising.music.read("account.me", {});
+    const { token } = await adminB.music.run("people.reset", { userId: risingId });
+
+    await adminA.music.run("people.role", { userId: risingId, role: "admin" });
+
+    // Otherwise adminB could take over an admin and reach their private libraries.
+    expect(await failureCode(resetPassword(server, token, "taken-over-2"))).toBe("invalid_args");
+    expect(await failureCode(passwordSignIn(server, `rising-${id}@music.test`, PASSWORD))).toBe(
+      "succeeded",
+    );
+  });
+
+  it("answers an unknown email and a wrong password alike, and refuses sign-up over an account", async () => {
+    const generic = { code: "unauthenticated", message: "Invalid email or password" };
+
+    expect(await failure(passwordSignIn(server, `nobody-${id}@music.test`, PASSWORD))).toEqual(
+      generic,
+    );
+    expect(await failure(passwordSignIn(server, `member-${id}@music.test`, "wrong-pass"))).toEqual(
+      generic,
+    );
+
+    // Sign-up over an existing account would check its password with no rate limit.
+    expect(
+      await failure(signUp(server, { email: `member-${id}@music.test`, password: PASSWORD })),
+    ).toEqual(generic);
   });
 });

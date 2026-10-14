@@ -213,7 +213,7 @@ function LibraryCard({
       <div className="flex flex-wrap gap-x-row gap-y-3 pl-8">
         <Stat value={formatCount(library.trackCount)} label="songs" />
         {library.readable ? null : (
-          <Stat value="Not for you" label="you manage it but aren't on its list" />
+          <Stat value="Not for you" label="you manage it; only its owner can let you listen" />
         )}
         <Stat
           value={library.lastScanAt === null ? "Never" : formatAgo(library.lastScanAt)}
@@ -336,12 +336,12 @@ function RenameForm({
 }
 
 const VISIBILITY_HINTS: Readonly<Record<LibraryVisibility, (owner: string) => string>> = {
-  shared: () => "Everyone on the server except guests. Add guests below to let them listen too.",
+  shared: () => "Everyone on the server except guests, and the guests added below.",
   restricted: (owner) => `Only the people below, and ${owner}.`,
   private: (owner) =>
     owner === "you"
-      ? "Only you. Other admins can't see or manage it while you are an admin."
-      : `Only ${owner} can listen. If they are an admin, it leaves your list until they open it up.`,
+      ? "Only you. Other admins can rename or rescan it, but can't listen or let anyone in."
+      : `Only ${owner}.`,
 };
 
 /** Who can listen to a library: its visibility and the people added to it. */
@@ -360,10 +360,10 @@ function AccessForm({
   const people = useRead("people.list", {});
   const added = useRead("libraries.people", { libraryId: library.id });
   const visibility = library.visibility;
+  // Only a library's own owner decides who listens; other admins see the settings read-only.
+  const mine = owner === "you";
 
   const [setVisibility, changing] = useAction(
-    // A folder that turns private for an admin who owns it leaves the list, and this dialog goes
-    // with its card; one owned by someone who can't manage it stays, and so does the dialog.
     (next: LibraryVisibility) => update({ libraryId: library.id, visibility: next }),
     { success: () => "Saved who can listen" },
   );
@@ -388,7 +388,7 @@ function AccessForm({
             <Chip
               key={option}
               selected={visibility === option}
-              disabled={changing}
+              disabled={changing || !mine}
               onClick={() => (option === visibility ? undefined : void setVisibility(option))}
             >
               {visibilityLabel(option, owner)}
@@ -396,6 +396,12 @@ function AccessForm({
           ))}
         </div>
         <FieldHint>{VISIBILITY_HINTS[visibility](owner)}</FieldHint>
+        {mine ? null : (
+          <FieldHint>
+            Only {owner} can change who listens to this folder. You can still rename, rescan, or
+            remove it.
+          </FieldHint>
+        )}
       </div>
       {visibility === "private" ? null : (
         <div className="flex flex-col gap-2">
@@ -424,9 +430,10 @@ function AccessForm({
                   </span>
                   <button
                     type="button"
+                    disabled={!mine}
                     aria-label={`Remove ${person.name ?? person.email}`}
                     onClick={() => void remove(person.id)}
-                    className="font-sans text-sm/xs font-medium text-danger hover:underline"
+                    className="font-sans text-sm/xs font-medium text-danger hover:underline disabled:cursor-not-allowed disabled:opacity-(--opacity-disabled) disabled:no-underline"
                   >
                     Remove
                   </button>
@@ -434,7 +441,7 @@ function AccessForm({
               ))}
             </ul>
           )}
-          {candidates.length === 0 ? null : (
+          {candidates.length === 0 || !mine ? null : (
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={<Button variant="secondary" size="sm" className="w-fit" pending={adding} />}
@@ -465,7 +472,7 @@ function AccessForm({
 const ADD_VISIBILITY_HINTS: Readonly<Record<LibraryVisibility, string>> = {
   shared: "Everyone but guests. You can add guests from the folder's menu.",
   restricted: "Only the people you add from the folder's menu after it's created.",
-  private: "Only you. Other admins can't see it.",
+  private: "Only you. Other admins can rename or rescan it, but can't listen or let anyone in.",
 };
 
 function AddLibraryDialog({

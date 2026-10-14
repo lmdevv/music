@@ -72,6 +72,26 @@ export const revokeLapsedInvites = internalMutation({
   },
 });
 
+/**
+ * Deletes the password reset links someone made, after they were demoted, suspended, or removed.
+ * Redemption checks the maker's rights again (`resetStillAllowed`), so this only tidies up.
+ */
+export const deleteResetsBy = internalMutation({
+  args: { creatorId: v.id("users") },
+  handler: async (ctx, { creatorId }) => {
+    const resets = await ctx.db
+      .query("passwordResets")
+      .withIndex("by_creator", (q) => q.eq("createdBy", creatorId))
+      .take(PURGE_BATCH);
+
+    await Promise.all(resets.map((reset) => ctx.db.delete(reset._id)));
+
+    if (resets.length === PURGE_BATCH) {
+      await ctx.scheduler.runAfter(0, internal.people.deleteResetsBy, { creatorId });
+    }
+  },
+});
+
 /** Revokes every API key a person has and ends the sessions they opened, for someone made a guest. */
 export const revokeKeys = internalMutation({
   args: { userId: v.id("users"), cursor },

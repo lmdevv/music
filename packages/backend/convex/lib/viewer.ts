@@ -105,23 +105,11 @@ export const canRead = (viewer: Viewer, libraryId: Id<"libraries">): boolean =>
   viewer.libraryIds.has(libraryId);
 
 /**
- * Checks that the viewer can manage a library: admins manage every shared and restricted library,
- * listening or not. A private library stays its owner's alone while the owner is an admin who can
- * manage it; once they are not (demoted, or it was made private for a member), any admin can, so
- * no library is ever left without someone to manage it.
+ * Checks that the viewer can manage a library: admins rename, rescan, and remove every library,
+ * and see that it exists, whether or not they may listen to it. Who may listen is the library
+ * owner's alone to change (`canChangeLibraryAccess`).
  */
-export const canManage = async (
-  ctx: ReadCtx,
-  viewer: Viewer,
-  library: Doc<"libraries">,
-): Promise<boolean> => {
-  if (!can(viewer.role, "admin")) return false;
-
-  if (library.visibility !== "private" || library.ownerId === viewer.id) return true;
-  const owner = await ctx.db.get(library.ownerId);
-
-  return owner === null || !can(roleOf(owner), "admin");
-};
+export const canManage = (viewer: Viewer): boolean => can(viewer.role, "admin");
 
 /** A person by wire ID, or a `not_found` failure. */
 export const loadPerson = async (ctx: ReadCtx, id: string): Promise<Doc<"users">> =>

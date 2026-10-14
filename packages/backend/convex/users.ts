@@ -1,8 +1,20 @@
 import { v } from "convex/values";
 
-import { internalMutation } from "./_generated/server";
+import { internalMutation, internalQuery } from "./_generated/server";
 import { fail } from "./lib/errors";
 import { inviterStillAllows } from "./lib/invites";
+
+/** Whether a password account already uses this email, for sign-up to refuse before hashing. */
+export const hasPasswordAccount = internalQuery({
+  args: { email: v.string() },
+  handler: async (ctx, { email }) =>
+    (await ctx.db
+      .query("authAccounts")
+      .withIndex("providerAndAccountId", (q) =>
+        q.eq("provider", "password").eq("providerAccountId", email),
+      )
+      .unique()) !== null,
+});
 
 /**
  * Creates the account for a password sign-up. The first account becomes the owner; every later

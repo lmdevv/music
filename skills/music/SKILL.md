@@ -48,13 +48,15 @@ CLI, the web app, and this skill always agree.
 - `music commands --json` lists every command with its flags and its arguments as JSON Schema.
   `music <command> --help` shows one command.
 - Roles: the `owner` (the first account, exactly one) can do everything; `admin` runs people,
-  invites, libraries, and jobs; `member` listens and keeps playlists, likes, history, and API keys;
-  `guest` only listens to the libraries an admin added them to and has no API keys. `access` in
+  invites, libraries, and jobs, but only the owner changes another admin; `member` listens and
+  keeps playlists, likes, history, and API keys; `guest` only listens to the libraries they were
+  added to and has no API keys. `access` in
   `music commands --json` names what each command needs: `user` (anyone), `keys` (not guests),
   `admin`, or `owner`. Other callers get exit code 3 and `forbidden`.
 - Library visibility: `shared` is everyone but guests, `restricted` is only the people added with
   `music libraries grant`, and `private` is only the library's owner. Guests hear a shared library
-  once they are added to it.
+  once they are added to it. Only a library's own owner changes its visibility or who is added;
+  other admins can rename, rescan, and remove it (`forbidden` otherwise).
 
 ## Recipes
 
@@ -106,8 +108,8 @@ music invites create --email friend@example.com --json             # share .code
 music invites create --role guest --json                           # a friend who only listens
 ```
 
-Run the people on the server (admin). The owner cannot be changed, and nobody changes their own
-account this way:
+Run the people on the server (admin). The owner cannot be changed, only the owner changes another
+admin, and nobody changes their own account this way:
 
 ```sh
 music people list --json                       # .id, .role, .suspended, .lastActiveAt
@@ -119,7 +121,7 @@ music people remove <user-id>                  # deletes their data; their libra
 music people transfer <user-id>                # owner only: hand the server to an admin
 ```
 
-Share a library with specific people (admin):
+Share a library you own with specific people (admin; only the library's owner may):
 
 ```sh
 music libraries update <library-id> --visibility restricted --name "Kids"
@@ -224,10 +226,10 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 - `music libraries create --name <text> --path <text> [--visibility <shared|restricted|private>] [--wait [--timeout <seconds>]]`: Add a library folder and scan it. (admin; job: add `--wait`)
 - `music libraries scan <library-id> [--wait [--timeout <seconds>]]`: Rescan a library folder. (admin; job: add `--wait`)
 - `music libraries delete <library-id>`: Remove a library folder from the index (files stay on disk). (admin)
-- `music libraries update <library-id> [--name <text>] [--visibility <shared|restricted|private>]`: Rename a library folder or change who can listen to it. (admin)
+- `music libraries update <library-id> [--name <text>] [--visibility <shared|restricted|private>]`: Rename a library folder, or (its owner only) change who can listen to it. (admin)
 - `music libraries people <library-id>`: List the people added to a library folder. (admin)
-- `music libraries grant --library-id <id> --user-id <id>`: Let someone listen to a restricted library folder, or a guest to a shared one. (admin)
-- `music libraries revoke --library-id <id> --user-id <id>`: Take someone off a library folder's access list. (admin)
+- `music libraries grant --library-id <id> --user-id <id>`: Let someone listen to a restricted library folder you own, or a guest to a shared one. (admin)
+- `music libraries revoke --library-id <id> --user-id <id>`: Take someone off the access list of a library folder you own. (admin)
 
 ### jobs
 

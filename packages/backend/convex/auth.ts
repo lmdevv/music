@@ -72,6 +72,32 @@ const given = (value: string | undefined): string | undefined =>
 const scrypt = new Scrypt();
 
 /**
+ * A Scrypt hash of a phrase no account uses, to verify against when the account does not exist,
+ * so that path does the same work as a wrong password. Made on first use (hashing needs
+ * randomness, which a module may not use while it loads) and kept for the process.
+ */
+interface DummyHash {
+  hash?: Promise<string>;
+}
+
+const dummy: DummyHash = {};
+
+const dummyHash = (): Promise<string> => {
+  dummy.hash ??= scrypt.hash("no account has this password");
+
+  return dummy.hash;
+};
+
+/** What every failed password sign-in says, whether the email or the password was wrong. */
+const INVALID_CREDENTIALS = "Invalid email or password";
+
+const RATE_LIMITED_MESSAGE = "Too many failed sign-ins. Wait a few minutes and try again.";
+
+const invalidCredentials = (): never => {
+  throw new ConvexError({ code: "unauthenticated", message: INVALID_CREDENTIALS });
+};
+
+/**
  * Email and password accounts. It replaces Convex Auth's `Password` provider, which cannot refuse
  * a suspended account or take a reset link without email; everything else matches it.
  */
@@ -94,6 +120,13 @@ const password = ConvexCredentials<DataModel>({
 
       if (inviteCode !== undefined) profile.inviteCode = inviteCode;
 
+      // Convex Auth's `createAccount` signs in an existing account when the password matches,
+      // without the sign-in rate limit: sign-up would be an unlimited password oracle, and a way
+      // around suspension. An existing email is refused like any failed sign-in.
+      if (await ctx.runQuery(internal.users.hasPasswordAccount, { email })) {
+        return invalidCredentials();
+      }
+
       const { user } = await createAccount(ctx, {
         provider: PASSWORD,
         account: { id: email, secret: input.password },
@@ -106,10 +139,22 @@ const password = ConvexCredentials<DataModel>({
     }
 
     if (input.flow === "signIn") {
-      // Throws on a wrong password, before anything reveals that the account is suspended.
+      // Fails on a wrong password before anything reveals that the account is suspended.
       const { user } = await retrieveAccount(ctx, {
         provider: PASSWORD,
         account: { id: input.email.toLowerCase(), secret: input.password },
+      }).catch(async (cause: unknown) => {
+        const reason = cause instanceof Error ? cause.message : "";
+
+        if (reason === "TooManyFailedAttempts") {
+          throw new ConvexError({ code: "rate_limited", message: RATE_LIMITED_MESSAGE });
+        }
+
+        // An unknown email costs the same hash check as a wrong password, so timing does not
+        // tell them apart either.
+        if (reason === "InvalidAccountId") await scrypt.verify(await dummyHash(), input.password);
+
+        return invalidCredentials();
       });
 
       if (user.suspendedAt !== undefined) {

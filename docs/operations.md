@@ -187,3 +187,33 @@ Every service runs as its own unprivileged user; only the start-up script runs a
   `/proc/*/environ`.
 - Container ports bypass a NixOS firewall; the module publishes on `127.0.0.1` unless
   `openFirewall` is set.
+
+## Accounts and access
+
+- **Roles.** The first account is the `owner`: it can do everything, can't be demoted, suspended,
+  or removed, and can hand ownership to an admin. `admin`s run people, invites, libraries, and
+  jobs, but only the owner changes, suspends, resets, or removes another admin. `member`s listen
+  and keep their own playlists, likes, history, and API keys. `guest`s only hear the libraries
+  they were added to and have no API keys.
+- **Libraries.** `shared` is everyone but guests, `restricted` is only the people added, and
+  `private` is only the library's owner. Admins can rename, rescan, and remove any library and see
+  that it exists, but only a library's own owner changes who listens to it. When someone is
+  removed, their libraries move to the server's owner.
+- **Suspend and remove** end the person's sessions and API key sign-ins at once.
+- **Password reset without email.** An admin makes a one-time link in Settings → People (or
+  `music people reset <user-id>`); it lasts 24 hours, and stops working if its maker loses the
+  right to reset that person (demoted, suspended, removed, or the person became an admin). If the
+  owner is locked out, make a link with the admin key:
+
+  ```sh
+  docker exec music sh -c 'cd /app/backend && CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210 \
+    CONVEX_SELF_HOSTED_ADMIN_KEY="$(cat /data/secrets/admin_key)" \
+    ./node_modules/.bin/convex run passwordResets:createForEmail "{\"email\": \"you@example.com\"}"'
+  ```
+
+  Open `https://<your host>` + the `path` it prints.
+
+- **Known limit: signed stream URLs.** A stream or artwork URL is signed for whoever asked for it
+  and works without a session until it expires: up to 6 hours for streams (artwork URLs follow a
+  weekly schedule). After someone is suspended, removed, or loses access to a library, URLs they
+  already fetched keep working until then; they can't get new ones.
