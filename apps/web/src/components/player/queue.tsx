@@ -171,11 +171,14 @@ export function QueueList({
     if (removed === null || handled.current === removed || element === null) return;
 
     const active = document.activeElement;
+    // Inside Now Playing, the dialog takes focus when the removed row's button unmounts, so focus
+    // anywhere in the dialog around the list is still the user's place in the queue.
+    const area = element.closest("[role=dialog]") ?? element;
 
     const move = focusMove(removed, {
       now: Date.now(),
       trackIds: signature.length === 0 ? [] : signature.split(" "),
-      focusFree: active === null || active === document.body || element.contains(active),
+      focusFree: active === null || active === document.body || area.contains(active),
     });
 
     if (move === "wait") return;
