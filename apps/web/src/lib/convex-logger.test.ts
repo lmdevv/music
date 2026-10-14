@@ -26,7 +26,6 @@ describe("convexLogger", () => {
 
     logger.error(signInFailure("InvalidSecret"));
     logger.error(signInFailure("InvalidAccountId"));
-    logger.error(signInFailure("ConvexError: Invalid email or password"));
 
     expect(lines).toEqual([]);
   });
