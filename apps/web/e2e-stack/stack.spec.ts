@@ -534,10 +534,18 @@ test("album cards and song rows expose their play buttons", async ({ page }) => 
 
   await page.goto("/songs");
 
+  // The playing song shows its bars instead of a play button, and the album just played can hold
+  // the first song by title, so pick the first song that isn't playing.
+  const menu = page
+    .locator("main [role=row]:not([aria-current=true])")
+    .getByRole("button", { name: /^More actions for / })
+    .first();
+
+  const menuLabel = (await menu.getAttribute("aria-label")) ?? "";
+
   const row = page
     .locator("main [role=row]")
-    .filter({ has: page.getByRole("button", { name: /^More actions for / }) })
-    .first();
+    .filter({ has: page.getByRole("button", { name: menuLabel, exact: true }) });
 
   // No hover: role queries skip display:none, so finding it proves screen readers can, and
   // focusing it and pressing Enter is how a keyboard plays the song.
