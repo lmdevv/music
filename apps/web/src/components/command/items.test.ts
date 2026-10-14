@@ -69,7 +69,6 @@ const command = (name: "playlists.create"): Item => ({
   section: "Commands",
   name,
   fields: fieldsOf(name) ?? [],
-  defaults: {},
 });
 
 const ids = (items: ReadonlyArray<Item>) => items.map((item) => item.id);

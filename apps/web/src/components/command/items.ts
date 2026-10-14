@@ -10,7 +10,7 @@ import type { CommandName, MutationName } from "@music/commands/registry";
 import { foldSearchText } from "@music/commands/search-text";
 import type { LucideIcon } from "lucide-react";
 
-import type { FieldSpec, FormValues } from "./fields";
+import type { FieldSpec } from "./fields";
 
 /**
  * One row in the command menu: the song playing, a library record, a registry command, or a
@@ -44,7 +44,6 @@ export type Item =
       readonly section: string;
       readonly name: MutationName;
       readonly fields: ReadonlyArray<FieldSpec>;
-      readonly defaults: FormValues;
     }
   | {
       readonly kind: "action";

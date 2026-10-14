@@ -1,66 +1,22 @@
-import type { MutationName } from "@music/commands/registry";
-import { usePlayer, usePlayerPosition } from "@music/player/react";
+import { usePlayer } from "@music/player/react";
 import { useRead, useReadOnce } from "@music/sdk/react";
 import { useNavigate } from "@tanstack/react-router";
-import { Match } from "effect";
 import { HeartIcon, ListMusicIcon, PlusIcon, SpeakerIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { usePlayTracks } from "@/components/library/cards";
-import { NEXT_REPEAT } from "@/components/player/controls";
 import { useUi } from "@/components/shell/ui-state";
 import { toastFailure } from "@/lib/action";
 import { readPages } from "@/lib/read-pages";
 
 import { offeredCommands, offeredScreens } from "./catalog";
 import type { Route } from "./catalog";
-import type { FieldSpec, FormValues } from "./fields";
 import { browseItems, cliOf, searchItems } from "./items";
 import type { Item } from "./items";
 
 /** Most liked songs "Shuffle liked songs" reads; the queue keeps 1,000 of them. */
 const SHUFFLE_LIMIT = 2000;
-
-/** Default form values from what is playing and on screen. */
-const useDefaults = (): ((name: MutationName, fields: ReadonlyArray<FieldSpec>) => FormValues) => {
-  const player = usePlayer();
-  const position = usePlayerPosition();
-  const me = useRead("account.me", {});
-  const libraries = useRead("libraries.list", {});
-
-  return (name, fields) => {
-    const values: Record<string, FormValues[string]> = {};
-
-    for (const field of fields) {
-      if (field.field.kind === "boolean" && !field.optional) values[field.name] = false;
-    }
-
-    const track = player.track;
-
-    const extra: FormValues = Match.value(name).pipe(
-      Match.when("likes.set", () =>
-        track === null ? {} : { trackId: track.id, liked: !track.liked },
-      ),
-      Match.when("playback.shuffle", () => ({ on: !player.shuffle })),
-      Match.when("playback.repeat", () => ({ mode: NEXT_REPEAT[player.repeat] })),
-      Match.when("playback.volume", () => ({ volume: String(player.volume) })),
-      Match.when("playback.seek", () => ({ positionMs: String(Math.round(position)) })),
-      Match.when("playback.jump", () => ({ index: String(player.index) })),
-      Match.when("account.rename", () => ({ name: me?.name ?? undefined })),
-      // With one folder there is nothing to choose; removing one is left to an explicit pick.
-      Match.when("libraries.scan", () =>
-        libraries?.length === 1 && libraries[0] !== undefined ? { libraryId: libraries[0].id } : {},
-      ),
-      Match.whenOr("queue.add", "playback.play", "playlists.add", () =>
-        track === null ? {} : { trackIds: [track.id] },
-      ),
-      Match.orElse(() => ({})),
-    );
-
-    return { ...values, ...extra };
-  };
-};
 
 /** The menu's rows for the current query. */
 interface MenuItems {
@@ -83,7 +39,6 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
   const player = usePlayer();
   const ui = useUi();
   const navigate = useNavigate();
-  const defaults = useDefaults();
   const me = useRead("account.me", {});
   const home = useRead("library.home", {});
   const playlists = useRead("playlists.list", {});
@@ -193,12 +148,11 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
         section: "Commands",
         name,
         fields,
-        defaults: defaults(name, fields),
       }),
     );
 
     return [...quick, ...registry, ...screens];
-  }, [admin, defaults, navigate, onClose, player.track, playTracks, readLikes, ui]);
+  }, [admin, navigate, onClose, player.track, playTracks, readLikes, ui]);
 
   const items = useMemo(
     (): ReadonlyArray<Item> =>

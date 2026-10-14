@@ -19,6 +19,7 @@ import { formatCount } from "@/lib/format";
 import { ArgsForm } from "./args-form";
 import type { MenuContext } from "./args-form";
 import { missingFields, rawArgs } from "./fields";
+import { useCommandDefaults } from "./command-defaults";
 import type { FieldSpec, FormValues } from "./fields";
 import { cliOf } from "./items";
 import { jobMeta, outcomeOf } from "./outcome";
@@ -40,7 +41,6 @@ type Outcome =
 export function CommandPreview({
   name,
   fields,
-  defaults,
   context,
   onClose,
   onBack,
@@ -48,12 +48,12 @@ export function CommandPreview({
 }: PreviewProps & {
   readonly name: MutationName;
   readonly fields: ReadonlyArray<FieldSpec>;
-  readonly defaults: FormValues;
   readonly context: MenuContext;
 }) {
   const convex = useConvex();
   const client = useMemo(() => makeMusicClient(convex), [convex]);
   const navigate = useNavigate();
+  const defaults = useCommandDefaults(name, fields);
   // Only fields the person changed are kept; the rest follow live defaults such as the current song.
   const [edits, setEdits] = useState<FormValues>({});
   const values: FormValues = { ...defaults, ...edits };

@@ -90,7 +90,6 @@ export function Preview({
         <CommandPreview
           name={item.name}
           fields={item.fields}
-          defaults={item.defaults}
           context={context}
           onClose={onClose}
           onBack={onBack}
