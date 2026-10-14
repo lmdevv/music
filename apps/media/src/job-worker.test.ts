@@ -108,7 +108,7 @@ describe("JobWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       }),
     ));
 
-  it("deletes the artwork nothing uses once a scan changed songs", () =>
+  it("deletes the artwork a scan stopped using once nothing else uses it", () =>
     runScoped(
       Effect.gen(function* () {
         const { root } = yield* fixtureLibrary;
@@ -131,8 +131,13 @@ describe("JobWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           .update(yield* Files.readWholeFile(cover))
           .digest("hex");
 
+        // Art nothing uses that this scan did not stop using waits for the next full collection:
+        // a scan asks Convex only about the art it changed.
+        const orphan = createHash("sha256").update("orphan").digest("hex");
+        yield* Files.writeFileAtomic(join(art, orphan), new Uint8Array([0xff, 0xd8, 0xff]), "x");
+
         // An hour later, the album's cover is replaced.
-        for (const name of before) {
+        for (const name of [...before, orphan]) {
           yield* Effect.promise(() => setFileTime(join(art, name), Date.now() - 60 * 60 * 1000));
         }
 
@@ -154,6 +159,7 @@ describe("JobWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           [
             ...before.filter((name) => name !== oldCover),
             createHash("sha256").update(replaced).digest("hex"),
+            orphan,
           ].toSorted(),
         );
       }),

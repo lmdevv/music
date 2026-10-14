@@ -3,16 +3,17 @@
  * renews its lease while the scan runs, stops when the job is cancelled, and reports the result.
  * Claims are guarded by Convex and scans are idempotent, so a job that runs twice is harmless.
  *
- * It also deletes the artwork nothing uses any more: at startup, after a scan that changed
- * songs, and a while after a library is deleted (Convex purges its songs in the background).
- * Collections and jobs take turns, so no scan of this worker is storing artwork meanwhile.
+ * It also deletes the artwork nothing uses any more: all of it at startup and a while after a
+ * library is deleted (Convex purges its songs in the background), and after a scan the artwork
+ * that scan stopped using. Collections and jobs take turns, so no scan of this worker is storing
+ * artwork meanwhile.
  */
 import { hostname } from "node:os";
 
 import type { JobId } from "@music/commands/ids";
 import { Cause, Data, Effect, Layer, Option, Ref, Schedule, Semaphore, Stream } from "effect";
 
-import { collectUnusedArt } from "./art-collector.ts";
+import { collectReleasedArt, collectUnusedArt } from "./art-collector.ts";
 import {
   type JobOutcome,
   type JobProgress,
@@ -46,9 +47,6 @@ const outcomeOf = (end: JobEnd): JobOutcome | undefined =>
     Failed: ({ error }): JobOutcome => ({ status: "failed", error }),
     Cancelled: () => undefined,
   });
-
-const changedSongs = (summary: ScanSummary): boolean =>
-  summary.updated + summary.moved + summary.missing > 0;
 
 const runJob = Effect.fn("JobWorker.runJob")(
   function* (jobId: JobId, workerId: string) {
@@ -110,9 +108,9 @@ const runJob = Effect.fn("JobWorker.runJob")(
     yield* backend.finishJob(jobId, workerId, outcome);
     yield* Effect.logInfo("JobWorker.finished").pipe(Effect.annotateLogs({ outcome }));
 
-    // Artwork only falls out of use when songs change.
-    if (JobEnd.$is("Finished")(end) && changedSongs(end.summary)) {
-      yield* collectUnusedArt().pipe(
+    // Artwork only falls out of use where songs changed, and Convex says where.
+    if (JobEnd.$is("Finished")(end)) {
+      yield* collectReleasedArt(end.summary.releasedArt).pipe(
         Effect.catchTags({
           BackendError: (error) => Effect.logWarning("JobWorker.art_collection_failed", error),
           FileError: (error) => Effect.logWarning("JobWorker.art_collection_failed", error),

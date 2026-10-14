@@ -6,7 +6,7 @@
  */
 import { Clock, Duration, Effect } from "effect";
 
-import { sweepArt } from "./art-store.ts";
+import { deleteArt, sweepArt } from "./art-store.ts";
 import { type ArtHashPage, type ArtworkTable, MediaBackend } from "./media-backend.ts";
 import { MediaConfig } from "./media-config.ts";
 
@@ -51,6 +51,49 @@ export const collectUnusedArt = Effect.fn("ArtCollector.collect")(function* () {
   if (inUse.size === 0) return 0;
   const now = yield* Clock.currentTimeMillis;
   const removed = yield* sweepArt(dataDir, inUse, now - Duration.toMillis(GRACE));
+
+  if (removed > 0) {
+    yield* Effect.logInfo("ArtCollector.collected").pipe(Effect.annotateLogs({ removed }));
+  }
+
+  return removed;
+});
+
+/** Hashes per `artInUse` call. */
+const CHECK_BATCH = 200;
+
+/**
+ * Deletes the artwork among `released` (what a scan's batches stopped using somewhere) that no
+ * track, album, or artist uses any more and that is older than ten minutes. It asks Convex about
+ * these hashes only, so a scan that changed a few songs costs a few lookups rather than a walk
+ * over every song, album, and artist. Art it misses (an album deleted after the scan asked) goes
+ * at the next full collection.
+ *
+ * @returns How many files were deleted, or `BackendError` when Convex could not say which
+ *   artwork is in use, or `FileError` when a file could not be deleted.
+ */
+export const collectReleasedArt = Effect.fn("ArtCollector.collectReleased")(function* (
+  released: ReadonlySet<string>,
+) {
+  if (released.size === 0) return 0;
+  const backend = yield* MediaBackend;
+  const { dataDir } = yield* MediaConfig;
+  const hashes = [...released];
+  const inUse = new Set<string>();
+
+  for (let start = 0; start < hashes.length; start += CHECK_BATCH) {
+    const used = yield* backend.artInUse(hashes.slice(start, start + CHECK_BATCH));
+
+    for (const hash of used) inUse.add(hash);
+  }
+
+  const now = yield* Clock.currentTimeMillis;
+
+  const removed = yield* deleteArt(
+    dataDir,
+    hashes.filter((hash) => !inUse.has(hash)),
+    now - Duration.toMillis(GRACE),
+  );
 
   if (removed > 0) {
     yield* Effect.logInfo("ArtCollector.collected").pipe(Effect.annotateLogs({ removed }));

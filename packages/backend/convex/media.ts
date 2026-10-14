@@ -9,7 +9,8 @@ import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx } from "./_generated/server";
 import { enqueueScan } from "./handlers/admin";
-import { markTrackMissing, moveScannedTrack, upsertScannedTrack } from "./lib/catalog";
+import { catalogBatch } from "./lib/catalog";
+import { fail } from "./lib/errors";
 import { firstOverlap, isClaimed, normaliseLibraryPath } from "./lib/paths";
 import { inOrder } from "./lib/sequence";
 import { requireService } from "./lib/service";
@@ -19,6 +20,9 @@ const LEASE_MS = 60_000;
 const FINGERPRINT_PAGE = 1000;
 
 const ART_PAGE = 1000;
+
+/** Most hashes one `artInUse` call checks: three index lookups each. */
+const ART_CHECK = 200;
 
 const scannedTrack = v.object({
   path: v.string(),
@@ -83,7 +87,9 @@ export const claimJob = mutation({
       workerId,
       leaseUntil: now + LEASE_MS,
       startedAt: job.startedAt ?? now,
+      // Progress is this lease's own: a lease that ends before it reports any is a stall.
       done: 0,
+      total: undefined,
     });
 
     return {
@@ -253,19 +259,32 @@ export const finishJob = mutation({
   },
 });
 
-/** Known files in a library, for skipping unchanged files and finding missing ones. */
+/**
+ * Known files in a library, for skipping unchanged files and finding missing ones. With `from`
+ * and `to`, only paths from `from` (inclusive) up to `to` (exclusive), in code point order: the
+ * self-hosted backend's cost for an index range grows with the range's size however few rows a
+ * page takes, so the media service splits the library into ranges of about a page each and reads
+ * them side by side instead of paging through the whole library one page after another.
+ */
 export const fingerprints = query({
   args: {
     secret: v.string(),
     libraryId: v.id("libraries"),
     cursor: v.union(v.string(), v.null()),
+    from: v.optional(v.string()),
+    to: v.optional(v.string()),
   },
-  handler: async (ctx, { secret, libraryId, cursor }) => {
+  handler: async (ctx, { secret, libraryId, cursor, from, to }) => {
     requireService(secret);
 
     const page = await ctx.db
       .query("tracks")
-      .withIndex("by_library_path", (q) => q.eq("libraryId", libraryId))
+      .withIndex("by_library_path", (q) => {
+        const library = q.eq("libraryId", libraryId);
+        const lower = from === undefined ? library : library.gte("path", from);
+
+        return to === undefined ? lower : lower.lt("path", to);
+      })
       .paginate({ cursor, numItems: FINGERPRINT_PAGE });
 
     return {
@@ -287,7 +306,10 @@ export const fingerprints = query({
   },
 });
 
-/** Upserts a batch of scanned files. Keep batches at 100 files or fewer. */
+/**
+ * Upserts a batch of scanned files. Keep batches at 100 files or fewer. `released` lists the
+ * artwork the batch stopped using somewhere, for the media service to check with `artInUse`.
+ */
 export const upsertTracks = mutation({
   args: {
     secret: v.string(),
@@ -297,11 +319,12 @@ export const upsertTracks = mutation({
   handler: async (ctx, { secret, libraryId, tracks }) => {
     requireService(secret);
 
-    if ((await ctx.db.get(libraryId)) === null) return { upserted: 0 };
+    if ((await ctx.db.get(libraryId)) === null) return { upserted: 0, released: [] };
+    const batch = catalogBatch(ctx, libraryId);
 
-    await inOrder(tracks, (track) => upsertScannedTrack(ctx, libraryId, track));
+    await inOrder(tracks, (track) => batch.upsert(track));
 
-    return { upserted: tracks.length };
+    return { upserted: tracks.length, released: await batch.finish() };
   },
 });
 
@@ -319,14 +342,15 @@ export const moveTracks = mutation({
   handler: async (ctx, { secret, libraryId, moves }) => {
     requireService(secret);
 
-    if ((await ctx.db.get(libraryId)) === null) return { moved: 0 };
+    if ((await ctx.db.get(libraryId)) === null) return { moved: 0, released: [] };
+    const batch = catalogBatch(ctx, libraryId);
     let moved = 0;
 
     await inOrder(moves, async ({ from, track }) => {
-      if (await moveScannedTrack(ctx, libraryId, from, track)) moved += 1;
+      if (await batch.move(from, track)) moved += 1;
     });
 
-    return { moved };
+    return { moved, released: await batch.finish() };
   },
 });
 
@@ -335,10 +359,49 @@ export const markMissing = mutation({
   args: { secret: v.string(), libraryId: v.id("libraries"), paths: v.array(v.string()) },
   handler: async (ctx, { secret, libraryId, paths }) => {
     requireService(secret);
+    const batch = catalogBatch(ctx, libraryId);
 
-    await inOrder(paths, (path) => markTrackMissing(ctx, libraryId, path));
+    await inOrder(paths, (path) => batch.markMissing(path));
 
-    return { marked: paths.length };
+    return { marked: paths.length, released: await batch.finish() };
+  },
+});
+
+/**
+ * Which of `hashes` (at most 200) a track, album, or artist still uses, so the media service can
+ * delete the artwork a scan stopped using without listing every hash in use.
+ */
+export const artInUse = query({
+  args: { secret: v.string(), hashes: v.array(v.string()) },
+  handler: async (ctx, { secret, hashes }) => {
+    requireService(secret);
+
+    if (hashes.length > ART_CHECK) {
+      return fail("invalid_args", `Check at most ${ART_CHECK} hashes at once`);
+    }
+
+    const used = await Promise.all(
+      hashes.map(async (hash) => {
+        const [track, album, artist] = await Promise.all([
+          ctx.db
+            .query("tracks")
+            .withIndex("by_art", (q) => q.eq("artHash", hash))
+            .first(),
+          ctx.db
+            .query("albums")
+            .withIndex("by_art", (q) => q.eq("artHash", hash))
+            .first(),
+          ctx.db
+            .query("artists")
+            .withIndex("by_art", (q) => q.eq("artHash", hash))
+            .first(),
+        ]);
+
+        return track !== null || album !== null || artist !== null;
+      }),
+    );
+
+    return { inUse: hashes.filter((_, index) => used[index] === true) };
   },
 });
 

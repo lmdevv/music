@@ -15,7 +15,8 @@
     "./text": "./src/text.ts",
     "./permissions": "./src/permissions.ts",
     "./folder-ids": "./src/folder-ids.ts",
-    "./system-folders": "./src/system-folders.ts"
+    "./system-folders": "./src/system-folders.ts",
+    "./text-order": "./src/text-order.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

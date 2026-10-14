@@ -62,6 +62,35 @@ export const sweepArt = Effect.fn("ArtStore.sweep")(function* (
   return unused.length;
 });
 
+/**
+ * Deletes the stored artwork of `hashes` that was last written before `before`, like `sweepArt`
+ * but without listing the art store. Hashes with no stored file are skipped.
+ *
+ * @returns How many files were deleted.
+ */
+export const deleteArt = Effect.fn("ArtStore.delete")(function* (
+  dataDir: string,
+  hashes: Iterable<string>,
+  before: number,
+) {
+  const deleted = yield* Effect.forEach(
+    [...hashes].filter(isArtHash),
+    (hash) =>
+      Effect.gen(function* () {
+        const path = artPath(dataDir, hash);
+        const info = yield* Files.statPath(path).pipe(Effect.option);
+
+        if (Option.isNone(info) || info.value.mtimeMs >= before) return false;
+        yield* Files.removePath(path);
+
+        return true;
+      }),
+    { concurrency: 8 },
+  );
+
+  return deleted.filter(Boolean).length;
+});
+
 /** The image `Content-Type` from the first bytes of a file. */
 export const imageContentType = (head: Uint8Array): string => {
   if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47)

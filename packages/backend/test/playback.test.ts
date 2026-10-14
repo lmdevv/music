@@ -626,6 +626,25 @@ describe("what a position report costs", () => {
     // The session (read, then read again by its patch), the queue row (read to locate the song,
     // then to save), and the one song: never the other 999.
     expect(cost).toEqual({ read: 5, written: 1 });
+
+    // A player that names no song (the CLI) costs the same while it reports the current one.
+    const unnamed = await admin.as.mutation(async (ctx) => {
+      const viewer = await loadViewer(ctx);
+      const before = await ctx.meta.getTransactionMetrics();
+
+      await playbackMutations["playback.report"](ctx, viewer, {
+        deviceId: DEVICE,
+        index: 0,
+        positionMs: 30_100,
+        playing: true,
+      });
+
+      const after = await ctx.meta.getTransactionMetrics();
+
+      return after.documentsRead.used - before.documentsRead.used;
+    });
+
+    expect(unnamed).toBe(5);
   });
 });
 

@@ -16,6 +16,7 @@ import { signResource } from "@music/commands/signed-url";
 
 import type { Doc, Id } from "../_generated/dataModel";
 import { mediaBaseUrl, requireEnv } from "./env";
+import type { LibraryCounts } from "./stats";
 import { canRead } from "./viewer";
 import type { ReadCtx, Viewer } from "./viewer";
 
@@ -174,6 +175,8 @@ export const ownerLabel = (owner: Doc<"users"> | null, viewerRole: Role): string
 /** A library folder as clients see it. */
 export const presentLibrary = (
   doc: Doc<"libraries">,
+  /** Its counters, from `libraryCounts`. */
+  counts: LibraryCounts,
   /** How to name the owner: see `ownerLabel`. */
   ownerName: string | null,
   readable: boolean,
@@ -191,7 +194,7 @@ export const presentLibrary = (
   ownerId: doc.ownerId,
   ownerName,
   readable,
-  trackCount: doc.trackCount,
+  trackCount: counts.trackCount,
   lastScanAt: doc.lastScanAt ?? null,
   scanning,
 });
