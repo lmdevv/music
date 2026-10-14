@@ -13,6 +13,7 @@ import { v } from "convex/values";
 
 import { internal } from "./_generated/api";
 import { internalMutation, type MutationCtx } from "./_generated/server";
+import { enqueueScan } from "./handlers/admin";
 import { albumSearchText, artistSearchText, trackSearchText } from "./lib/catalog";
 import { clearedLegacyQueue, hasLegacyQueue, legacyQueue, saveQueue } from "./lib/queue";
 
@@ -93,6 +94,21 @@ const MIGRATIONS = {
     return page;
   },
   /**
+   * Libraries from before real folders were claimed (`media:claimRoot`) have none; a scan for
+   * each makes the media service claim it now rather than at its next periodic scan.
+   */
+  claimLibraryRoots: async (ctx, cursor) => {
+    const page = await ctx.db.query("libraries").paginate({ cursor, numItems: BATCH });
+
+    await Promise.all(
+      page.page
+        .filter((library) => library.realPath === undefined)
+        .map((library) => enqueueScan(ctx, library._id, library.ownerId)),
+    );
+
+    return page;
+  },
+  /**
    * Servers from before owners have admins only; the earliest-created admin becomes the owner.
    * One batch: the `by_role` index finds both rows directly.
    */
@@ -126,6 +142,7 @@ const migrationName = v.union(
   v.literal("foldArtistSearchText"),
   v.literal("splitPlaybackQueues"),
   v.literal("promoteOwner"),
+  v.literal("claimLibraryRoots"),
 );
 
 const NAMES: ReadonlyArray<MigrationName> = [
@@ -134,6 +151,7 @@ const NAMES: ReadonlyArray<MigrationName> = [
   "foldArtistSearchText",
   "splitPlaybackQueues",
   "promoteOwner",
+  "claimLibraryRoots",
 ];
 
 /**

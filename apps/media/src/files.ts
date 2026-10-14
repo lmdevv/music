@@ -102,6 +102,10 @@ export const walkTree = (
 ): Effect.Effect<ReadonlyArray<NodeFiles.WalkedFile>, FileError> =>
   attempt("walk", root, () => NodeFiles.walkTree(root, include));
 
+/** The canonical path of `path` through every link. Fails with `FileError` when it does not exist. */
+export const realPath = (path: string): Effect.Effect<string, FileError> =>
+  attempt("realpath", path, () => NodeFiles.realPath(path));
+
 /**
  * The canonical path of `path` when it resolves, through any symlinks, to somewhere inside the
  * canonical `root`; `None` when it escapes. Fails with `FileError` when either does not exist.

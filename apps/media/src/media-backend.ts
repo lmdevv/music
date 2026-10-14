@@ -99,6 +99,14 @@ export interface TrackSource extends Schema.Schema.Type<typeof TrackSource> {}
 
 const ReportResult = Schema.Struct({ cancelled: Schema.Boolean });
 
+const RootClaim = Schema.Union([
+  Schema.Struct({ ok: Schema.Literal(true) }),
+  Schema.Struct({ ok: Schema.Literal(false), error: Schema.String }),
+]);
+
+/** Whether Convex accepted a library's real folder, and why not. */
+export type RootClaim = Schema.Schema.Type<typeof RootClaim>;
+
 const MoveResult = Schema.Struct({ moved: Schema.Finite });
 
 /** Tags read from one file, in the shape `media:upsertTracks` accepts. */
@@ -154,6 +162,11 @@ type Secret = { secret: string };
 const functions = {
   pendingJobs: makeFunctionReference<"query", Secret, unknown>("media:pendingJobs"),
   libraries: makeFunctionReference<"query", Secret, unknown>("media:libraries"),
+  claimRoot: makeFunctionReference<
+    "mutation",
+    Secret & { libraryId: string; realPath: string },
+    unknown
+  >("media:claimRoot"),
   claimJob: makeFunctionReference<
     "mutation",
     Secret & { jobId: string; workerId: string },
@@ -225,6 +238,14 @@ export interface Interface {
     jobId: JobId,
     workerId: string,
   ) => Effect.Effect<Option.Option<ClaimedJob>, BackendError>;
+  /**
+   * Claims the real folder a library's path resolves to before it is scanned. Refused when it
+   * overlaps another library's folder; the error names no other folder.
+   */
+  readonly claimRoot: (
+    libraryId: LibraryId,
+    realPath: string,
+  ) => Effect.Effect<RootClaim, BackendError>;
   /** Reports progress and renews the lease. Returns true when the job was cancelled. */
   readonly reportJob: (
     jobId: JobId,
@@ -289,6 +310,8 @@ export const resubscribeSchedule = Schedule.min([
 const decodeClaim = Schema.decodeUnknownEffect(Schema.NullOr(ClaimedJob));
 
 const decodeReport = Schema.decodeUnknownEffect(ReportResult);
+
+const decodeRootClaim = Schema.decodeUnknownEffect(RootClaim);
 
 const decodeMove = Schema.decodeUnknownEffect(MoveResult);
 
@@ -364,6 +387,17 @@ const make = Effect.gen(function* () {
       const claimed = yield* decodeClaim(result).pipe(Effect.mapError(decodeFailure("claimJob")));
 
       return Option.fromNullOr(claimed);
+    }),
+
+    claimRoot: Effect.fn("MediaBackend.claimRoot")(function* (
+      libraryId: LibraryId,
+      realPath: string,
+    ) {
+      const result = yield* call("claimRoot", () =>
+        client.mutation(functions.claimRoot, { secret: secret(), libraryId, realPath }),
+      );
+
+      return yield* decodeRootClaim(result).pipe(Effect.mapError(decodeFailure("claimRoot")));
     }),
 
     reportJob: Effect.fn("MediaBackend.reportJob")(function* (

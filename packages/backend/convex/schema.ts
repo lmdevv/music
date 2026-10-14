@@ -102,6 +102,12 @@ export default defineSchema({
   libraries: defineTable({
     name: v.string(),
     path: v.string(),
+    /**
+     * The folder `path` resolves to through links and mounts, as the media service last found it
+     * before a scan (`media:claimRoot`). No two libraries' real folders may overlap. Missing until
+     * the first scan after the library was added or this field was.
+     */
+    realPath: v.optional(v.string()),
     visibility,
     ownerId: v.id("users"),
     lastScanAt: v.optional(v.number()),

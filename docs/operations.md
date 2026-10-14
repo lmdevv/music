@@ -197,9 +197,19 @@ Every service runs as its own unprivileged user; only the start-up script runs a
   they were added to and have no API keys.
 - **Libraries.** `shared` is everyone but guests, `restricted` is only the people added, and
   `private` is only the library's owner. Admins rename, rescan, and remove the libraries they can
-  listen to; the server's owner manages every library. Admins see that the other libraries exist
-  (name, owner, visibility, song count) but not their folders. Only a library's own owner changes
-  who listens to it. When someone is removed, their libraries move to the server's owner.
+  listen to; the server's owner manages every library. Only a library's own owner, or the
+  server's owner, removes it. Admins see that the other libraries exist (name, owner,
+  visibility, song count) but not their folders. Only a library's own owner changes who listens
+  to it. When someone is removed, their libraries move to the server's owner.
+- **Library folders (`MUSIC_ROOTS`).** Before every scan the media service resolves a library's
+  folder through links and mounts and claims the real folder; a folder that is, sits inside, or
+  holds another library's real folder is not scanned, and the job says so without naming the
+  other folder. Library folders must also be inside `MUSIC_ROOTS` (comma-separated absolute
+  folders): the image sets `/music`, where Docker, Compose, and the NixOS module mount your music,
+  so a folder elsewhere (or a link out of `/music`) is refused. Set `MUSIC_ROOTS` on the container
+  to allow others; outside the image (development) it is unset and every folder is allowed.
+  `/proc`, `/sys`, and `/dev` are always refused. Libraries added before this check claim their
+  folder at their next scan, which an upgrade starts for each of them.
 - **Suspend and remove** end the person's sessions and API key sign-ins at once.
 - **Password reset without email.** An admin makes a one-time link in Settings → People (or
   `music people reset <user-id>`); it lasts 24 hours, and stops working if its maker loses the
@@ -218,8 +228,9 @@ Every service runs as its own unprivileged user; only the start-up script runs a
   "Too many failed sign-ins" for a while; an email with no account never does. Someone who tries
   more than 10 passwords can tell the two apart.
 - **Known limit: folder paths.** Adding a library refuses a folder that is, is inside, or contains
-  another library's folder (so no files are indexed twice), naming a library you can't hear only
-  as "another library". An admin who guesses folder paths can learn that one is taken.
+  another library's folder (so no files are indexed twice); for a library you can't hear it says
+  only "This folder overlaps another library", naming no folder. An admin who guesses folder
+  paths can still learn that one is taken.
 - **Known limit: signed stream URLs.** A stream or artwork URL is signed for whoever asked for it
   and works without a session until it expires: up to 6 hours for streams (artwork URLs follow a
   weekly schedule). After someone is suspended, removed, or loses access to a library, URLs they

@@ -56,8 +56,8 @@ CLI, the web app, and this skill always agree.
 - Library visibility: `shared` is everyone but guests, `restricted` is only the people added with
   `music libraries grant`, and `private` is only the library's owner. Guests hear a shared library
   once they are added to it. Only a library's own owner changes its visibility or who is added
-  (`forbidden` otherwise). Admins rename, rescan, and remove libraries they can listen to, and the
-  server's owner every library; `music libraries list` shows other libraries with `path: null` and
+  (`forbidden` otherwise). Admins rename and rescan libraries they can listen to, and the
+  server's owner every library; only a library's own owner or the server's owner removes it; `music libraries list` shows other libraries with `path: null` and
   `manageable: false`, and commands on them answer `not_found`.
 
 ## Recipes
@@ -227,7 +227,7 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 - `music libraries list`: List library folders you can see.
 - `music libraries create --name <text> --path <text> [--visibility <shared|restricted|private>] [--wait [--timeout <seconds>]]`: Add a library folder and scan it. (admin; job: add `--wait`)
 - `music libraries scan <library-id> [--wait [--timeout <seconds>]]`: Rescan a library folder. (admin; job: add `--wait`)
-- `music libraries delete <library-id>`: Remove a library folder from the index (files stay on disk). (admin)
+- `music libraries delete <library-id>`: Remove a library folder from the index (its owner or the server owner; files stay on disk). (admin)
 - `music libraries update <library-id> [--name <text>] [--visibility <shared|restricted|private>]`: Rename a library folder, or (its owner only) change who can listen to it. (admin)
 - `music libraries people <library-id>`: List the people added to a library folder. (admin)
 - `music libraries grant --library-id <id> --user-id <id>`: Let someone listen to a restricted library folder you own, or a guest to a shared one. (admin)

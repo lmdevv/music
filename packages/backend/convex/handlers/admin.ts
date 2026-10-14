@@ -1,4 +1,9 @@
-import { assignableRoles, can, canChangeLibraryAccess } from "@music/commands/permissions";
+import {
+  assignableRoles,
+  can,
+  canChangeLibraryAccess,
+  canRemoveLibrary,
+} from "@music/commands/permissions";
 import { Match } from "effect";
 
 import { internal } from "../_generated/api";
@@ -7,7 +12,7 @@ import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { randomToken, sha256Hex } from "../lib/crypto";
 import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
-import { normaliseLibraryPath, overlapOf } from "../lib/paths";
+import { firstOverlap, isSystemPath, normaliseLibraryPath } from "../lib/paths";
 import { presentJob, presentLibrary } from "../lib/present";
 import { endSession } from "../lib/sessions";
 import { canManage, canRead, loadPerson, roleOf } from "../lib/viewer";
@@ -104,22 +109,23 @@ const visibleJob = async (ctx: QueryCtx, viewer: Viewer, id: string): Promise<Do
 const checkNoOverlap = async (ctx: QueryCtx, viewer: Viewer, path: string): Promise<void> => {
   // Every folder must be compared, and an install has a handful of libraries (`loadViewer` reads
   // them all on every request too).
-  const libraries = await ctx.db.query("libraries").collect();
+  const found = firstOverlap(await ctx.db.query("libraries").collect(), path);
 
-  for (const library of libraries) {
-    const other = normaliseLibraryPath(library.path) ?? library.path;
-    const overlap = overlapOf(path, other);
+  if (found === null) return;
+  const { library, overlap } = found;
 
-    if (overlap === "apart") continue;
-    const name = canRead(viewer, library._id) ? `${library.name} (${other})` : "another library";
+  // Neither path is said for a library the viewer can't hear: not even the one they typed, which
+  // would confirm a guess at where it lives.
+  if (!canRead(viewer, library._id))
+    return fail("conflict", "This folder overlaps another library");
+  const name = `${library.name} (${normaliseLibraryPath(library.path) ?? library.path})`;
 
-    return Match.value(overlap).pipe(
-      Match.when("same", () => fail("conflict", `${path} is already the folder of ${name}`)),
-      Match.when("inside", () => fail("conflict", `${path} is inside the folder of ${name}`)),
-      Match.when("contains", () => fail("conflict", `${path} contains the folder of ${name}`)),
-      Match.exhaustive,
-    );
-  }
+  return Match.value(overlap).pipe(
+    Match.when("same", () => fail("conflict", `${path} is already the folder of ${name}`)),
+    Match.when("inside", () => fail("conflict", `${path} is inside the folder of ${name}`)),
+    Match.when("contains", () => fail("conflict", `${path} contains the folder of ${name}`)),
+    Match.exhaustive,
+  );
 };
 
 const grantOf = (
@@ -244,6 +250,10 @@ export const adminMutations = {
       normaliseLibraryPath(args.path) ??
       fail("invalid_args", `Use an absolute folder path, such as /music, not ${args.path}`);
 
+    if (isSystemPath(path)) {
+      return fail("invalid_args", "A library folder can't be in /proc, /sys, or /dev");
+    }
+
     await checkNoOverlap(ctx, viewer, path);
 
     const libraryId = await ctx.db.insert("libraries", {
@@ -324,6 +334,12 @@ export const adminMutations = {
 
   "libraries.delete": async (ctx, viewer, args) => {
     const library = await managedLibrary(ctx, viewer, args.libraryId);
+
+    // Whoever removes a library could add its folder back as their own; only its owner may.
+    if (!canRemoveLibrary(viewer, library)) {
+      return fail("forbidden", "Only the library's owner or the server's owner can remove it");
+    }
+
     await ctx.db.delete(library._id);
 
     const [open, grants] = await Promise.all([

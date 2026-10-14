@@ -20,6 +20,13 @@ export const normaliseLibraryPath = (raw: string): string | null => {
   return `/${segments.join("/")}`;
 };
 
+/**
+ * Kernel file systems a library may never read: `/proc/self/root/...` is the whole file system
+ * again under another name, and `/sys` and `/dev` hold no music. Takes a normalised path.
+ */
+export const isSystemPath = (path: string): boolean =>
+  ["/proc", "/sys", "/dev"].some((root) => path === root || path.startsWith(`${root}/`));
+
 /** How a folder sits relative to another one, both normalised. */
 export type Overlap = "same" | "inside" | "contains" | "apart";
 
@@ -33,4 +40,33 @@ export const overlapOf = (path: string, other: string): Overlap => {
   if (within(path, other)) return "inside";
 
   return within(other, path) ? "contains" : "apart";
+};
+
+/** The folder names a library is known by: the path it was added with, and the real one. */
+interface Rooted {
+  readonly path: string;
+  readonly realPath?: string | undefined;
+}
+
+/**
+ * The first library in `libraries` whose folder overlaps `path` (normalised), and how. A library
+ * is compared by the path it was added with and, once the media service has resolved it, by its
+ * real path too: a link or a bind mount can name the same files under a different path.
+ */
+export const firstOverlap = <Library extends Rooted>(
+  libraries: ReadonlyArray<Library>,
+  path: string,
+): { readonly library: Library; readonly overlap: Exclude<Overlap, "apart"> } | null => {
+  for (const library of libraries) {
+    const names = [normaliseLibraryPath(library.path) ?? library.path, library.realPath];
+
+    for (const name of names) {
+      if (name === undefined) continue;
+      const overlap = overlapOf(path, name);
+
+      if (overlap !== "apart") return { library, overlap };
+    }
+  }
+
+  return null;
 };

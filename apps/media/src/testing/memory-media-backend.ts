@@ -18,11 +18,13 @@ import {
   MediaBackend,
   type PendingJob,
   type ArtHashPage,
+  type RootClaim,
   type ArtworkTable,
   type ScannedTrack,
   type TrackMove,
   type TrackSource,
 } from "../media-backend.ts";
+import { isWithin } from "../platform/node-files.ts";
 
 /** A stored track and its generated ID. */
 interface MemoryTrack {
@@ -44,6 +46,8 @@ export interface MemoryJob {
 
 interface State {
   readonly libraries: ReadonlyArray<LibraryFolder>;
+  /** Real folders libraries claimed, as `media:claimRoot` stores them. */
+  readonly roots: ReadonlyMap<LibraryId, string>;
   readonly tracks: ReadonlyArray<MemoryTrack>;
   readonly jobs: ReadonlyArray<MemoryJob>;
   readonly nextId: number;
@@ -75,6 +79,7 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
     Effect.gen(function* () {
       const state = yield* SubscriptionRef.make<State>({
         libraries: [],
+        roots: new Map(),
         tracks: [],
         jobs: [],
         nextId: 1,
@@ -189,6 +194,27 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
           ),
         ),
         libraries: changes.pipe(Stream.map((current) => current.libraries)),
+
+        claimRoot: Effect.fn("MemoryMediaBackend.claimRoot")(function* (
+          libraryId: LibraryId,
+          realPath: string,
+        ) {
+          return yield* SubscriptionRef.modify(state, (current): [RootClaim, State] => {
+            const overlaps = [...current.roots].some(
+              ([other, root]) =>
+                other !== libraryId && (isWithin(root, realPath) || isWithin(realPath, root)),
+            );
+
+            if (overlaps) {
+              return [{ ok: false, error: "This folder overlaps another library" }, current];
+            }
+
+            return [
+              { ok: true },
+              { ...current, roots: new Map([...current.roots, [libraryId, realPath]]) },
+            ];
+          });
+        }),
 
         claimJob: Effect.fn("MemoryMediaBackend.claimJob")(function* (
           jobId: JobId,
@@ -357,6 +383,7 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
           yield* SubscriptionRef.update(state, (current) => ({
             ...current,
             libraries: current.libraries.filter((library) => library.id !== libraryId),
+            roots: new Map([...current.roots].filter(([id]) => id !== libraryId)),
             tracks: current.tracks.filter((track) => track.libraryId !== libraryId),
           }));
         }),

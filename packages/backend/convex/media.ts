@@ -7,6 +7,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { enqueueScan } from "./handlers/admin";
 import { markTrackMissing, moveScannedTrack, upsertScannedTrack } from "./lib/catalog";
+import { firstOverlap, isSystemPath, normaliseLibraryPath } from "./lib/paths";
 import { inOrder } from "./lib/sequence";
 import { requireService } from "./lib/service";
 
@@ -87,6 +88,44 @@ export const claimJob = mutation({
       kind: job.kind,
       library: { id: library._id, path: library.path, name: library.name },
     };
+  },
+});
+
+/** The message of a refused root claim. It names no folder: the job's viewer may not read the other library. */
+const OVERLAP_MESSAGE =
+  "This folder is the same as, inside, or around another library's folder (through a link or a " +
+  "mount), so it was not scanned. Add a folder that holds only this library's music.";
+
+/**
+ * Records the real folder a library's path resolves to, before the media service indexes
+ * anything in it, or refuses it. A link or a bind mount can give one folder two names, so the
+ * text check when a library is added is not enough: the claim is refused when the real folder
+ * equals, contains, or sits inside another library's folder (by either of its names), or lies
+ * in /proc, /sys, or /dev. The media service claims at the start of every scan and indexes
+ * nothing when refused; a refusal says nothing about the other library.
+ */
+export const claimRoot = mutation({
+  args: { secret: v.string(), libraryId: v.id("libraries"), realPath: v.string() },
+  handler: async (ctx, { secret, libraryId, realPath }) => {
+    requireService(secret);
+    const library = await ctx.db.get(libraryId);
+    const real = normaliseLibraryPath(realPath);
+
+    if (library === null) return { ok: false, error: "The library was removed" } as const;
+
+    if (real === null || isSystemPath(real)) {
+      return { ok: false, error: "A library folder can't be in /proc, /sys, or /dev" } as const;
+    }
+
+    const others = (await ctx.db.query("libraries").collect()).filter(
+      (other) => other._id !== libraryId,
+    );
+
+    if (firstOverlap(others, real) !== null) return { ok: false, error: OVERLAP_MESSAGE } as const;
+
+    if (library.realPath !== real) await ctx.db.patch(libraryId, { realPath: real });
+
+    return { ok: true } as const;
   },
 });
 
@@ -272,7 +311,8 @@ export const trackSource = query({
 
     return {
       path: track.path,
-      libraryPath: library.path,
+      // The folder the last scan claimed: a link retargeted since must not change what plays.
+      libraryPath: library.realPath ?? library.path,
       codec: track.codec,
       lossless: track.lossless,
       size: track.size,

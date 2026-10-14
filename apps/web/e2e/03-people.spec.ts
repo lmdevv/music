@@ -209,3 +209,51 @@ test("an admin shares a library with specific people, then opens it to everyone 
 
   await expect(member.getByText("Recently added", { exact: true }).first()).toBeVisible();
 });
+
+// https://github.com/lmdevv/music/pull/27#discussion_r4274008577: the access dialog read the
+// access list of a library the viewer can't manage, whose not_found took the screen down.
+test("an admin sees another admin's private library read-only, and the screen stays up", async ({
+  page,
+  browser,
+}) => {
+  await signIn(page);
+
+  const folder = unique("vault").replace(" ", "-");
+  const admin = await join(browser, await createInvite(page, "Admin"), freshEmail("adm"), "Ada");
+
+  await page.goto("/settings/libraries?add=1");
+  await page.getByRole("textbox", { name: "Library folder" }).fill(`/${folder}`);
+  await page.getByRole("button", { name: "Only me" }).click();
+  await page.getByRole("button", { name: "Add and scan" }).click();
+
+  const own = page.getByRole("region", { name: `/${folder}` });
+
+  await expect(own).toBeVisible();
+
+  try {
+    await admin.goto("/settings/libraries");
+
+    // Listed by name, without its folder, actions, or access list.
+    const theirs = admin.getByRole("region", { name: folder });
+
+    await expect(theirs).toBeVisible();
+    await expect(theirs.getByRole("button", { name: /^More actions/ })).toHaveCount(0);
+    await expect(theirs.getByRole("button", { name: "Rescan" })).toHaveCount(0);
+
+    await theirs.getByRole("button", { name: new RegExp(`^Who can listen to ${folder}`) }).click();
+
+    const dialog = admin.getByRole("dialog", { name: "Who can listen" });
+
+    await expect(dialog.getByText(/can change who listens to this folder/)).toBeVisible();
+    await expect(dialog.getByRole("list", { name: "People who can listen" })).toHaveCount(0);
+    await dialog.getByRole("button", { name: "Done" }).click();
+
+    await expect(admin.getByText("This screen didn't load")).toHaveCount(0);
+    await expect(admin.getByRole("heading", { name: "Libraries" })).toBeVisible();
+  } finally {
+    await own.getByRole("button", { name: `More actions for /${folder}` }).click();
+    await page.getByRole("menuitem", { name: "Remove from [music]…" }).click();
+    await page.getByRole("button", { name: "Remove folder" }).click();
+    await expect(own).toHaveCount(0);
+  }
+});

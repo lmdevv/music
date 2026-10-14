@@ -501,7 +501,8 @@ export const commands = {
     result: Schema.Struct({ jobId: JobId }),
   }),
   "libraries.delete": command({
-    summary: "Remove a library folder from the index (files stay on disk)",
+    summary:
+      "Remove a library folder from the index (its owner or the server owner; files stay on disk)",
     group: "libraries",
     kind: "mutation",
     access: "admin",

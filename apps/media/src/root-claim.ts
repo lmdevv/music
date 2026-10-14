@@ -1,0 +1,81 @@
+/**
+ * Claims a library's real folder before a scan reads it. A link or a bind mount can give one
+ * folder two names (`/proc/self/root/srv/music` is `/srv/music`), so Convex's check of the path a
+ * library was added with is not enough to keep two libraries off the same files. The service
+ * resolves the folder through every link, refuses one outside the allowed roots (`MUSIC_ROOTS`)
+ * or in /proc, /sys, or /dev, and reports it to Convex (`media:claimRoot`), which refuses a folder
+ * that overlaps another library's. Nothing is indexed unless the claim succeeds; it runs again at
+ * every scan, since a link's target can change.
+ */
+import type { LibraryId } from "@music/commands/ids";
+import { Effect, Schema } from "effect";
+
+import * as Files from "./files.ts";
+import { MediaBackend } from "./media-backend.ts";
+import { MediaConfig } from "./media-config.ts";
+import * as NodeFiles from "./platform/node-files.ts";
+
+/** Kernel file systems no library may read, by their real paths. */
+const SYSTEM_ROOTS = ["/proc", "/sys", "/dev"];
+
+const isSystemPath = (path: string): boolean =>
+  SYSTEM_ROOTS.some((root) => path === root || NodeFiles.isWithin(root, path));
+
+/** The library's folder may not be scanned. The message is safe to show on the job. */
+class RootRefused extends Schema.TaggedError<RootRefused>()("RootRefused", {
+  libraryId: Schema.String,
+  reason: Schema.String,
+}) {
+  override get message(): string {
+    return this.reason;
+  }
+}
+
+/**
+ * Resolves the library's folder, checks it, and claims it with Convex. Returns the real folder,
+ * which the scan then reads instead of the path the library was added with. Fails with
+ * `FileError` when the folder does not resolve, and with `RootRefused` when it may not be read.
+ */
+export const claimRoot = Effect.fn("RootClaim.claim")(function* (library: {
+  readonly id: LibraryId;
+  readonly path: string;
+}) {
+  const backend = yield* MediaBackend;
+  const { musicRoots } = yield* MediaConfig;
+
+  if (isSystemPath(library.path)) {
+    return yield* new RootRefused({
+      libraryId: library.id,
+      reason: "A library folder can't be in /proc, /sys, or /dev",
+    });
+  }
+
+  const real = yield* Files.realPath(library.path);
+
+  if (isSystemPath(real)) {
+    return yield* new RootRefused({
+      libraryId: library.id,
+      reason: "A library folder can't be in /proc, /sys, or /dev",
+    });
+  }
+
+  if (musicRoots !== null) {
+    // The allowed roots resolve too, so a root that is itself a link still allows its target.
+    const roots = yield* Effect.forEach(musicRoots, (root) =>
+      Files.realPath(root).pipe(Effect.orElseSucceed(() => root)),
+    );
+
+    if (!roots.some((root) => real === root || NodeFiles.isWithin(root, real))) {
+      return yield* new RootRefused({
+        libraryId: library.id,
+        reason: `Library folders must be inside ${musicRoots.join(" or ")} (MUSIC_ROOTS)`,
+      });
+    }
+  }
+
+  const claim = yield* backend.claimRoot(library.id, real);
+
+  if (!claim.ok) return yield* new RootRefused({ libraryId: library.id, reason: claim.error });
+
+  return real;
+});

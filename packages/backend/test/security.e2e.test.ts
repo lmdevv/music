@@ -385,6 +385,17 @@ const expectInvisible = async (
   await expectReadFailure(viewer, "jobs.get", { jobId: hidden.jobId }, "not_found");
 };
 
+/** Claims a library's real folder, as the media service does before every scan. */
+const claimRoot = (libraryId: string, realPath: string) =>
+  anonymous(server).convex.mutation(
+    makeFunctionReference<
+      "mutation",
+      { secret: string; libraryId: string; realPath: string },
+      { ok: boolean; error?: string }
+    >("media:claimRoot"),
+    { secret: mediaSecret, libraryId, realPath },
+  );
+
 describe.skipIf(server === "" || mediaSecret === "")("backend authorization", () => {
   let fixture: Fixture;
 
@@ -868,6 +879,11 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
         secret,
         table: "tracks",
         cursor: null,
+      }),
+      visitor.mutation(makeFunctionReference<"mutation">("media:claimRoot"), {
+        secret,
+        libraryId,
+        realPath: "/",
       }),
     ];
 
@@ -1545,5 +1561,49 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
         signUp(server, { email: `member-${id}@music.test`, password: PASSWORD, inviteCode: code }),
       ),
     ).toEqual(generic);
+  });
+  it("keeps a library's files from a second library under another name for the folder", async () => {
+    const { adminA, adminB, alpha } = fixture;
+
+    // The media service resolves each library's folder before a scan and claims it.
+    expect(await claimRoot(alpha.libraryId, `/security-${id}/alpha`)).toEqual({ ok: true });
+
+    // A link (or /proc/self/root, or a bind mount) names the folder around it differently.
+    const alias = await adminB.music.run("libraries.create", {
+      name: `Alias ${id}`,
+      path: `/elsewhere-${id}/link`,
+    });
+
+    const refused = await claimRoot(alias.libraryId, `/security-${id}`);
+
+    expect(refused.ok).toBe(false);
+    // The refusal is the job's error, which the alias's owner reads: it names no folder.
+    expect(refused.error).not.toMatch(/security-/u);
+
+    // Only a library's own owner or the server's owner removes it: an admin added to it could
+    // otherwise remove it and add its folder back as their own.
+    const shared = await adminA.music.run("libraries.create", {
+      name: `Lent ${id}`,
+      path: `/security-${id}/lent`,
+      visibility: "restricted",
+    });
+
+    const { id: adminBId } = await adminB.music.read("account.me", {});
+
+    await adminA.music.run("libraries.grant", { libraryId: shared.libraryId, userId: adminBId });
+    await expectRunFailure(
+      adminB,
+      "libraries.delete",
+      { libraryId: shared.libraryId },
+      "forbidden",
+    );
+    await adminB.music.run("libraries.update", { libraryId: shared.libraryId, name: `Lent ${id}` });
+
+    // An overlap with a library the admin can't hear names neither folder.
+    expect(
+      await failure(
+        adminB.music.run("libraries.create", { name: "Probe", path: `/security-${id}/alpha/x` }),
+      ),
+    ).toEqual({ code: "conflict", message: "This folder overlaps another library" });
   });
 });

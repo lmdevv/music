@@ -10,6 +10,7 @@
  */
 import { Cause, Effect, FiberMap, Layer, Queue, Ref, Schedule, Schema, Stream } from "effect";
 
+import * as Files from "./files.ts";
 import { type LibraryFolder, MediaBackend, resubscribeSchedule } from "./media-backend.ts";
 import { MediaConfig } from "./media-config.ts";
 import { watchTree } from "./platform/node-watch.ts";
@@ -116,8 +117,22 @@ const watchLibrary = Effect.fn("LibraryWatcher.watch")(
     // Failures since the watch last ran: a watch that starts again after one scans for what it
     // missed, and only the first failure in a row is a warning.
     const failures = yield* Ref.make(0);
+    // The real folder at the last start. A scan claims the folder anew (`root-claim.ts`), so one
+    // whose link now points elsewhere is checked again before anything is read from it.
+    const lastReal = yield* Ref.make<string | null>(null);
 
-    const started = Ref.getAndSet(failures, 0).pipe(Effect.map((missed) => missed > 0));
+    const retargeted = Files.realPath(library.path).pipe(
+      Effect.orElseSucceed(() => null),
+      Effect.flatMap((real) =>
+        Ref.getAndSet(lastReal, real).pipe(
+          Effect.map((previous) => previous !== null && previous !== real),
+        ),
+      ),
+    );
+
+    const started = Effect.all([Ref.getAndSet(failures, 0), retargeted]).pipe(
+      Effect.map(([missed, moved]) => missed > 0 || moved),
+    );
 
     const onChange = folderChanges(library.path, started).pipe(
       Stream.debounce(DEBOUNCE),
