@@ -7,7 +7,8 @@
 import { v } from "convex/values";
 
 import { internal } from "./_generated/api";
-import { internalMutation } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { internalMutation, type MutationCtx } from "./_generated/server";
 import { inviterStillAllows } from "./lib/invites";
 import { endSession } from "./lib/sessions";
 
@@ -123,9 +124,26 @@ export const revokeKeys = internalMutation({
 });
 
 /**
+ * Who a removed person's libraries go to when a batch runs: the server's owner at that moment
+ * (ownership may have moved, and the old owner been removed, since the removal), or, on a server
+ * from before owners, `fallback` (whoever removed them) while that account still exists.
+ */
+const heirOf = async (ctx: MutationCtx, fallback: Id<"users">): Promise<Id<"users"> | null> => {
+  const owner = await ctx.db
+    .query("users")
+    .withIndex("by_role", (q) => q.eq("role", "owner"))
+    .first();
+
+  if (owner !== null) return owner._id;
+
+  return (await ctx.db.get(fallback)) === null ? null : fallback;
+};
+
+/**
  * Deletes what a removed person owned, rescheduling until it is gone: keys, devices, library
- * access, reset links, likes, history, and playlists; their libraries move to `heir`.
- * `people.remove` has already deleted the account, so none of this is reachable meanwhile.
+ * access, reset links, likes, history, and playlists; their libraries move to the server's owner
+ * (`heirOf`). `people.remove` has already deleted the account, so none of this is reachable
+ * meanwhile.
  */
 export const purgeRemovedUser = internalMutation({
   args: { userId: v.id("users"), heir: v.id("users") },
@@ -161,15 +179,22 @@ export const purgeRemovedUser = internalMutation({
     ]);
 
     // Their libraries leave the `by_owner` range as they move, so each batch takes the next ones.
-    const libraries = await ctx.db
-      .query("libraries")
-      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
-      .take(PURGE_BATCH);
+    // With nobody to take them (no owner, and the remover gone too) they stay for an owner's
+    // later removal of someone, or a rerun, to move.
+    const to = await heirOf(ctx, heir);
+
+    const libraries =
+      to === null
+        ? []
+        : await ctx.db
+            .query("libraries")
+            .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+            .take(PURGE_BATCH);
 
     await Promise.all([
       ...owned.flat().map((doc) => ctx.db.delete(doc._id)),
       // Private libraries stay private, now to the heir; nothing on disk changes.
-      ...libraries.map((library) => ctx.db.patch(library._id, { ownerId: heir })),
+      ...libraries.map((library) => ctx.db.patch(library._id, { ownerId: to ?? heir })),
     ]);
 
     if ([...owned, libraries].some((batch) => batch.length === PURGE_BATCH)) {

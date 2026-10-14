@@ -3,8 +3,10 @@
  * action and command dispatcher in memory. Each case is a security review finding on PR #22.
  */
 import { UserId } from "@music/commands/ids";
+import { makeMusicClient, type MusicClient } from "@music/sdk/client";
+import { decodeJwt } from "jose";
 import { sha256Hex } from "../convex/lib/crypto";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { api, internal } from "../convex/_generated/api";
 import { enableAuth, joinWithPassword, passwordFlow } from "./auth";
@@ -36,6 +38,20 @@ const household = async (): Promise<{
   });
 
   return { backend, owner, admin, member };
+};
+
+/** Signs in with an API key, as the CLI does; null when the key no longer works. */
+const keySignIn = async (backend: Backend, key: string): Promise<MusicClient | null> => {
+  const result = await backend.action(api.auth.signIn, { provider: "apikey", params: { key } });
+  const token = result.tokens?.token;
+
+  if (token === undefined) return null;
+  const signedIn = backend.withIdentity({ subject: decodeJwt(token).sub ?? "" });
+
+  return makeMusicClient({
+    query: (reference, args) => signedIn.query(reference, args),
+    mutation: (reference, args) => signedIn.mutation(reference, args),
+  });
 };
 
 const redeem = (backend: Backend, token: string) =>
@@ -79,8 +95,42 @@ describe("password reset links", () => {
 
     expect(await failureCode(redeem(backend, token))).toBe("invalid_args");
     await expect(
-      backend.mutation(internal.passwordResets.redeem, { hash: await sha256Hex(token) }),
+      backend.mutation(internal.passwordResets.redeem, {
+        hash: await sha256Hex(token),
+        provider: "password",
+        secret: "a-hash",
+      }),
     ).rejects.toThrow("no longer valid");
+  });
+
+  it("check the link, set the password on the person's own account, and sign them out at once", async () => {
+    const { backend, admin, member } = await household();
+    const { token } = await admin.music.run("people.reset", { userId: member.userId });
+
+    // Another account under the same email can't exist alongside, but the account is found by
+    // the person, not by the email, so the password lands on theirs alone.
+    const userId = await backend.mutation(internal.passwordResets.redeem, {
+      hash: await sha256Hex(token),
+      provider: "password",
+      secret: "the-new-hash",
+    });
+
+    const after = await backend.run(async (ctx) => ({
+      secrets: (await ctx.db.query("authAccounts").collect()).map((account) => [
+        account.userId,
+        account.secret,
+      ]),
+      used: (await ctx.db.query("passwordResets").collect()).map(
+        (reset) => reset.usedAt !== undefined,
+      ),
+    }));
+
+    expect(userId).toBe(member.id);
+    expect(after.secrets.filter(([owner]) => owner === member.id)).toEqual([
+      [member.id, "the-new-hash"],
+    ]);
+    expect(after.used).toEqual([true]);
+    await expect(member.music.read("account.me", {})).rejects.toThrow("session has ended");
   });
 
   it("stop working once the person is promoted to admin", async () => {
@@ -175,6 +225,39 @@ describe("password resets around library access", () => {
     expect(await failureCode(admin.music.run("people.reset", { userId: keeper.userId }))).toBe(
       "forbidden",
     );
+  });
+});
+
+describe("API keys around a demotion to guest", () => {
+  it("stop at once, before the batched revocation, and stay stopped after a promotion", async () => {
+    const { backend, owner, member } = await household();
+    const { key } = await member.music.run("keys.create", { name: "CLI" });
+    const cli = await keySignIn(backend, key);
+
+    if (cli === null) throw new Error("A fresh key did not sign in");
+
+    expect(await failureCode(cli.read("account.me", {}))).toBe("succeeded");
+
+    // The batches that revoke the keys wait until the end.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    try {
+      await owner.music.run("people.role", { userId: member.userId, role: "guest" });
+      expect(await failureCode(cli.read("account.me", {}))).toBe("unauthenticated");
+      // A guest still listens through their password session.
+      expect(await failureCode(member.music.read("account.me", {}))).toBe("succeeded");
+
+      await owner.music.run("people.role", { userId: member.userId, role: "member" });
+      expect(await failureCode(cli.read("account.me", {}))).toBe("unauthenticated");
+      expect(await keySignIn(backend, key)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // Keys made after the promotion work.
+    const fresh = await member.music.run("keys.create", { name: "New CLI" });
+
+    expect(await keySignIn(backend, fresh.key)).not.toBeNull();
   });
 });
 

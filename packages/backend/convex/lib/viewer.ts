@@ -1,12 +1,12 @@
 import { getAuthSessionId, getAuthUserId } from "@convex-dev/auth/server";
 import type { Role } from "@music/commands/models";
-import { canManageLibrary } from "@music/commands/permissions";
+import { can, canManageLibrary } from "@music/commands/permissions";
 
 import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx } from "../_generated/server";
 import { fail } from "./errors";
 import { tableId } from "./ids";
-import { isStale } from "./sessions";
+import { isStale, keyLapsed } from "./sessions";
 
 export type ReadCtx = Pick<QueryCtx, "db" | "auth">;
 
@@ -127,6 +127,20 @@ export const loadViewer = async (ctx: ReadCtx): Promise<Viewer> => {
 
   // Suspending ends every session, so this only catches a sign-in racing the suspension.
   if (user.suspendedAt !== undefined) return fail("unauthenticated", SUSPENDED_MESSAGE);
+
+  // A session an API key opened ends with the key's right to work: at once for a guest, who has
+  // no keys, and for keys made before a demotion to guest, which a promotion doesn't revive.
+  // Others pay no extra read.
+  if (!can(roleOf(user), "keys") || user.keysValidAfter !== undefined) {
+    const key = await ctx.db
+      .query("apiKeys")
+      .withIndex("by_session", (q) => q.eq("sessionId", session._id))
+      .first();
+
+    if (key !== null && (!can(roleOf(user), "keys") || keyLapsed(key, user))) {
+      return fail("unauthenticated", "This API key no longer works");
+    }
+  }
 
   const { all, libraries } = await listenable(ctx, user);
 

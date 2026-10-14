@@ -3,7 +3,7 @@ import { v } from "convex/values";
 
 import { internalMutation } from "./_generated/server";
 import { fail } from "./lib/errors";
-import { endSession, isStale } from "./lib/sessions";
+import { endSession, isStale, keyLapsed } from "./lib/sessions";
 import { roleOf, SUSPENDED_MESSAGE } from "./lib/viewer";
 
 /** Matches Convex Auth's default session lifetime, which `auth.ts` does not change. */
@@ -25,7 +25,7 @@ export const redeem = internalMutation({
     if (key === null || key.revokedAt !== undefined) return null;
     const user = await ctx.db.get(key.userId);
 
-    if (user === null) return null;
+    if (user === null || keyLapsed(key, user)) return null;
 
     if (user.suspendedAt !== undefined) return fail("forbidden", SUSPENDED_MESSAGE);
 

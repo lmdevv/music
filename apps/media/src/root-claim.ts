@@ -11,10 +11,10 @@
  */
 import type { LibraryId } from "@music/commands/ids";
 import { isSystemFolder, SYSTEM_FOLDER_MESSAGE } from "@music/commands/system-folders";
-import { Effect, Schema } from "effect";
+import { Effect, Layer, Ref, Schema, Stream } from "effect";
 
 import * as Files from "./files.ts";
-import { MediaBackend } from "./media-backend.ts";
+import { type LibraryFolder, MediaBackend, resubscribeSchedule } from "./media-backend.ts";
 import { MediaConfig } from "./media-config.ts";
 import * as NodeFiles from "./platform/node-files.ts";
 
@@ -72,3 +72,54 @@ export const claimRoot = Effect.fn("RootClaim.claim")(function* (library: {
 
   return real;
 });
+
+/** Libraries claimed at once, side by side, when many need it (after an upgrade, say). */
+const CLAIM_CONCURRENCY = 4;
+
+const claimKey = (library: LibraryFolder): string => `${library.id}:${library.path}`;
+
+/**
+ * Claims every library without a claim as soon as it appears, ahead of the scan queue: libraries
+ * from before claims (after an upgrade), new ones, and ones whose claim was dropped. A claim takes
+ * a `stat` per folder level, so every library streams again within seconds rather than waiting
+ * for its full scan, which still claims again first. A library is tried once per folder in this
+ * process; a refused one is tried again by its scans.
+ */
+export const layer: Layer.Layer<never, never, MediaBackend | MediaConfig> = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const backend = yield* MediaBackend;
+    const config = yield* MediaConfig;
+    const tried = yield* Ref.make<ReadonlySet<string>>(new Set());
+
+    const claimNew = Effect.fn("RootClaim.claimNew")(function* (
+      libraries: ReadonlyArray<LibraryFolder>,
+    ) {
+      const seen = yield* Ref.get(tried);
+
+      const fresh = libraries.filter((library) => !library.claimed && !seen.has(claimKey(library)));
+
+      yield* Ref.set(tried, new Set([...seen, ...fresh.map(claimKey)]));
+
+      yield* Effect.forEach(
+        fresh,
+        (library) =>
+          claimRoot(library).pipe(
+            Effect.tap(() => Effect.logInfo("RootClaim.claimed", { libraryId: library.id })),
+            Effect.catch((error) =>
+              Effect.logWarning("RootClaim.not_claimed", { libraryId: library.id, error }),
+            ),
+            Effect.provideService(MediaBackend, backend),
+            Effect.provideService(MediaConfig, config),
+          ),
+        { concurrency: CLAIM_CONCURRENCY, discard: true },
+      );
+    });
+
+    yield* backend.libraries.pipe(
+      Stream.runForEach(claimNew),
+      Effect.tapError((error) => Effect.logWarning("RootClaim.subscription_lost", error)),
+      Effect.retry(resubscribeSchedule),
+      Effect.forkScoped,
+    );
+  }),
+);

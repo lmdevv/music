@@ -47,5 +47,11 @@ export const endUserSessions = async (ctx: MutationCtx, userId: Id<"users">): Pr
 };
 
 /** Whether a session was ended by `endUserSessions` but its row is not purged yet. */
+/** Whether an API key was made before its person's keys stopped working (`keysValidAfter`). */
+export const keyLapsed = (
+  key: Pick<Doc<"apiKeys">, "_creationTime">,
+  user: Pick<Doc<"users">, "keysValidAfter">,
+): boolean => user.keysValidAfter !== undefined && key._creationTime <= user.keysValidAfter;
+
 export const isStale = (session: Doc<"authSessions">, user: Doc<"users">): boolean =>
   user.sessionsValidAfter !== undefined && session._creationTime <= user.sessionsValidAfter;

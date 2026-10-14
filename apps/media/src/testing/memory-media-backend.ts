@@ -45,7 +45,7 @@ export interface MemoryJob {
 }
 
 interface State {
-  readonly libraries: ReadonlyArray<LibraryFolder>;
+  readonly libraries: ReadonlyArray<Omit<LibraryFolder, "claimed">>;
   /**
    * The identities of the folders libraries claimed, as `media:claimRoot` stores them. Compared
    * by identity only, so tests show the service reports identities that catch any overlap.
@@ -66,6 +66,8 @@ export interface ControlInterface {
   readonly cancelJob: (jobId: JobId) => Effect.Effect<void>;
   readonly tracks: Effect.Effect<ReadonlyArray<MemoryTrack>>;
   readonly jobs: Effect.Effect<ReadonlyArray<MemoryJob>>;
+  /** Libraries whose folders are claimed. */
+  readonly claimed: Effect.Effect<ReadonlyArray<LibraryId>>;
 }
 
 /** Controls for `layerMemory`. */
@@ -196,7 +198,14 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
               .map((job) => ({ jobId: job.id, kind: "scan" })),
           ),
         ),
-        libraries: changes.pipe(Stream.map((current) => current.libraries)),
+        libraries: changes.pipe(
+          Stream.map((current) =>
+            current.libraries.map((library) => ({
+              ...library,
+              claimed: current.roots.has(library.id),
+            })),
+          ),
+        ),
 
         claimRoot: Effect.fn("MemoryMediaBackend.claimRoot")(function* (
           libraryId: LibraryId,
@@ -408,6 +417,9 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
         }),
         tracks: SubscriptionRef.get(state).pipe(Effect.map((current) => current.tracks)),
         jobs: SubscriptionRef.get(state).pipe(Effect.map((current) => current.jobs)),
+        claimed: SubscriptionRef.get(state).pipe(
+          Effect.map((current) => Array.from(current.roots.keys())),
+        ),
       });
 
       return Context.make(MediaBackend, backend).pipe(

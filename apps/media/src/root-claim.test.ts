@@ -2,10 +2,12 @@ import { dirname, join } from "node:path";
 
 import { SYSTEM_FOLDER_MESSAGE } from "@music/commands/system-folders";
 import { describe, expect, it } from "vitest";
+import { LibraryId } from "@music/commands/ids";
 import { Effect, Layer, Schedule } from "effect";
 
 import * as Files from "./files.ts";
 import * as JobWorker from "./job-worker.ts";
+import * as RootClaim from "./root-claim.ts";
 import {
   fixtureLibrary,
   MEDIA_TEST_TIMEOUT,
@@ -34,6 +36,25 @@ const worker = (dataDir: string, musicRoots: ReadonlyArray<string> | null = null
 
     return yield* MemoryMediaBackendControl.pipe(Effect.provideContext(context));
   });
+
+/** The claim pass alone over the in-memory backend: no job worker, so nothing is scanned. */
+const claimPass = (dataDir: string) =>
+  Effect.gen(function* () {
+    const services = Layer.merge(layerMemory, testConfig(dataDir));
+
+    const context = yield* Layer.build(
+      Layer.merge(services, RootClaim.layer.pipe(Layer.provide(services))),
+    );
+
+    return yield* MemoryMediaBackendControl.pipe(Effect.provideContext(context));
+  });
+
+/** Waits until `libraryId` is claimed, or gives up after about ten seconds. */
+const claimedSoon = (control: MemoryMediaBackendControl["Service"], libraryId: string) =>
+  control.claimed.pipe(
+    Effect.map((ids) => ids.includes(LibraryId.make(libraryId))),
+    Effect.repeat({ schedule: Schedule.spaced("20 millis"), until: (done) => done, times: 500 }),
+  );
 
 const scanOf = (control: MemoryMediaBackendControl["Service"], path: string) =>
   Effect.gen(function* () {
@@ -119,6 +140,37 @@ describe("root claims", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const apart = yield* scanOf(control, beside);
 
         expect(apart.job?.status).toBe("done");
+      }),
+    ));
+
+  it("claims every unclaimed library at once, ahead of any scan", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { root } = yield* fixtureLibrary;
+        const control = yield* claimPass(yield* temporaryDirectory("data"));
+        const base = yield* temporaryDirectory("upgrade");
+        const folders = ["one", "two", "three"].map((name) => join(base, name));
+
+        yield* Effect.forEach(folders, (folder) => Files.copyTree(root, folder), { discard: true });
+
+        // As after an upgrade: libraries indexed by an older version, none of them claimed.
+        const ids = yield* Effect.forEach(folders, (folder) => control.addLibrary(folder));
+
+        const claimed = yield* Effect.forEach(ids, (id) => claimedSoon(control, id));
+
+        expect(claimed).toEqual([true, true, true]);
+        // Claimed without a single scan: they stream again before their full scans run.
+        expect(yield* control.jobs).toEqual([]);
+
+        // A folder inside a claimed one is still refused, and claims nothing.
+        const inner = join(folders[0] ?? base, "inner");
+
+        yield* Files.makeDirectory(inner);
+        const nested = yield* control.addLibrary(inner);
+
+        yield* Effect.sleep("300 millis");
+        expect(yield* control.claimed).not.toContain(nested);
+        expect(yield* control.jobs).toEqual([]);
       }),
     ));
 

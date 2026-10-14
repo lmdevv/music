@@ -4,8 +4,9 @@
  * batches. Runs in memory with Convex's transaction limits tightened.
  */
 import { UserId } from "@music/commands/ids";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { drainScheduled, makeBackend, signUp } from "./backend";
 import type { Backend } from "./backend";
@@ -106,6 +107,89 @@ describe("people management at scale", () => {
     await drainScheduled(backend);
     expect(await countOf(backend, "apiKeys", person.id)).toBe(0);
     expect(await countOf(backend, "authSessions", person.id)).toBe(0);
+  });
+
+  it("removes a library with more grants than one mutation can delete", async () => {
+    const backend = makeBackend({ documentsWritten: LIMIT });
+    const owner = await signUp(backend, "owner");
+    const person = await signUp(backend, "member");
+
+    const { libraryId } = await owner.music.run("libraries.create", {
+      name: "Crowded",
+      path: "/music/crowded",
+      visibility: "restricted",
+    });
+
+    const id = await backend.run(async (ctx) => ctx.db.normalizeId("libraries", libraryId));
+
+    if (id === null) throw new Error("The library was not created");
+
+    await insertMany(backend, MANY, async (ctx) => {
+      await ctx.db.insert("libraryAccess", {
+        libraryId: id,
+        userId: person.id,
+        grantedBy: owner.id,
+      });
+    });
+
+    expect(await failureCode(owner.music.run("libraries.delete", { libraryId }))).toBe("succeeded");
+    await drainScheduled(backend);
+
+    const left = await backend.run(
+      async (ctx) =>
+        (
+          await ctx.db
+            .query("libraryAccess")
+            .withIndex("by_library", (q) => q.eq("libraryId", id))
+            .collect()
+        ).length,
+    );
+
+    expect(left).toBe(0);
+  });
+
+  it("gives a removed person's libraries to whoever owns the server when each batch runs", async () => {
+    const backend = makeBackend();
+    const first = await signUp(backend, "owner");
+    const leaving = await signUp(backend, "admin");
+    const next = await signUp(backend, "admin");
+
+    await insertMany(backend, 5, async (ctx, index) => {
+      await ctx.db.insert("libraries", {
+        name: `Shelf ${String(index)}`,
+        path: `/music/shelf-${String(index)}`,
+        visibility: "private",
+        ownerId: leaving.id,
+        trackCount: 0,
+        albumCount: 0,
+        artistCount: 0,
+        durationMs: 0,
+      });
+    });
+
+    // Removing someone schedules their clean-up with the owner of the moment as heir. Before it
+    // runs, ownership moves on and that owner is removed in turn, and their clean-up runs first.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    try {
+      await first.music.run("people.remove", { userId: UserId.make(leaving.id) });
+      await first.music.run("people.transfer", { userId: UserId.make(next.id) });
+      await next.music.run("people.remove", { userId: UserId.make(first.id) });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    await backend.mutation(internal.people.purgeRemovedUser, { userId: first.id, heir: next.id });
+    await backend.mutation(internal.people.purgeRemovedUser, {
+      userId: leaving.id,
+      heir: first.id,
+    });
+
+    const owners = await backend.run(async (ctx) => [
+      ...new Set((await ctx.db.query("libraries").collect()).map((library) => library.ownerId)),
+    ]);
+
+    expect(owners).toEqual([next.id]);
   });
 
   it("revokes a new guest's keys in batches", async () => {

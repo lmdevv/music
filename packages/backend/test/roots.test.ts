@@ -283,7 +283,12 @@ describe("real folder claims", () => {
 
     expect(await playable(backend, owner, track.id)).toEqual(SILENT);
 
-    // The upgrade's migration asks the media service to scan both, which claims them.
+    // The media service sees which libraries need a claim and claims them before any scan.
+    const listed = await backend.query(api.media.libraries, { secret: MEDIA_SECRET });
+
+    expect(listed.map((library) => library.claimed)).toEqual([false, false]);
+
+    // The upgrade's migration asks the media service to scan both too, which claims them again.
     await backend.mutation(internal.migrations.run, {});
     await drainScheduled(backend);
 

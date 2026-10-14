@@ -67,6 +67,9 @@
   --container-sidebar: 240px;
   --container-dialog: 560px;
   --container-content: 1120px;
+  --container-column-role: 180px;
+  --container-column-meta: 140px;
+  --container-column-action: 60px;
   --spacing-1: 4px;
   --spacing-2: 8px;
   --spacing-3: 12px;

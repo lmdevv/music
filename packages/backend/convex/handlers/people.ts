@@ -197,7 +197,13 @@ export const peopleMutations = {
 
     if (args.role !== "admin") await keepAnAdmin(ctx, user);
 
-    await ctx.db.patch(user._id, { role: args.role });
+    // Guests have no API keys: every key made so far stops at once, with the sessions it opened
+    // (`keysValidAfter`), and stays stopped after a later promotion, while the batches below
+    // revoke the rows.
+    await ctx.db.patch(
+      user._id,
+      args.role === "guest" ? { role: args.role, keysValidAfter: Date.now() } : { role: args.role },
+    );
     await revokeLapsedInvites(ctx, user._id);
     await voidResets(ctx, user._id);
 

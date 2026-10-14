@@ -209,10 +209,11 @@ Every service runs as its own unprivileged user; only the start-up script runs a
   folders): the image sets `/music`, where Docker, Compose, and the NixOS module mount your music,
   so a folder elsewhere (or a link out of `/music`) is refused. Set `MUSIC_ROOTS` on the container
   to allow others; outside the image (development) it is unset and every folder is allowed.
-  `/` itself, and folders in `/proc`, `/sys`, and `/dev`, are always refused. A library whose folder is refused stops
-  streaming until a scan claims it again; its songs stay listed. Libraries from before this check
-  stream nothing until they claim their folder at their next scan, which an upgrade starts for
-  each of them right away.
+  `/` itself, and folders in `/proc`, `/sys`, and `/dev`, are always refused. A library whose folder is
+  refused stops streaming until a scan claims it again; its songs stay listed. The media service
+  claims every unclaimed library as soon as it sees it, ahead of the scan queue, so after an
+  upgrade every library streams again within seconds; their full scans, which the upgrade also
+  starts, follow one at a time.
 - **Known limit: two names for one folder.** When two libraries name the same folder (one through
   a bind mount, which only a path check can't see), the library added first keeps it, even if the
   newer one's scan claimed it first: the newer one stops streaming and its scans fail. Songs the

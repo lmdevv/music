@@ -341,31 +341,29 @@ export const adminMutations = {
 
     await ctx.db.delete(library._id);
 
-    const [open, grants] = await Promise.all([
-      Promise.all(
-        (["pending", "running"] as const).map((status) =>
-          ctx.db
-            .query("jobs")
-            .withIndex("by_library_status", (q) =>
-              q.eq("libraryId", library._id).eq("status", status),
-            )
-            .collect(),
-        ),
+    // A library has at most one pending and one running job (`enqueueScan`).
+    const open = await Promise.all(
+      (["pending", "running"] as const).map((status) =>
+        ctx.db
+          .query("jobs")
+          .withIndex("by_library_status", (q) =>
+            q.eq("libraryId", library._id).eq("status", status),
+          )
+          .collect(),
       ),
-      ctx.db
-        .query("libraryAccess")
-        .withIndex("by_library", (q) => q.eq("libraryId", library._id))
-        .collect(),
-    ]);
+    );
 
-    await Promise.all([
-      ...open
+    await Promise.all(
+      open
         .flat()
         .map((job) => ctx.db.patch(job._id, { status: "cancelled", finishedAt: Date.now() })),
-      ...grants.map((grant) => ctx.db.delete(grant._id)),
-    ]);
+    );
 
+    // Its songs and its grants, of which there may be many, go in batches after.
     await ctx.scheduler.runAfter(0, internal.maintenance.purgeLibrary, {
+      libraryId: library._id,
+    });
+    await ctx.scheduler.runAfter(0, internal.maintenance.purgeLibraryAccess, {
       libraryId: library._id,
     });
 

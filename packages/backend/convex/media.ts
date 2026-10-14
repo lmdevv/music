@@ -380,7 +380,12 @@ export const libraries = query({
     requireService(secret);
     const all = await ctx.db.query("libraries").collect();
 
-    return all.map((library) => ({ id: library._id, path: library.path }));
+    // `claimed` lets the service claim new and upgraded libraries at once, before any scan.
+    return all.map((library) => ({
+      id: library._id,
+      path: library.path,
+      claimed: isClaimed(library) && library.rootIds !== undefined,
+    }));
   },
 });
 

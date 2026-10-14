@@ -1,5 +1,5 @@
 import { ConvexCredentials } from "@convex-dev/auth/providers/ConvexCredentials";
-import { convexAuth, modifyAccountCredentials, retrieveAccount } from "@convex-dev/auth/server";
+import { convexAuth, retrieveAccount } from "@convex-dev/auth/server";
 import { ConvexError } from "convex/values";
 import { Scrypt } from "lucia";
 import { Result, Schema } from "effect";
@@ -160,22 +160,13 @@ const password = ConvexCredentials<DataModel>({
 
     checkPassword(input.newPassword);
 
-    const hash = await sha256Hex(input.token);
-    const { userId, accountId } = await ctx.runMutation(internal.passwordResets.redeem, { hash });
-
-    try {
-      await modifyAccountCredentials(ctx, {
-        provider: PASSWORD,
-        account: { id: accountId, secret: input.newPassword },
-      });
-    } catch (cause) {
-      // The password did not change, so the link must still work for a retry.
-      await ctx.runMutation(internal.passwordResets.release, { hash });
-      throw cause;
-    }
-
-    // Only now that the old password no longer works can no new session slip past this.
-    await ctx.runMutation(internal.passwordResets.finish, { userId });
+    // One transaction checks the link and who may use it, sets the password on the person's own
+    // account, and ends their sessions, so nothing can change in between.
+    const userId = await ctx.runMutation(internal.passwordResets.redeem, {
+      hash: await sha256Hex(input.token),
+      provider: PASSWORD,
+      secret: await scrypt.hash(input.newPassword),
+    });
 
     return { userId };
   },

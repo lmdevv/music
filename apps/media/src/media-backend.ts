@@ -36,9 +36,14 @@ const PendingJob = Schema.Struct({ jobId: JobId, kind: Schema.Literal("scan") })
 /** A job waiting for a worker. */
 export interface PendingJob extends Schema.Schema.Type<typeof PendingJob> {}
 
-const LibraryFolder = Schema.Struct({ id: LibraryId, path: Schema.String });
+const LibraryFolder = Schema.Struct({
+  id: LibraryId,
+  path: Schema.String,
+  /** Whether its folder is claimed, with identities (`media:claimRoot`), so its songs stream. */
+  claimed: Schema.Boolean,
+});
 
-/** A library and the folder it reads. */
+/** A library, the folder it reads, and whether that folder is claimed. */
 export interface LibraryFolder extends Schema.Schema.Type<typeof LibraryFolder> {}
 
 const ClaimedJob = Schema.Struct({

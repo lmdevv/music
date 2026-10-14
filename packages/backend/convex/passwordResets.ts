@@ -14,14 +14,15 @@ import { endUserSessions } from "./lib/sessions";
 import { SUSPENDED_MESSAGE } from "./lib/viewer";
 
 /**
- * Uses up the reset link with this token hash. Returns the person and the password account to set
- * the new password on, or fails saying why the link does not work. Claiming before the password
- * changes means a link works exactly once; `release` undoes the claim if the change fails, and
- * `finish` ends the sessions again once it succeeds.
+ * Redeems the reset link with this token hash, in one transaction: checks the link and that its
+ * maker may still reset the person, sets `secret` (the new password's hash) on the person's own
+ * password account, found by their ID rather than by the email, uses the link up, and ends every
+ * session they had. Returns the person, or fails saying why the link does not work. Nothing that
+ * changes who may reset them can land between the check and the new password.
  */
 export const redeem = internalMutation({
-  args: { hash: v.string() },
-  handler: async (ctx, { hash }) => {
+  args: { hash: v.string(), provider: v.string(), secret: v.string() },
+  handler: async (ctx, { hash, provider, secret }) => {
     const reset = await resetByHash(ctx, hash);
 
     if (reset === null) return fail("invalid_args", "This reset link is not valid");
@@ -43,42 +44,17 @@ export const redeem = internalMutation({
 
     const account = await ctx.db
       .query("authAccounts")
-      .withIndex("userIdAndProvider", (q) => q.eq("userId", user._id).eq("provider", "password"))
+      .withIndex("userIdAndProvider", (q) => q.eq("userId", user._id).eq("provider", provider))
       .unique();
 
     if (account === null) return fail("invalid_args", "This account has no password to reset");
 
+    await ctx.db.patch(account._id, { secret });
     await ctx.db.patch(reset._id, { usedAt: Date.now() });
-    // Sessions end here and again in `finish`: if `finish` never runs, every session from before
-    // the reset is already over, and only a sign-in racing the reset could remain.
+    // The session the reset itself opens is created after this, so it is the only one left.
     await endUserSessions(ctx, user._id);
 
-    return { userId: user._id, accountId: account.providerAccountId };
-  },
-});
-
-/**
- * Ends every session of a person whose password was just reset. It runs after the new password
- * is stored, so a sign-in with the old password that raced the reset is ended too; the session
- * the reset itself opens is created after this.
- */
-export const finish = internalMutation({
-  args: { userId: v.id("users") },
-  handler: async (ctx, { userId }) => {
-    await endUserSessions(ctx, userId);
-  },
-});
-
-/**
- * Makes a claimed link usable again when setting the password failed after `redeem`, so the
- * person can retry instead of needing a new link.
- */
-export const release = internalMutation({
-  args: { hash: v.string() },
-  handler: async (ctx, { hash }) => {
-    const reset = await resetByHash(ctx, hash);
-
-    if (reset !== null) await ctx.db.patch(reset._id, { usedAt: undefined });
+    return user._id;
   },
 });
 

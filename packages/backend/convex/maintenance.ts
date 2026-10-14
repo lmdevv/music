@@ -19,6 +19,9 @@ const PURGE_QUEUES = 4;
 
 const PRUNE_BATCH = 200;
 
+/** Access grants a removed library's purge deletes per batch. */
+const ACCESS_BATCH = 100;
+
 /** A scan whose lease expires this many times in a row before it saves anything fails. */
 export const MAX_SCAN_STALLS = 3;
 
@@ -222,6 +225,27 @@ export const purgeLibrary = internalMutation({
 
         return;
       }
+    }
+  },
+});
+
+/**
+ * Deletes a removed library's access grants, a batch at a time, rescheduling until none are
+ * left. Anyone can be added to a library, so there may be more than one mutation can delete; the
+ * library is already gone, so the grants give nothing meanwhile.
+ */
+export const purgeLibraryAccess = internalMutation({
+  args: { libraryId: v.id("libraries") },
+  handler: async (ctx, { libraryId }) => {
+    const grants = await ctx.db
+      .query("libraryAccess")
+      .withIndex("by_library", (q) => q.eq("libraryId", libraryId))
+      .take(ACCESS_BATCH);
+
+    await Promise.all(grants.map((grant) => ctx.db.delete(grant._id)));
+
+    if (grants.length === ACCESS_BATCH) {
+      await ctx.scheduler.runAfter(0, internal.maintenance.purgeLibraryAccess, { libraryId });
     }
   },
 });

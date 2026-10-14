@@ -48,6 +48,12 @@ export default defineSchema({
      * however many there are; the rows themselves are purged in batches afterwards.
      */
     sessionsValidAfter: v.optional(v.number()),
+    /**
+     * API keys created up to this time no longer work, nor do the sessions they opened. Demotion
+     * to guest sets it, so a later promotion can't revive keys the batched revocation
+     * (`people:revokeKeys`) has not reached yet.
+     */
+    keysValidAfter: v.optional(v.number()),
     /** Carried from the sign-up form to `createOrUpdateUser`; never stored on a created user. */
     inviteCode: v.optional(v.string()),
   })
@@ -95,6 +101,7 @@ export default defineSchema({
     sessionId: v.optional(v.id("authSessions")),
   })
     .index("by_hash", ["hash"])
+    .index("by_session", ["sessionId"])
     .index("by_user", ["userId"])
     .index("by_revoked", ["revokedAt"])
     .index("by_user_last_used", ["userId", "lastUsedAt"]),
