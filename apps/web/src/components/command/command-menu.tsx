@@ -76,9 +76,13 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
     input.current?.focus();
   }, []);
 
+  // A row clicked while another was selected: it runs once its own preview registers.
+  const [runWhenShown, setRunWhenShown] = useState<string | null>(null);
+
   useEffect(() => {
     setActiveId(null);
     setDetail(false);
+    setRunWhenShown(null);
   }, [deferred]);
 
   // Once results for the query settle, the selection follows its item, so results arriving later
@@ -106,8 +110,6 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
     null,
   );
 
-  // A row clicked while another was selected: it runs once its own preview registers.
-  const [runWhenShown, setRunWhenShown] = useState<string | null>(null);
   const currentId = current?.id ?? null;
   const runPrimary = primary !== null && primary.id === currentId ? primary.run : null;
 
@@ -123,11 +125,21 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
   );
 
   useEffect(() => {
-    if (runWhenShown === null || primary?.id !== runWhenShown) return;
+    if (runWhenShown === null) return;
+
+    // The selection moved off the clicked row before its preview registered: nothing runs, and
+    // coming back to that row later doesn't run it either.
+    if (runWhenShown !== currentId) {
+      setRunWhenShown(null);
+
+      return;
+    }
+
+    if (primary?.id !== runWhenShown) return;
 
     setRunWhenShown(null);
     primary.run();
-  }, [primary, runWhenShown]);
+  }, [currentId, primary, runWhenShown]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     const key = menuKeyOf(event.nativeEvent);
@@ -138,7 +150,8 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
 
     if (key === "next") select(Math.min(active + 1, items.length - 1));
     else if (key === "previous") select(Math.max(active - 1, 0));
-    else runPrimary?.();
+    // While a new query's results load, the rows are the previous query's, so Enter waits.
+    else if (!searching) runPrimary?.();
   };
 
   const empty = items.length === 0 && !searching;
