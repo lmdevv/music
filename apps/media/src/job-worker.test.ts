@@ -250,6 +250,20 @@ describe("JobWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
             yield* Effect.promise(() => setFileTime(join(art, name), Date.now() - 60 * 60 * 1000));
           }
 
+          // Adding a library collects nothing, not even art no song uses: only a deletion does.
+          const orphan = join(art, "0".repeat(64));
+
+          yield* Files.writeFileAtomic(orphan, new Uint8Array([0xff, 0xd8, 0xff, 0xe0]), "w");
+          yield* Effect.promise(() => setFileTime(orphan, Date.now() - 60 * 60 * 1000));
+
+          const before = yield* Files.listNames(art);
+
+          yield* control.addLibrary(yield* temporaryDirectory("added"));
+          yield* clock.withLive(Effect.sleep("100 millis"));
+          yield* clock.adjust("5 minutes");
+          yield* clock.withLive(Effect.sleep("300 millis"));
+          expect((yield* Files.listNames(art)).toSorted()).toEqual(before.toSorted());
+
           yield* control.deleteLibrary(deleted);
           yield* clock.withLive(Effect.sleep("100 millis"));
           expect((yield* Files.listNames(art)).length).toBeGreaterThan(kept.length);
