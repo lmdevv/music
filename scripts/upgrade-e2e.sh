@@ -2,12 +2,13 @@
 # Proves an upgrade and a rollback on one data volume, as a homelab would do them:
 #
 #   1. The released image (OLD_IMAGE, default ghcr.io/lmdevv/music:0.1.0) starts on an empty
-#      volume; an admin signs up, adds the fixture library, waits for its scan, and makes a
-#      playlist.
+#      volume; an admin signs up, adds the fixture library, waits for its scan, makes a
+#      playlist, and queues songs on a device.
 #   2. The new image (IMAGE, built from this checkout unless set) starts on the same volume. It
 #      must back up before deploying, run the data migrations (0.1.0 predates accent-folded
-#      search, so "doppelganger" only finds "Doppelgänger" once they ran), and keep every
-#      account, song, and playlist, with the same password still signing in.
+#      search, so "doppelganger" only finds "Doppelgänger" once they ran, and stored the queue on
+#      the playback session, which splitPlaybackQueues moves to a row of its own), and keep every
+#      account, song, playlist, and queue, with the same password still signing in.
 #   3. The documented rollback: import the pre-upgrade backup while the new image runs, then go
 #      back to the old image, which must come up healthy with the same data.
 #
@@ -103,6 +104,18 @@ snapshot() {
   echo "users=$(convex_rows users) tracks=$(convex_rows tracks) albums=$(convex_rows albums) playlists=$(convex_rows playlists) playlistItems=$(convex_rows playlistItems) libraries=$(convex_rows libraries)"
 }
 
+convex_data() {
+  docker exec "$name" sh -c 'cd /app/backend && CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210 \
+    CONVEX_SELF_HOSTED_ADMIN_KEY="$(cat /data/secrets/admin_key)" \
+    ./node_modules/.bin/convex data "$1" --limit 10000 --format jsonLines' sh "$1"
+}
+
+# The signed-in user's queue as `<track ids>@<index>`, the same in every version's playback.state.
+queue_of() {
+  run_command query read playback.state '{}' | field .value |
+    node -pe 'const s = JSON.parse(require("node:fs").readFileSync(0, "utf8")); `${s.queue.map((t) => t.id).join(",")}@${s.index}`'
+}
+
 search_titles() {
   run_command query read search "{\"query\":\"$1\"}" | field .value.tracks |
     node -pe 'JSON.parse(require("node:fs").readFileSync(0, "utf8")).map((t) => t.title).join(",")'
@@ -122,6 +135,17 @@ done
 tracks="$(run_command query read tracks.list '{"limit":3}' | field .value.items)"
 track_ids="$(node -pe 'JSON.stringify(JSON.parse(process.argv[1]).map((t) => t.id))' "$tracks")"
 run_command mutation run playlists.create "{\"name\":\"Before the upgrade\",\"trackIds\":$track_ids}" >/dev/null
+# A queue on a device: 0.1.0 stores it on the playback session row, which the
+# splitPlaybackQueues migration moves into a playbackQueues row of its own.
+run_command mutation run devices.heartbeat \
+  '{"deviceId":"upgrade-e2e","name":"Upgrade test","kind":"web"}' >/dev/null
+run_command mutation run playback.play \
+  "{\"trackIds\":$track_ids,\"index\":1,\"deviceId\":\"upgrade-e2e\"}" >/dev/null
+run_command mutation run playback.pause '{}' >/dev/null
+queue_before="$(queue_of)"
+echo "queue before the upgrade: $queue_before"
+[[ "$queue_before" == *"@1" ]] || fail "the old image did not keep the queue"
+convex_data playbackSessions | grep -q '"queue"' || fail "0.1.0 did not store the queue on the session"
 before="$(snapshot)"
 echo "before the upgrade: $before"
 [[ "$before" != *"tracks=0"* && "$before" == *"playlists=1"* ]] || fail "the old image did not set up"
@@ -146,6 +170,17 @@ echo "search doppelganger: ${found:-nothing}"
 [[ "$found" == *"Doppelgänger"* ]] || fail "the accent-folding migration did not run"
 [[ "$(run_command query read playlists.list '{}' | field .value)" == *"Before the upgrade"* ]] ||
   fail "the playlist is gone"
+# The migrations run in the background after the deploy: wait for the queue to move.
+for _ in $(seq 1 30); do
+  [[ "$(convex_rows playbackQueues)" == 1 ]] && ! convex_data playbackSessions | grep -q '"queue"' && break
+  sleep 2
+done
+echo "playbackQueues rows: $(convex_rows playbackQueues); session keeps a queue: $(convex_data playbackSessions | grep -c '"queue"' || true)"
+[[ "$(convex_rows playbackQueues)" == 1 ]] || fail "the splitPlaybackQueues migration did not move the queue"
+convex_data playbackSessions | grep -q '"queue"' && fail "the session still holds the old queue"
+queue_after="$(queue_of)"
+echo "queue after the upgrade: $queue_after"
+[[ "$queue_after" == "$queue_before" ]] || fail "the queue changed in the upgrade: $queue_after"
 
 # 3. Roll back: restore the pre-upgrade backup, then run the old image again.
 docker exec "$name" sh -c 'cd /app/backend && CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210 \
@@ -158,4 +193,5 @@ echo "after the rollback: $rolled_back"
 token="$(sign_in signIn)"
 [[ "$(run_command query read playlists.list '{}' | field .value)" == *"Before the upgrade"* ]] ||
   fail "the playlist is gone after the rollback"
+[[ "$(queue_of)" == "$queue_before" ]] || fail "the queue is gone after the rollback"
 echo "upgrade e2e passed"
