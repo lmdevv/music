@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+# Proves an upgrade and a rollback on one data volume, as a homelab would do them:
+#
+#   1. The released image (OLD_IMAGE, default ghcr.io/lmdevv/music:0.1.0) starts on an empty
+#      volume; an admin signs up, adds the fixture library, waits for its scan, and makes a
+#      playlist.
+#   2. The new image (IMAGE, built from this checkout unless set) starts on the same volume. It
+#      must back up before deploying, run the data migrations (0.1.0 predates accent-folded
+#      search, so "doppelganger" only finds "Doppelgänger" once they ran), and keep every
+#      account, song, and playlist, with the same password still signing in.
+#   3. The documented rollback: import the pre-upgrade backup while the new image runs, then go
+#      back to the old image, which must come up healthy with the same data.
+#
+#   scripts/upgrade-e2e.sh
+#   OLD_IMAGE=ghcr.io/lmdevv/music:0.1.0 IMAGE=music:dev PORT=8091 scripts/upgrade-e2e.sh
+#
+# Env: OLD_IMAGE, IMAGE, PORT (default 8090), NAME (default music-upgrade-e2e), KEEP=1 to leave
+# the container and volume behind.
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+port="${PORT:-8090}"
+name="${NAME:-music-upgrade-e2e}"
+old_image="${OLD_IMAGE:-ghcr.io/lmdevv/music:0.1.0}"
+image="${IMAGE:-}"
+url="http://localhost:${port}"
+email="upgrade@music.test"
+password="upgrade-password-1"
+
+if [[ -z "$image" ]]; then
+  image="music:${name#music-}"
+  docker build -f "$root/deploy/docker/Dockerfile" -t "$image" "$root"
+fi
+docker pull -q "$old_image" >/dev/null
+
+library="$(mktemp -d)"
+node "$root/apps/media/scripts/generate-fixtures.ts" "$library" >/dev/null
+chmod -R a+rX "$library"
+
+cleanup() {
+  if [[ "${KEEP:-0}" != "1" ]]; then
+    docker rm -f "$name" >/dev/null 2>&1 || true
+    docker volume rm "$name-data" >/dev/null 2>&1 || true
+  fi
+  rm -rf "$library"
+}
+trap cleanup EXIT
+
+fail() {
+  echo "upgrade e2e: $*" >&2
+  docker logs "$name" 2>&1 | tail -40 >&2 || true
+  exit 1
+}
+
+start() {
+  # Stopped the way an upgrade would stop it, so Convex shuts down cleanly first.
+  docker stop -t 60 "$name" >/dev/null 2>&1 || true
+  docker rm -f "$name" >/dev/null 2>&1 || true
+  docker run -d --name "$name" -p "127.0.0.1:${port}:8080" -v "$name-data:/data" \
+    -v "$library:/music:ro" -e PUBLIC_URL="$url" "$1" >/dev/null
+  # Earlier images answered /healthz from Caddy alone, so wait for the media service too.
+  for _ in $(seq 1 150); do
+    if curl -fsS "$url/healthz" >/dev/null 2>&1 && curl -fsS "$url/media/health" >/dev/null 2>&1; then
+      echo "$1 is up"
+      return 0
+    fi
+    sleep 2
+  done
+  fail "$1 did not become healthy"
+}
+
+# Prints the JSON field path $2 (like .value.tokens.token) of the JSON on stdin.
+field() {
+  node -e '
+    let value = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+    for (const key of process.argv[1].split(".").filter(Boolean)) value = value?.[key];
+    if (value === undefined) { console.error("missing", process.argv[1]); process.exit(1); }
+    process.stdout.write(typeof value === "string" ? value : JSON.stringify(value));
+  ' "$1"
+}
+
+# Calls the Convex HTTP API: kind (query, mutation, action), function path, JSON args.
+call() {
+  curl -fsS -X POST "$url/convex/api/$1" -H 'Content-Type: application/json' \
+    ${token:+-H "Authorization: Bearer $token"} \
+    -d "{\"path\":\"$2\",\"format\":\"json\",\"args\":$3}"
+}
+
+sign_in() {
+  call action auth:signIn "{\"provider\":\"password\",\"params\":{\"email\":\"$email\",\"password\":\"$password\",\"flow\":\"$1\",\"name\":\"Upgrade\"}}" |
+    field .value.tokens.token
+}
+
+run_command() { call "$1" "commands:$2" "{\"name\":\"$3\",\"args\":$4}"; }
+
+convex_rows() {
+  docker exec "$name" sh -c 'cd /app/backend && CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210 \
+    CONVEX_SELF_HOSTED_ADMIN_KEY="$(cat /data/secrets/admin_key)" \
+    ./node_modules/.bin/convex data "$1" --limit 10000 --format jsonLines' sh "$1" | grep -c '"_id"' || true
+}
+
+snapshot() {
+  echo "users=$(convex_rows users) tracks=$(convex_rows tracks) albums=$(convex_rows albums) playlists=$(convex_rows playlists) playlistItems=$(convex_rows playlistItems) libraries=$(convex_rows libraries)"
+}
+
+search_titles() {
+  run_command query read search "{\"query\":\"$1\"}" | field .value.tracks |
+    node -pe 'JSON.parse(require("node:fs").readFileSync(0, "utf8")).map((t) => t.title).join(",")'
+}
+
+# 1. The released image, with an admin, a scanned library, and a playlist.
+start "$old_image"
+token="$(sign_in signUp)"
+job="$(run_command mutation run libraries.create '{"name":"Music","path":"/music"}' | field .value.jobId)"
+for _ in $(seq 1 90); do
+  status="$(run_command query read jobs.get "{\"jobId\":\"$job\"}" | field .value.status)"
+  [[ "$status" == "done" ]] && break
+  [[ "$status" == "failed" || "$status" == "cancelled" ]] && fail "the scan ended $status"
+  sleep 2
+done
+[[ "$status" == "done" ]] || fail "the scan did not finish"
+tracks="$(run_command query read tracks.list '{"limit":3}' | field .value.items)"
+track_ids="$(node -pe 'JSON.stringify(JSON.parse(process.argv[1]).map((t) => t.id))' "$tracks")"
+run_command mutation run playlists.create "{\"name\":\"Before the upgrade\",\"trackIds\":$track_ids}" >/dev/null
+before="$(snapshot)"
+echo "before the upgrade: $before"
+[[ "$before" != *"tracks=0"* && "$before" == *"playlists=1"* ]] || fail "the old image did not set up"
+
+# 2. The new image on the same volume.
+start "$image"
+mapfile -t backups < <(docker exec "$name" sh -c 'ls -1t /data/backups | grep "^pre-.*\.zip$"' || true)
+echo "backups: ${backups[*]:-none}"
+[[ "${#backups[@]}" == 1 ]] || fail "expected one backup before the upgrade, got ${#backups[@]}"
+[[ "$(docker exec "$name" cat /data/build)" == "$(docker exec "$name" cat /app/build-id)" ]] ||
+  fail "the new build is not recorded"
+after="$(snapshot)"
+echo "after the upgrade: $after"
+[[ "$after" == "$before" ]] || fail "data changed in the upgrade: $before -> $after"
+token="$(sign_in signIn)"
+for _ in $(seq 1 30); do
+  found="$(search_titles doppelganger)"
+  [[ "$found" == *"Doppelgänger"* ]] && break
+  sleep 2
+done
+echo "search doppelganger: ${found:-nothing}"
+[[ "$found" == *"Doppelgänger"* ]] || fail "the accent-folding migration did not run"
+[[ "$(run_command query read playlists.list '{}' | field .value)" == *"Before the upgrade"* ]] ||
+  fail "the playlist is gone"
+
+# 3. Roll back: restore the pre-upgrade backup, then run the old image again.
+docker exec "$name" sh -c 'cd /app/backend && CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210 \
+  CONVEX_SELF_HOSTED_ADMIN_KEY="$(cat /data/secrets/admin_key)" \
+  ./node_modules/.bin/convex import --replace-all -y "/data/backups/$1"' sh "${backups[0]}" >/dev/null
+start "$old_image"
+rolled_back="$(snapshot)"
+echo "after the rollback: $rolled_back"
+[[ "$rolled_back" == "$before" ]] || fail "the rollback did not restore the data: $rolled_back"
+token="$(sign_in signIn)"
+[[ "$(run_command query read playlists.list '{}' | field .value)" == *"Before the upgrade"* ]] ||
+  fail "the playlist is gone after the rollback"
+echo "upgrade e2e passed"
