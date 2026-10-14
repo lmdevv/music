@@ -415,6 +415,22 @@ const pause = (ms: number) =>
     setTimeout(resolve, ms);
   });
 
+/**
+ * Waits until `sessions` holds at least `count`, so a race starts once the sign-ins are really
+ * landing, however slow the machine; gives up after about 30 seconds.
+ */
+const opened = async (
+  sessions: ReadonlyArray<unknown>,
+  count: number,
+  attemptsLeft = 600,
+): Promise<void> => {
+  if (sessions.length >= count || attemptsLeft === 0) return;
+
+  await pause(50);
+
+  return opened(sessions, count, attemptsLeft - 1);
+};
+
 /** The outcome of reading as each of `sessions`: a set of one code when they all agree. */
 const endedEverywhere = async (sessions: ReadonlyArray<Session>) =>
   new Set(await Promise.all(sessions.map((one) => failureCode(one.music.read("account.me", {})))));
@@ -1474,7 +1490,7 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     const suspendStop = { done: false };
     const suspendRace = hammer(busy, 24, suspendStop);
 
-    await pause(400);
+    await opened(suspendRace.sessions, 3);
     const suspended = await failureCode(adminA.music.run("people.suspend", { userId: busyId }));
 
     suspendStop.done = true;
@@ -1492,7 +1508,7 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     const resetStop = { done: false };
     const resetRace = hammer(rushed, 24, resetStop);
 
-    await pause(400);
+    await opened(resetRace.sessions, 3);
     const { token } = await adminA.music.run("people.reset", { userId: rushedId });
     const after = await resetPassword(server, token, "after-the-race-1");
 
