@@ -105,8 +105,8 @@
                   PUID = "5";
                 };
               };
-              # A backend that disagrees with the host's oci-containers backend.
-              mismatched = nixpkgs.lib.nixosSystem {
+              # A host that already runs its oci-containers with Docker, as earlier versions allowed.
+              inherited = nixpkgs.lib.nixosSystem {
                 inherit system;
                 modules = [
                   self.nixosModules.default
@@ -143,9 +143,16 @@
               tuned.config.systemd.timers ? music-update
               && nixpkgs.lib.hasInfix "docker-music.service" tuned.config.systemd.services.music-update.script
             ) "autoUpdate does not restart the right service";
-            assert expect (builtins.any (nixpkgs.lib.hasInfix "Set them to the same runtime") (
-              failed mismatched
-            )) "a backend mismatch is not refused";
+            assert expect (
+              failed inherited == [ ]
+              && (container inherited).serviceName == "docker-music"
+              && nixpkgs.lib.hasInfix "docker pull" (
+                (evaluate {
+                  backend = "docker";
+                  autoUpdate.enable = true;
+                }).config.systemd.services.music-update.script
+              )
+            ) "an existing Docker host does not keep its backend: ${toString (failed inherited)}";
             assert expect (failed listed == [ ]) "the list form fails: ${toString (failed listed)}";
             assert expect (
               (container listed).volumes == [

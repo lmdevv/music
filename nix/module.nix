@@ -27,6 +27,9 @@ let
 
   serviceName = config.virtualisation.oci-containers.containers.music.serviceName;
 
+  # The runtime in use: `backend`, or the host's oci-containers backend when that is unset.
+  runtime = config.virtualisation.oci-containers.backend;
+
   # { name, path } for each folder: the list form names a mount after the folder, which is how
   # every install before the attrset form named them, so existing libraries keep their paths.
   mounts =
@@ -97,14 +100,18 @@ in
     };
 
     backend = lib.mkOption {
-      type = lib.types.enum [
-        "podman"
-        "docker"
-      ];
-      default = "podman";
+      type = lib.types.nullOr (
+        lib.types.enum [
+          "podman"
+          "docker"
+        ]
+      );
+      default = null;
+      example = "docker";
       description = ''
-        Container runtime, set as `virtualisation.oci-containers.backend` (which every
-        oci-container on the host shares). The service is `podman-music` or `docker-music`.
+        Container runtime. Unset, the host's `virtualisation.oci-containers.backend` is used
+        (Podman on current NixOS); set, it sets that option, which every oci-container on the host
+        shares. The service is `podman-music` or `docker-music`.
       '';
     };
 
@@ -243,13 +250,6 @@ in
         } must be absolute paths without a colon.";
       }
       {
-        assertion = config.virtualisation.oci-containers.backend == cfg.backend;
-        message = ''
-          services.music.backend is "${cfg.backend}" but virtualisation.oci-containers.backend is
-          "${config.virtualisation.oci-containers.backend}". Set them to the same runtime.
-        '';
-      }
-      {
         assertion = !(cfg.autoUpdate.enable && cfg.imageFile != null);
         message = "services.music.autoUpdate pulls from the registry, so it cannot be used with imageFile.";
       }
@@ -271,7 +271,8 @@ in
       }
     ];
 
-    virtualisation.oci-containers.backend = lib.mkDefault cfg.backend;
+    # A host-wide setting: a different explicit value elsewhere is reported as a conflict.
+    virtualisation.oci-containers.backend = lib.mkIf (cfg.backend != null) cfg.backend;
 
     # Traversable, not listable: the media user reaches dataDir/media; everything else in
     # dataDir is root's alone.
@@ -299,12 +300,12 @@ in
       description = "Update the [music] container image";
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
-      path = [ config.virtualisation.${cfg.backend}.package ];
+      path = [ config.virtualisation.${runtime}.package ];
       serviceConfig.Type = "oneshot";
       script = ''
-        before="$(${cfg.backend} image inspect --format '{{.Id}}' ${lib.escapeShellArg cfg.image} 2>/dev/null || true)"
-        ${cfg.backend} pull ${lib.escapeShellArg cfg.image}
-        after="$(${cfg.backend} image inspect --format '{{.Id}}' ${lib.escapeShellArg cfg.image})"
+        before="$(${runtime} image inspect --format '{{.Id}}' ${lib.escapeShellArg cfg.image} 2>/dev/null || true)"
+        ${runtime} pull ${lib.escapeShellArg cfg.image}
+        after="$(${runtime} image inspect --format '{{.Id}}' ${lib.escapeShellArg cfg.image})"
         if [ "$before" != "$after" ]; then
           echo "new image $after; restarting ${serviceName}"
           systemctl restart ${serviceName}.service

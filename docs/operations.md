@@ -83,7 +83,8 @@ for it to report healthy, and import. People sign in again; their API keys keep 
 
 ## Upgrade
 
-Images on `ghcr.io/lmdevv/music` are published only after every CI check has passed:
+Images on `ghcr.io/lmdevv/music` are published only after every CI check has passed. A release is
+a tag such as `v0.2.0` in the repository; its images drop the `v`:
 
 | Tag           | What it is                                             |
 | ------------- | ------------------------------------------------------ |

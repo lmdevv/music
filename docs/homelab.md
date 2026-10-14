@@ -123,7 +123,8 @@ The flake's module runs the same image with Podman (or Docker):
   `openFirewall = true` to listen on every interface; container ports skip the NixOS firewall,
   so the bind address is what keeps it private.
 - `uid`/`gid` choose who reads the music (default 1000), `dataDir` where `/data` lives
-  (`/var/lib/music`), and `backend = "docker"` uses Docker instead of Podman.
+  (`/var/lib/music`). It runs on the host's `virtualisation.oci-containers.backend` (Podman
+  unless you chose Docker); `backend = "docker"` sets that.
 - The image defaults to the release that matches the flake revision, so `nix flake update music`
   followed by `nixos-rebuild switch` is an upgrade. `imageFile` loads an image from the Nix store
   instead of pulling, for example one from `dockerTools.pullImage` pinned by digest.
