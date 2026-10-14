@@ -20,30 +20,39 @@ const signInFailure = (error: string) =>
   `[CONVEX A(auth:signIn)] [Request ID: c567abd5af572dac] Server Error\nUncaught Error: ${error}\n    at retrieveAccount (index.ts:602:9)`;
 
 describe("convexLogger", () => {
-  it("drops failed sign-ins, including from a deployment that redacts error details", () => {
+  it("drops a sign-in rejected for its email or password", () => {
     const { lines, sink } = recordingSink();
     const logger = convexLogger(sink);
 
     logger.error(signInFailure("InvalidSecret"));
     logger.error(signInFailure("InvalidAccountId"));
-    logger.error(signInFailure("TooManyFailedAttempts"));
-    logger.error("[CONVEX A(auth:signIn)] [Request ID: 5f0a3c] Server Error");
+    logger.error(signInFailure("ConvexError: Invalid email or password"));
 
     expect(lines).toEqual([]);
   });
 
-  it("still logs every other function's errors", () => {
+  it("still logs other sign-in failures and every other function's errors", () => {
     const { lines, sink } = recordingSink();
     const logger = convexLogger(sink);
+
+    const refresh = signInFailure("Invalid refresh token");
+    const limited = signInFailure("TooManyFailedAttempts");
+    const redacted = "[CONVEX A(auth:signIn)] [Request ID: 5f0a3c] Server Error";
 
     const other =
       "[CONVEX M(commands:run)] [Request ID: 1] Server Error\nUncaught Error: InvalidSecret";
 
+    logger.error(refresh);
+    logger.error(limited);
+    logger.error(redacted);
     logger.error(other);
     logger.warn("reconnecting");
     logger.log("%c[CONVEX Q(commands:read)] [LOG]", "color:gray", "'hello'");
 
     expect(lines).toEqual([
+      ["error", [refresh]],
+      ["error", [limited]],
+      ["error", [redacted]],
       ["error", [other]],
       ["warn", ["reconnecting"]],
       ["log", ["%c[CONVEX Q(commands:read)] [LOG]", "color:gray", "'hello'"]],
