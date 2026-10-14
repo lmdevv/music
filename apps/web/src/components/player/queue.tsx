@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
 
 import { Artwork, PlayingBars } from "@/components/library/artwork";
 import { useUi } from "@/components/shell/ui-state";
-import { useAction } from "@/lib/action";
+import { toastFailure, useAction } from "@/lib/action";
 import { formatDuration } from "@/lib/format";
 
 import { perform } from "./controls";
@@ -59,7 +59,7 @@ function QueueRow({
   readonly index: number;
   readonly tone?: "plain" | "glass";
   readonly current?: boolean;
-  /** Called as the remove button is pressed, before the queue changes. */
+  /** Removes the song from the queue; rows without it (the current song) have no remove button. */
   readonly onRemove?: () => void;
 }) {
   const player = usePlayer();
@@ -121,7 +121,6 @@ function QueueRow({
               data-queue-remove
               onClick={() => {
                 onRemove?.();
-                perform(player.removeFromQueue(index));
               }}
               className={cn(
                 "relative flex size-7 shrink-0 items-center justify-center rounded-full opacity-0 outline-none group-hover/queue:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50",
@@ -155,6 +154,7 @@ export function QueueList({
   readonly tone?: "plain" | "glass";
   readonly className?: string;
 }) {
+  const player = usePlayer();
   const list = useRef<HTMLDivElement>(null);
   const removedAt = useRef<number | null>(null);
   // Rows remount when the queue changes (their keys carry the queue position), so focus is placed
@@ -186,6 +186,11 @@ export function QueueList({
               tone={tone}
               onRemove={() => {
                 removedAt.current = position;
+                // A removal that fails leaves the queue as it was; focus must not jump later.
+                player.removeFromQueue(entry.index).catch((cause: unknown) => {
+                  removedAt.current = null;
+                  toastFailure(cause);
+                });
               }}
             />
           ))}
