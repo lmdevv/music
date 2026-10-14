@@ -161,6 +161,50 @@ describe("lists for a viewer who reads every library", () => {
     ]);
   });
 
+  it(
+    "ends an overgrown page early and says where, so no row is lost",
+    { timeout: 60_000 },
+    async () => {
+      const backend = makeBackend();
+      const admin = await signUp(backend, "admin");
+      const { libraryId } = await seedLibrary(backend, admin, { name: "Old", count: 0 });
+
+      await upsertFiles(backend, libraryId, [
+        { path: "a.flac", album: "A" },
+        { path: "b.flac", album: "B" },
+      ]);
+
+      const first = await admin.music.read("albums.list", { limit: 1 });
+
+      // A scan adds 1,001 newer albums while the first page is on screen with `end`.
+      await Array.from({ length: 11 }, (_, batch) =>
+        Array.from({ length: batch === 10 ? 1 : 100 }, (__, index) => {
+          const name = `New ${batch * 100 + index}`;
+
+          return { path: `${name}.flac`, album: name };
+        }),
+      ).reduce(async (previous, batch) => {
+        await previous;
+        await upsertFiles(backend, libraryId, batch);
+      }, Promise.resolve());
+
+      const grown = await admin.music.read("albums.list", { end: first.cursor, limit: 1 });
+
+      expect(grown.items).toHaveLength(1000);
+      expect(grown.cursor).not.toBe(first.cursor);
+
+      const between = await admin.music.read("albums.list", {
+        cursor: grown.cursor,
+        end: first.cursor,
+        limit: 1,
+      });
+
+      expect(between.cursor).toBe(first.cursor);
+      expect([...grown.items, ...between.items].map((album) => album.title)).toContain("B");
+      expect(grown.items.length + between.items.length).toBe(1002);
+    },
+  );
+
   it("refuses a cursor that is not one of its own", async () => {
     const backend = makeBackend();
     const admin = await signUp(backend, "admin");
@@ -196,7 +240,7 @@ describe("liked songs", () => {
     await admin.music.run("likes.set", { trackId: first, liked: false });
     await admin.music.run("likes.set", { trackId: first, liked: true });
 
-    const liked = await pages((cursor) => admin.music.read("likes.list", { cursor, limit: 200 }));
+    const liked = await pages((cursor) => admin.music.read("likes.page", { cursor, limit: 200 }));
     const ids: ReadonlyArray<TrackId> = liked.flat().map((track) => track.id);
 
     expect(ids).toHaveLength(1100);

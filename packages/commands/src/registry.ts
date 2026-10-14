@@ -39,6 +39,7 @@ import {
   SearchResults,
   StreamProfile,
   StreamUrl,
+  Track,
   TrackPage,
   User,
 } from "./models";
@@ -260,6 +261,11 @@ export const commands = {
     args: Schema.Struct({
       deviceId: DeviceId,
       index: QueueIndex,
+      /**
+       * The song playing at `index`. When the queue changed before the player saw it, the server
+       * finds this song near `index` instead of trusting the index.
+       */
+      trackId: Schema.optionalKey(TrackId),
       positionMs: Millis,
       playing: Schema.Boolean,
     }),
@@ -329,6 +335,15 @@ export const commands = {
 
   // Likes and history
   "likes.list": command({
+    summary: "List up to 1,000 liked songs, newest first (likes.page reads them all)",
+    group: "likes",
+    kind: "query",
+    access: "user",
+    job: false,
+    args: NoArgs,
+    result: Schema.Array(Track),
+  }),
+  "likes.page": command({
     summary: "List liked songs, newest first, a page at a time",
     group: "likes",
     kind: "query",

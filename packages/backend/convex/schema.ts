@@ -246,8 +246,14 @@ export default defineSchema({
     leaseUntil: v.optional(v.number()),
     startedAt: v.optional(v.number()),
     finishedAt: v.optional(v.number()),
-    /** How many times a worker claimed it; a scan that keeps crashing fails after a few. */
-    attempts: v.optional(v.number()),
+    /**
+     * How many leases in a row expired without the scan getting further than `furthestDone`. A
+     * file that crashes the scanner stops it at the same place each time, so it fails after a few;
+     * a scan that restarts for other reasons (a deploy) and keeps getting further does not.
+     */
+    stalls: v.optional(v.number()),
+    /** The most files a lease of this job had done when it expired. */
+    furthestDone: v.optional(v.number()),
   })
     .index("by_status", ["status"])
     .index("by_status_finished", ["status", "finishedAt"])

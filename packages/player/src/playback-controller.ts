@@ -448,6 +448,7 @@ export class PlaybackController {
       this.#client.run("playback.report", {
         deviceId: this.deviceId,
         index: loaded.index,
+        trackId: loaded.track.id,
         positionMs,
         playing,
       }),

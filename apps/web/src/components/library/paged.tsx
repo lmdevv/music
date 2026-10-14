@@ -27,6 +27,23 @@ export const summarizeChain = (reported: ReadonlyArray<PageReport | undefined>) 
 });
 
 /**
+ * The chain's cursors after the page at `cursor` reported that it ends at `next`. A page that is
+ * not the last ends where the following page starts, unless it outgrew the most rows one page
+ * holds; then a page starting at `next` goes in between, so no row falls out of the list.
+ */
+export const splitChain = (
+  cursors: ReadonlyArray<string | null>,
+  cursor: string | null,
+  next: string,
+): ReadonlyArray<string | null> => {
+  const at = cursors.indexOf(cursor);
+
+  if (at === -1 || at === cursors.length - 1 || cursors.includes(next)) return cursors;
+
+  return [...cursors.slice(0, at + 1), next, ...cursors.slice(at + 1)];
+};
+
+/**
  * The cursors of a list loaded page by page, and what each page reported. A page can be empty
  * while more follow (its rows were in libraries you can't read), so emptiness is a property of the
  * whole chain: every page loaded so far is empty and the last one is done.
@@ -39,7 +56,11 @@ export const usePageChain = () => {
     setCursors((list) => (list.includes(next) ? list : [...list, next]));
   }, []);
 
-  const report = useCallback((cursor: string | null, items: number, done: boolean) => {
+  const report = useCallback((cursor: string | null, page: PageResult<unknown>) => {
+    const { items: shown, done, cursor: next } = page;
+    const items = shown.length;
+
+    setCursors((list) => splitChain(list, cursor, next));
     setReports((current) => {
       const previous = current.get(keyOf(cursor));
 
@@ -72,18 +93,15 @@ export const useHeldPage = <Page,>(page: Page | undefined): Page | undefined => 
   return page ?? held;
 };
 
-/** Tells the chain what `page` shows once it loads or changes. */
+/** Tells the chain what `page` shows, and where it ends, once it loads or changes. */
 export const useReportPage = (
   cursor: string | null,
   page: PageResult<unknown> | undefined,
-  report: (cursor: string | null, items: number, done: boolean) => void,
+  report: (cursor: string | null, page: PageResult<unknown>) => void,
 ): void => {
-  const items = page?.items.length;
-  const done = page?.done;
-
   useEffect(() => {
-    if (items !== undefined && done !== undefined) report(cursor, items, done);
-  }, [cursor, items, done, report]);
+    if (page !== undefined) report(cursor, page);
+  }, [cursor, page, report]);
 };
 
 /**
@@ -142,7 +160,7 @@ function Page<Item>({
   readonly renderItem: (item: Item) => ReactNode;
   readonly skeleton: ReactNode;
   readonly onMore: (cursor: string) => void;
-  readonly onReport: (cursor: string | null, items: number, done: boolean) => void;
+  readonly onReport: (cursor: string | null, page: PageResult<unknown>) => void;
 }) {
   const page = useHeldPage(usePage(cursor, end));
   useReportPage(cursor, page, onReport);

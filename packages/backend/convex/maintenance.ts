@@ -8,7 +8,7 @@ import type { MutationCtx } from "./_generated/server";
 import { DEVICE_RETAINED_MS } from "./lib/devices";
 import { findSession } from "./lib/playback";
 import { DEVICE_ONLINE_MS } from "./lib/present";
-import { normaliseQueue, rowQueue, saveQueue } from "./lib/queue";
+import { normaliseStored, rowQueue, saveQueue } from "./lib/queue";
 import { inOrder } from "./lib/sequence";
 
 /** Rows one purge run deletes at most, well inside Convex's per-mutation limits. */
@@ -19,8 +19,8 @@ const PURGE_QUEUES = 4;
 
 const PRUNE_BATCH = 200;
 
-/** A scan claimed this many times without finishing fails instead of retrying again. */
-export const MAX_SCAN_ATTEMPTS = 3;
+/** A scan whose lease expires this many times in a row without getting further fails. */
+export const MAX_SCAN_STALLS = 3;
 
 /** Finished jobs, used invites, and revoked keys are kept this long, then deleted. */
 export const RECORD_RETAINED_MS = 30 * 24 * 60 * 60 * 1000;
@@ -150,12 +150,19 @@ const purgeQueues = async (ctx: MutationCtx, cursor: string | null): Promise<str
   await Promise.all(
     page.page.map(async (row) => {
       const stored = rowQueue(row);
-      const ids = [...new Set([...stored.queue, ...(stored.unshuffled ?? [])])];
-      const tracks = await Promise.all(ids.map((id) => ctx.db.get(id)));
-      const found = new Map(ids.map((id, position) => [id, tracks[position] ?? null]));
-      const queue = normaliseQueue(stored, (id) => found.get(id) ?? null);
+      const queue = await normaliseStored(ctx, stored, () => true);
 
-      if (queue.stale) await saveQueue(ctx, row.userId, queue);
+      if (!queue.stale) return;
+      await saveQueue(ctx, row.userId, queue);
+
+      // The song playing was deleted: the position belonged to it, so the next song starts over.
+      if (queue.queue[queue.index] !== stored.queue[stored.index]) {
+        const session = await findSession(ctx, row.userId);
+
+        if (session !== null) {
+          await ctx.db.patch(session._id, { positionMs: 0, updatedAt: Date.now() });
+        }
+      }
     }),
   );
 
@@ -216,8 +223,9 @@ export const purgeLibrary = internalMutation({
 
 /**
  * Returns running jobs whose worker stopped renewing the lease to the pending queue, or fails one
- * that has been claimed `MAX_SCAN_ATTEMPTS` times: a file that crashes the scanner would otherwise
- * crash it again on every retry, forever.
+ * whose lease expired `MAX_SCAN_STALLS` times in a row without getting further: a file that
+ * crashes the scanner would otherwise crash it again on every retry, forever. A scan that gets
+ * further each time (the service restarted for a deploy) keeps retrying.
  */
 export const releaseExpiredLeases = internalMutation({
   args: {},
@@ -232,23 +240,30 @@ export const releaseExpiredLeases = internalMutation({
     const expired = running.filter((job) => job.leaseUntil !== undefined && job.leaseUntil < now);
 
     await Promise.all(
-      expired.map((job) =>
-        // A job claimed before attempts were counted has had at least this one.
-        (job.attempts ?? 1) >= MAX_SCAN_ATTEMPTS
+      expired.map((job) => {
+        const further = job.furthestDone === undefined || job.done > job.furthestDone;
+        const stalls = further ? 1 : (job.stalls ?? 1) + 1;
+        const furthestDone = Math.max(job.done, job.furthestDone ?? 0);
+
+        return stalls >= MAX_SCAN_STALLS
           ? ctx.db.patch(job._id, {
               status: "failed",
               workerId: undefined,
               leaseUntil: undefined,
               finishedAt: now,
-              error: `The scan stopped responding ${MAX_SCAN_ATTEMPTS} times, so it was stopped. Check the media service log for the file it was reading, then scan again.`,
+              stalls,
+              furthestDone,
+              error: `The scan stopped responding ${MAX_SCAN_STALLS} times at the same place, so it was stopped. Check the media service log for the file it was reading, then scan again.`,
             })
           : ctx.db.patch(job._id, {
               status: "pending",
               workerId: undefined,
               leaseUntil: undefined,
+              stalls,
+              furthestDone,
               message: "Worker stopped responding; retrying",
-            }),
-      ),
+            });
+      }),
     );
   },
 });

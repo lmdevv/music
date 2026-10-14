@@ -133,7 +133,9 @@ export const PageArgs = Schema.Struct({
    * The cursor the following page starts at, once a live client has loaded that page. The page
    * then covers everything up to it, growing past `limit` as rows are added, so no row falls
    * between two pages on screen. Such a page always reports `done: false`; the page that starts
-   * at `end` tells whether the list ends there.
+   * at `end` tells whether the list ends there. Its `cursor` is `end`, unless it grew past the
+   * most rows a page holds: then `cursor` is where it stopped, and a page starting there belongs
+   * in front of the one at `end`.
    */
   end: Schema.optionalKey(Schema.NullOr(Schema.String)),
   limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 200 }))),

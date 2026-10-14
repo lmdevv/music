@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { DEVICE_RETAINED_MS } from "../convex/lib/devices";
-import { MAX_SCAN_ATTEMPTS, RECORD_RETAINED_MS } from "../convex/maintenance";
+import { MAX_SCAN_STALLS, RECORD_RETAINED_MS } from "../convex/maintenance";
 import {
   MEDIA_SECRET,
   allTracks,
@@ -126,11 +126,40 @@ describe("the scan job lifecycle", () => {
     expect((await crash(1)).status).toBe("pending");
     expect((await crash(2)).status).toBe("pending");
 
-    const failed = await crash(MAX_SCAN_ATTEMPTS);
+    const failed = await crash(MAX_SCAN_STALLS);
 
     expect(failed.status).toBe("failed");
     expect(failed.error).toMatch(/stopped responding 3 times/u);
     expect(await backend.query(api.media.pendingJobs, { secret: MEDIA_SECRET })).toEqual([]);
+  });
+
+  it("keeps retrying a scan that gets further each time its worker restarts", async () => {
+    const backend = makeBackend();
+    const admin = await signUp(backend, "admin");
+    const created = await admin.music.run("libraries.create", { name: "Rock", path: "/music" });
+    const job = await jobId(backend, created.jobId);
+
+    const restart = async (attempt: number) => {
+      vi.setSystemTime(START + attempt * 10 * 60_000);
+      expect(await claim(backend, job)).not.toBeNull();
+      await backend.mutation(api.media.reportJob, {
+        secret: MEDIA_SECRET,
+        jobId: job,
+        workerId: WORKER,
+        done: attempt * 1000,
+      });
+      vi.setSystemTime(START + attempt * 10 * 60_000 + 2 * 60_000);
+      await backend.mutation(internal.maintenance.releaseExpiredLeases, {});
+
+      return (await admin.music.read("jobs.get", { jobId: created.jobId })).status;
+    };
+
+    const statuses = await [1, 2, 3, 4, 5].reduce<Promise<ReadonlyArray<string>>>(
+      async (previous, attempt) => [...(await previous), await restart(attempt)],
+      Promise.resolve([]),
+    );
+
+    expect(statuses).toEqual(["pending", "pending", "pending", "pending", "pending"]);
   });
 
   it("deletes albums and artists that no song points at after a scan", async () => {

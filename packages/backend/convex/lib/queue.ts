@@ -1,7 +1,7 @@
 /**
  * The play queue. Every reader and writer goes through `loadQueue`, which drops songs the viewer
- * can no longer play (their library was deleted or hidden, or their file is gone) and moves the
- * index with them, so an index a client sends always means the song that client was shown.
+ * can no longer read (their library was deleted or hidden) and moves the index with them, so an
+ * index a client sends always means the song that client was shown.
  */
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
@@ -152,24 +152,34 @@ export const normaliseQueue = (
   };
 };
 
-/** The viewer's queue, keeping only songs they can read and whose files are there. */
-export const loadQueue = async (ctx: ReadCtx, viewer: Viewer): Promise<Queue> => {
-  const stored = await storedQueue(ctx, viewer.id);
+/** Loads a stored queue's songs and keeps those `keep` accepts. */
+export const normaliseStored = async (
+  ctx: ReadCtx,
+  stored: StoredQueue,
+  keep: (track: Doc<"tracks">) => boolean,
+): Promise<Queue> => {
   const ids = [...new Set([...stored.queue, ...(stored.unshuffled ?? [])])];
   const docs = await Promise.all(ids.map((id) => ctx.db.get(id)));
 
-  const readable = new Map(
+  const kept = new Map(
     ids.flatMap((id, position) => {
       const track = docs[position] ?? null;
 
-      return track !== null && !track.missing && canRead(viewer, track.libraryId)
-        ? [[id, track] as const]
-        : [];
+      return track !== null && keep(track) ? [[id, track] as const] : [];
     }),
   );
 
-  return normaliseQueue(stored, (id) => readable.get(id) ?? null);
+  return normaliseQueue(stored, (id) => kept.get(id) ?? null);
 };
+
+/**
+ * The viewer's queue, keeping only songs they can read. A song whose file went missing stays: it
+ * may come back, and the player skips it if it can't stream.
+ */
+export const loadQueue = async (ctx: ReadCtx, viewer: Viewer): Promise<Queue> =>
+  normaliseStored(ctx, await storedQueue(ctx, viewer.id), (track) =>
+    canRead(viewer, track.libraryId),
+  );
 
 const sameIds = (
   left: ReadonlyArray<TrackId> | undefined,

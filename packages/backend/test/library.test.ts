@@ -181,6 +181,12 @@ describe("deleting a library", () => {
     await admin.music.run("libraries.delete", { libraryId: rockLibrary.libraryId });
     await drainScheduled(backend);
 
+    // The song playing was deleted, so the next one starts from the top.
+    const now = await member.music.read("playback.state", {});
+
+    expect(now.queue[now.index]?.id).toBe(jazz[0]);
+    expect(now.positionMs).toBe(0);
+
     const playlist = await member.music.read("playlists.get", { playlistId });
 
     expect(playlist.items.map((item) => item.track.id)).toEqual(jazz);

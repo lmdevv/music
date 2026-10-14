@@ -12,6 +12,9 @@ import { ok } from "./types";
 
 const STREAM_TTL_MS = 6 * 60 * 60 * 1000;
 
+/** Most likes `likes.list` returns; `likes.page` reads any number. */
+const MAX_LIKES = 1000;
+
 const LIKES_PAGE = 50;
 
 const MAX_PLAYLIST = 2000;
@@ -88,7 +91,23 @@ const appendTracks = async (
 };
 
 export const collectionQueries = {
-  "likes.list": async (ctx, viewer, args) => {
+  "likes.list": async (ctx, viewer) => {
+    const likes = await ctx.db
+      .query("likes")
+      .withIndex("by_user", (q) => q.eq("userId", viewer.id))
+      .order("desc")
+      .take(MAX_LIKES);
+
+    const tracks = await readableTracks(
+      ctx,
+      viewer,
+      likes.map((like) => like.trackId),
+    );
+
+    return makePresenter(ctx, viewer).tracks(tracks);
+  },
+
+  "likes.page": async (ctx, viewer, args) => {
     const page = await ctx.db
       .query("likes")
       .withIndex("by_user", (q) => q.eq("userId", viewer.id))

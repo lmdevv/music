@@ -18,6 +18,7 @@ import {
   seedLibrary,
   signUp,
   trackIds,
+  upsertFiles,
 } from "./backend";
 import type { Backend, User } from "./backend";
 
@@ -335,15 +336,17 @@ describe("songs whose file is gone", () => {
     );
   });
 
-  it("drop out of the queue when their file goes missing", async () => {
+  it("stay in the queue when their file goes missing while queued", async () => {
     const { backend, admin, rock } = await setup();
     const [library] = await admin.music.read("libraries.list", {});
 
     await admin.music.run("playback.play", { trackIds: [...rock], index: 2, deviceId: DEVICE });
     await markMissing(backend, library?.id ?? "", ["Rock/0002.flac"]);
+    await admin.music.run("playback.next", {});
 
-    expect(await queueIds(admin)).toEqual(rock.filter((id) => id !== at(1, rock)));
-    expect(await current(admin)).toBe(at(2, rock));
+    // The file may come back; the player skips it if it can't stream.
+    expect(await queueIds(admin)).toEqual(rock);
+    expect(await current(admin)).toBe(at(3, rock));
   });
 });
 
@@ -375,6 +378,30 @@ describe("after a library is deleted", () => {
     await admin.music.run("queue.remove", { index: 0 });
     expect(await queueIds(admin)).toEqual([at(1, rock), at(2, rock)]);
     expect(await current(admin)).toBe(at(1, rock));
+  });
+
+  it("finds the song a report names when the player has not seen the queue shift", async () => {
+    const { backend, admin, rock } = await setup();
+    const jazzLibrary = await seedLibrary(backend, admin, { name: "Jazz", count: 1 });
+    const [jazz] = trackIds(await allTracks(admin), "Jazz");
+
+    if (jazz === undefined) throw new Error("Seed missing");
+    const queue = [jazz, ...rock];
+
+    await admin.music.run("playback.play", { trackIds: queue, index: 3, deviceId: DEVICE });
+    await admin.music.run("libraries.delete", { libraryId: jazzLibrary.libraryId });
+
+    // The player still shows the old queue: the song it plays was at index 3.
+    await admin.music.run("playback.report", {
+      deviceId: DEVICE,
+      index: 3,
+      trackId: at(2, rock),
+      positionMs: 1000,
+      playing: true,
+    });
+
+    expect(await current(admin)).toBe(at(2, rock));
+    expect(await history(admin)).toEqual([at(2, rock)]);
   });
 
   it("refuses an index that only existed before the songs were dropped", async () => {
@@ -412,6 +439,29 @@ describe("position reports and history", () => {
     await report(admin, 0, 300);
 
     expect(await history(admin)).toEqual([at(0, rock), at(0, rock)]);
+  });
+
+  it("records every loop of a short song on repeat one", async () => {
+    const { backend, admin } = await setup();
+    const { libraryId } = await seedLibrary(backend, admin, { name: "Jingle", count: 0 });
+
+    await upsertFiles(backend, libraryId, [
+      { path: "jingle.flac", title: "Jingle", durationMs: 6000 },
+    ]);
+    const [jingle] = trackIds(await allTracks(admin), "Jingle");
+
+    if (jingle === undefined) throw new Error("Seed missing");
+    await admin.music.run("playback.play", { trackIds: [jingle], deviceId: DEVICE });
+    await admin.music.run("playback.repeat", { mode: "one" });
+
+    // The engine reports each time the song starts over, six seconds apart.
+    await [0, 1, 2].reduce(async (previous, loop) => {
+      await previous;
+      vi.setSystemTime(START + loop * 6000);
+      await report(admin, 0, 50);
+    }, Promise.resolve());
+
+    expect(await history(admin)).toEqual([jingle, jingle, jingle]);
   });
 
   it("records the next song a device advanced to, and ignores other devices", async () => {

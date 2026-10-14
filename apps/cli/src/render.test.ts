@@ -47,11 +47,7 @@ describe("formatDuration", () => {
 
 describe("renderResult", () => {
   it("renders track lists as a table", () => {
-    expect(
-      renderResult(commands["likes.list"].result, { items: [track], cursor: "", done: true }).split(
-        "\n",
-      ),
-    ).toEqual([
+    expect(renderResult(commands["likes.list"].result, [track]).split("\n")).toEqual([
       "ID  TITLE                             ARTIST     ALBUM      TIME  LIKED",
       "t1  Harder, Better, Faster, Stronger  Daft Punk  Discovery  3:44  ♥",
     ]);
@@ -135,12 +131,7 @@ describe("renderResult", () => {
 
   it("truncates long cells", () => {
     const long = { ...track, title: "x".repeat(80) };
-
-    const [, row] = renderResult(commands["likes.list"].result, {
-      items: [long],
-      cursor: "",
-      done: true,
-    }).split("\n");
+    const [, row] = renderResult(commands["likes.list"].result, [long]).split("\n");
 
     expect(row).toContain(`${"x".repeat(47)}…`);
   });

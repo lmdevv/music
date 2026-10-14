@@ -146,7 +146,7 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 - `music playback shuffle (--on | --no-on)`: Turn shuffle on or off.
 - `music playback repeat <off|all|one>`: Set repeat to off, all, or one.
 - `music playback volume <volume>`: Set the volume from 0 to 1.
-- `music playback report --device-id <id> --index <int> --position-ms <number> (--playing | --no-playing)`: Report the active device's position (sent by players).
+- `music playback report --device-id <id> --index <int> [--track-id <id>] --position-ms <number> (--playing | --no-playing)`: Report the active device's position (sent by players).
 - `music stream url --track-id <id> --profile <original|aac-320|aac-128|fmp4-flac|fmp4-aac>`: Get a signed stream URL for a song.
 
 ### devices
@@ -164,7 +164,8 @@ Playback controls: `music pause`, `music resume`, `music next`, `music previous`
 
 ### likes
 
-- `music likes list [--cursor <text>] [--end <text>] [--limit <int>]`: List liked songs, newest first, a page at a time.
+- `music likes list`: List up to 1,000 liked songs, newest first (likes.page reads them all).
+- `music likes page [--cursor <text>] [--end <text>] [--limit <int>]`: List liked songs, newest first, a page at a time.
 - `music likes set <track-id> (--liked | --no-liked)`: Like or unlike a song.
 - `music history list [--limit <int>]`: List recently played songs.
 

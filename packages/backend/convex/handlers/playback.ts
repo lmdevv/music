@@ -58,6 +58,29 @@ const playableTracks = async (
   return { ids: kept, index: Math.min(before, kept.length - 1) };
 };
 
+/**
+ * Where a reported song is in the queue. A player sends the index it was shown; when the queue
+ * shifted before it saw the change (a song went missing or was removed), the song it names is at
+ * another index, so the occurrence nearest the reported one wins. Null when the song is gone.
+ */
+const reportedIndex = (
+  queue: ReadonlyArray<Id<"tracks">>,
+  index: number,
+  trackId: string | undefined,
+): number | null => {
+  if (trackId === undefined) return index < queue.length ? index : null;
+
+  if (queue[index] === trackId) return index;
+
+  const positions = queue.flatMap((id, position) => (id === trackId ? [position] : []));
+
+  const [nearest] = positions.toSorted(
+    (left, right) => Math.abs(left - index) - Math.abs(right - index),
+  );
+
+  return nearest ?? null;
+};
+
 /** Picks the device that should play when the caller did not name one. */
 const defaultDevice = async (
   ctx: MutationCtx,
@@ -378,15 +401,19 @@ export const playbackMutations = {
     if (session.activeDeviceId !== args.deviceId) return ok;
     // The index is one the client was shown, so it counts in the queue as the viewer sees it.
     const queue = await loadQueue(ctx, viewer);
-    const track = queue.tracks[args.index];
+    const index = reportedIndex(queue.queue, args.index, args.trackId);
+    const track = index === null ? undefined : queue.tracks[index];
 
-    if (track === undefined) return ok;
+    if (index === null || track === undefined) return ok;
     const now = Date.now();
+
+    // A short song loops sooner than the gap, so its gap is half its length.
+    const gap = Math.min(REPLAY_GAP_MS, track.durationMs / 2);
 
     const startedAgain =
       track._id === queue.reportedTrackId &&
-      args.positionMs < REPLAY_GAP_MS &&
-      livePosition(session, now) - args.positionMs > REPLAY_GAP_MS;
+      args.positionMs < gap &&
+      livePosition(session, now) - args.positionMs > gap;
 
     const newPlay = args.playing && (track._id !== queue.reportedTrackId || startedAgain);
 
@@ -398,7 +425,7 @@ export const playbackMutations = {
 
     await saveQueue(ctx, viewer.id, {
       ...queue,
-      index: args.index,
+      index,
       reportedTrackId: newPlay ? track._id : queue.reportedTrackId,
     });
 

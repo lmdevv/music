@@ -85,6 +85,8 @@ const visibleJob = async (ctx: QueryCtx, viewer: Viewer, id: string): Promise<Do
  * viewer can't see is named only as "another library".
  */
 const checkNoOverlap = async (ctx: QueryCtx, viewer: Viewer, path: string): Promise<void> => {
+  // Every folder must be compared, and an install has a handful of libraries (`loadViewer` reads
+  // them all on every request too).
   const libraries = await ctx.db.query("libraries").collect();
 
   for (const library of libraries) {

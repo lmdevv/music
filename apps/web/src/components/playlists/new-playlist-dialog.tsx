@@ -46,7 +46,7 @@ function NewPlaylistForm({
   const navigate = useNavigate();
   const player = usePlayer();
   const create = useRun("playlists.create");
-  const readLikes = useReadOnce("likes.list");
+  const readLikes = useReadOnce("likes.page");
   const [name, setName] = useState("");
   const [startWith, setStartWith] = useState<StartWith>(seed.length > 0 ? "selection" : "nothing");
 

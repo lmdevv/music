@@ -1,5 +1,6 @@
 import { encodeArgs, resultDecoder } from "@music/commands/codec";
 import type { Track } from "@music/commands/models";
+import { InvalidResultError } from "@music/sdk/client";
 import { readCommand } from "@music/sdk/functions";
 import { useQueries } from "convex/react";
 import { Result } from "effect";
@@ -11,7 +12,7 @@ const PAGE_SIZE = 200;
 /** Most liked songs the page keeps live at once. */
 const LIKED_LIMIT = 5000;
 
-const decodePage = resultDecoder("likes.list");
+const decodePage = resultDecoder("likes.page");
 
 /** Every liked song the viewer can play, newest first, and whether all of them have loaded. */
 export interface LikedSongs {
@@ -36,8 +37,8 @@ export const useLikedSongs = (): LikedSongs | undefined => {
           {
             query: readCommand,
             args: {
-              name: "likes.list" as const,
-              args: encodeArgs("likes.list", { cursor, limit: PAGE_SIZE }),
+              name: "likes.page" as const,
+              args: encodeArgs("likes.page", { cursor, limit: PAGE_SIZE }),
             },
           },
         ]),
@@ -56,7 +57,9 @@ export const useLikedSongs = (): LikedSongs | undefined => {
     const decoded = decodePage(wire);
 
     if (Result.isFailure(decoded)) {
-      throw new Error(`likes.list returned an unexpected result: ${decoded.failure.message}`);
+      throw new InvalidResultError(
+        `likes.page returned an unexpected result: ${decoded.failure.message}`,
+      );
     }
 
     return decoded.success;

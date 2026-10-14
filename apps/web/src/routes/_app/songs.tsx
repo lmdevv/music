@@ -7,6 +7,7 @@ import { useDeferredValue, useEffect, useRef, useState } from "react";
 
 import { PageHeader, usePlayTracks } from "@/components/library/cards";
 import { useHeldPage, usePageChain, useReportPage } from "@/components/library/paged";
+import type { PageResult } from "@/components/library/paged";
 import { TrackList, TrackListSkeleton } from "@/components/library/track-list";
 import { toastFailure } from "@/lib/action";
 import { formatTotal, plural } from "@/lib/format";
@@ -142,7 +143,7 @@ function SongPage({
   readonly header: boolean;
   readonly last: boolean;
   readonly onMore: (cursor: string) => void;
-  readonly onReport: (cursor: string | null, items: number, done: boolean) => void;
+  readonly onReport: (cursor: string | null, page: PageResult<unknown>) => void;
 }) {
   const page = useHeldPage(useRead("tracks.list", { cursor, end, limit: PAGE_SIZE }));
   useReportPage(cursor, page, onReport);

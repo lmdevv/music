@@ -77,7 +77,6 @@ export const claimJob = mutation({
       leaseUntil: now + LEASE_MS,
       startedAt: job.startedAt ?? now,
       done: 0,
-      attempts: (job.attempts ?? 0) + 1,
     });
 
     return {

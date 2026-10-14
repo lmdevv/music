@@ -45,7 +45,7 @@ const DEFAULT_LIMIT = 50;
 
 /**
  * Most rows a page with an `end` returns. Pages grow when rows land in their range; past this the
- * page ends early, which only happens after thousands of additions while the page is on screen.
+ * page ends at its last row and reports that as its cursor, so the client inserts a page there.
  */
 const MAX_SPAN = 1000;
 
@@ -140,7 +140,16 @@ export const mergedPage = async <Row extends { readonly _creationTime: number }>
   const last = items.at(-1);
 
   if (range.end !== null && request.end !== undefined && request.end !== null) {
-    return { items, cursor: request.end, done: false };
+    // A page that outgrew `MAX_SPAN` ends at its last row instead, and the client puts a page
+    // starting there in front of the one at `end`.
+    return {
+      items,
+      cursor:
+        merged.length > limit && last !== undefined
+          ? encodeCursor({ key: keyOf(last), time: last._creationTime })
+          : request.end,
+      done: false,
+    };
   }
 
   return {
