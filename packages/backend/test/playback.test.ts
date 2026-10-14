@@ -164,6 +164,41 @@ describe("play, next, and previous", () => {
     expect(state.activeDevice?.id).toBe(DEVICE);
   });
 
+  it("plays on the online player when none is named, reading only online devices", async () => {
+    const { backend, admin, rock } = await setup();
+
+    // A month of closed tabs, each still a device row, all long silent.
+    await backend.run(async (ctx) => {
+      await Promise.all(
+        Array.from({ length: 100 }, (_, index) =>
+          ctx.db.insert("devices", {
+            userId: admin.id,
+            deviceId: `old-tab-${index}`,
+            name: "Old tab",
+            kind: "web",
+            lastSeenAt: START - (index + 1) * 60 * 60 * 1000,
+          }),
+        ),
+      );
+    });
+
+    const read = await admin.as.mutation(async (ctx) => {
+      const viewer = await loadViewer(ctx);
+      const before = await ctx.meta.getTransactionMetrics();
+
+      await playbackMutations["playback.play"](ctx, viewer, { trackIds: [...rock] });
+
+      return (
+        (await ctx.meta.getTransactionMetrics()).documentsRead.used - before.documentsRead.used
+      );
+    });
+
+    expect((await admin.music.read("playback.state", {})).activeDevice?.id).toBe(DEVICE);
+    // The five songs, the session and queue rows (read, then read by their writes), and the one
+    // online device: none of the hundred silent ones.
+    expect(read).toBeLessThan(20);
+  });
+
   it("refuses to play on a device that never registered", async () => {
     const { admin, rock } = await setup();
 

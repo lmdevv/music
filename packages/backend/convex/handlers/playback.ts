@@ -168,13 +168,16 @@ const defaultDevice = async (
   viewer: Viewer,
   session: Doc<"playbackSessions">,
 ): Promise<string | undefined> => {
-  const devices = await ctx.db
-    .query("devices")
-    .withIndex("by_user_device", (q) => q.eq("userId", viewer.id))
-    .collect();
-
   const now = Date.now();
-  const online = devices.filter((device) => now - device.lastSeenAt < DEVICE_ONLINE_MS);
+
+  // Only online devices can take playback, so only their range is read: every browser that ever
+  // opened the app keeps a device row for a month.
+  const online = await ctx.db
+    .query("devices")
+    .withIndex("by_user_last_seen", (q) =>
+      q.eq("userId", viewer.id).gt("lastSeenAt", now - DEVICE_ONLINE_MS),
+    )
+    .collect();
 
   // Keep the active device while it is online; otherwise hand playback to the player that was
   // seen most recently, so a closed tab does not keep "playing" with nobody listening.
