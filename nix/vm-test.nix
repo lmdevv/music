@@ -47,7 +47,23 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript = ''
+    import json
+    import shlex
     from datetime import timedelta
+
+    def sign_in(flow):
+        body = json.dumps({
+            "path": "auth:signIn",
+            "format": "json",
+            "args": {
+                "provider": "password",
+                "params": {"email": "vm@music.test", "password": "vm-test-password-1", "flow": flow, "name": "VM"},
+            },
+        })
+        return machine.succeed(
+            "curl -fsS -X POST http://127.0.0.1:8080/convex/api/action -H 'Content-Type: application/json' -d "
+            + shlex.quote(body)
+        )
 
     machine.wait_for_unit("podman-music.service")
     # The first start generates secrets and deploys the Convex functions.
@@ -60,7 +76,8 @@ pkgs.testers.runNixOSTest {
         machine.succeed("curl -fsS http://127.0.0.1:8080/sign-in | grep -q '<title>'")
 
     with subtest("the port is published on localhost only"):
-        machine.succeed("ss -ltn | grep -q '127.0.0.1:8080'")
+        machine.succeed("ss -ltnH | grep -q '127.0.0.1:8080 '")
+        machine.fail("ss -ltnH | grep -E '(0\\.0\\.0\\.0|\\[::\\]|\\*):8080 '")
 
     with subtest("the library folder is mounted read-only under its name"):
         machine.succeed("podman exec music cat /music/library/readme.txt | grep -q 'not music'")
@@ -70,11 +87,19 @@ pkgs.testers.runNixOSTest {
         machine.succeed("podman exec music printenv BACKUP_KEEP | grep -qx 3")
         machine.succeed("podman exec music printenv PUBLIC_URL | grep -qx http://localhost:8080")
 
-    with subtest("data survives a restart of the service"):
+    with subtest("the database and secrets survive a restart of the service"):
+        # A row written through Convex: the first sign-up creates the admin account.
+        assert '"tokens"' in sign_in("signUp"), "sign-up failed"
         machine.succeed("test -s /var/lib/music/secrets/instance_secret")
         secret = machine.succeed("cat /var/lib/music/secrets/instance_secret")
         machine.succeed("systemctl restart podman-music.service")
         machine.wait_until_succeeds("curl -fsS http://127.0.0.1:8080/media/health | grep -q '\"ok\":true'", timeout=timedelta(minutes=5))
         assert machine.succeed("cat /var/lib/music/secrets/instance_secret") == secret
+        # Reading it back: the same password signs in, and setup reports an account exists.
+        assert '"tokens"' in sign_in("signIn"), "the account did not survive the restart"
+        machine.succeed(
+            "curl -fsS -X POST http://127.0.0.1:8080/convex/api/query -H 'Content-Type: application/json' "
+            + "-d '{\"path\":\"setup:status\",\"format\":\"json\",\"args\":{}}' | grep -q '\"hasUsers\":true'"
+        )
   '';
 }

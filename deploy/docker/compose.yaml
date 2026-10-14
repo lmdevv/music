@@ -36,15 +36,16 @@ services:
       - ${MUSIC_DIR:-./music}:/music:ro
     # The image's own health check, spelled out: /healthz answers 200 only while the web server,
     # the media service, and the database all work. An upgrade backs up and migrates before it
-    # turns healthy, which can take minutes on a large library. Delete this block to use the
-    # image's own check (the same values), which follows future images.
+    # turns healthy, which can take minutes on a large library. These are the image's values
+    # except its 5-second `start_interval`, which needs Docker Engine 25 or newer (Debian 12 ships
+    # 20.10), so here `healthy` shows up within 30 seconds of the server being up. Delete this
+    # block to use the image's own check, which follows future images.
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10m
-      start_interval: 5s
     # Time to stop cleanly before Docker kills it; it normally takes a few seconds.
     stop_grace_period: 30s
     logging:

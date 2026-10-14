@@ -302,8 +302,8 @@ in
         ${runtime} pull ${lib.escapeShellArg cfg.image}
         after="$(${runtime} image inspect --format '{{.Id}}' ${lib.escapeShellArg cfg.image})"
         if [ "$before" != "$after" ]; then
-          echo "new image $after; restarting ${serviceName}"
-          systemctl restart ${serviceName}.service
+          echo "new image $after; restarting ${serviceName} if it is running"
+          systemctl try-restart ${serviceName}.service
         fi
       '';
     };
