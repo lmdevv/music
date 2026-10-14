@@ -648,6 +648,37 @@ describe("what a position report costs", () => {
   });
 });
 
+describe("liked songs in a long queue", () => {
+  it("are marked whether the viewer likes a few songs or many", async () => {
+    const backend = makeBackend();
+    const admin = await signUp(backend, "admin");
+    await seedLibrary(backend, admin, { name: "Long", count: 250 });
+    await admin.music.run("devices.heartbeat", { deviceId: DEVICE, name: "Laptop", kind: "web" });
+    const ids = (await allTracks(admin)).map((track) => track.id);
+
+    await admin.music.run("playback.play", { trackIds: ids, deviceId: DEVICE });
+
+    const likeAll = async (liked: ReadonlyArray<TrackId>) => {
+      await Promise.all(
+        liked.map((trackId) => admin.music.run("likes.set", { trackId, liked: true })),
+      );
+    };
+
+    const likedInQueue = async () =>
+      (await admin.music.read("queue.list", {})).queue.flatMap((track) =>
+        track.liked ? [track.id] : [],
+      );
+
+    // A few likes are read in one go.
+    await likeAll(ids.slice(10, 13));
+    expect(await likedInQueue()).toEqual(ids.slice(10, 13));
+
+    // More than one read takes are looked up song by song.
+    await likeAll(ids.slice(0, 210));
+    expect(await likedInQueue()).toEqual(ids.slice(0, 210));
+  });
+});
+
 describe("a session saved by an older version", () => {
   it("reads the queue from the session until something writes it", async () => {
     const { admin, rock } = await legacy();
