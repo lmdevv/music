@@ -1,5 +1,5 @@
 import type { MutationName } from "@music/commands/registry";
-import { usePlayer, usePlayerPosition } from "@music/player/react";
+import { usePlayer } from "@music/player/react";
 import { useRead } from "@music/sdk/react";
 import { Match } from "effect";
 
@@ -9,15 +9,15 @@ import type { FieldSpec, FormValues } from "./fields";
 
 /**
  * A command form's default values from what is playing and on screen. Only the open command's
- * preview calls it, so the playback position (which ticks several times a second) re-renders
- * that form, not the whole menu.
+ * preview calls it. `positionMs` is the live playback position, which only the seek form passes
+ * (it ticks several times a second); other forms pass null and don't follow it.
  */
 export const useCommandDefaults = (
   name: MutationName,
   fields: ReadonlyArray<FieldSpec>,
+  positionMs: number | null,
 ): FormValues => {
   const player = usePlayer();
-  const position = usePlayerPosition();
   const me = useRead("account.me", {});
   const libraries = useRead("libraries.list", {});
   const values: Record<string, FormValues[string]> = {};
@@ -35,7 +35,9 @@ export const useCommandDefaults = (
     Match.when("playback.shuffle", () => ({ on: !player.shuffle })),
     Match.when("playback.repeat", () => ({ mode: NEXT_REPEAT[player.repeat] })),
     Match.when("playback.volume", () => ({ volume: String(player.volume) })),
-    Match.when("playback.seek", () => ({ positionMs: String(Math.round(position)) })),
+    Match.when("playback.seek", () =>
+      positionMs === null ? {} : { positionMs: String(Math.round(positionMs)) },
+    ),
     Match.when("playback.jump", () => ({ index: String(player.index) })),
     Match.when("account.rename", () => ({ name: me?.name ?? undefined })),
     // With one folder there is nothing to choose; removing one is left to an explicit pick.

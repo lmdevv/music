@@ -2,6 +2,7 @@ import { argsDecoder } from "@music/commands/codec";
 import type { JobId } from "@music/commands/ids";
 import { commands } from "@music/commands/registry";
 import type { MutationName } from "@music/commands/registry";
+import { usePlayerPosition } from "@music/player/react";
 import { makeMusicClient } from "@music/sdk/client";
 import { useRead } from "@music/sdk/react";
 import { Button } from "@music/ui/components/button";
@@ -34,26 +35,48 @@ type Outcome =
   | { readonly kind: "key"; readonly key: string }
   | { readonly kind: "invite"; readonly link: string };
 
+/** What {@link CommandPreview} takes. */
+type CommandPreviewProps = PreviewProps & {
+  readonly name: MutationName;
+  readonly fields: ReadonlyArray<FieldSpec>;
+  readonly context: MenuContext;
+};
+
 /**
  * A registry command's preview: its form, the same command for a terminal, and Run. After a run
  * it shows the job, key, or invite the command returned, opens a new playlist, or closes the menu.
  */
-export function CommandPreview({
+export function CommandPreview(props: CommandPreviewProps) {
+  return props.name === "playback.seek" ? (
+    <SeekPreview {...props} />
+  ) : (
+    <CommandForm {...props} positionMs={null} />
+  );
+}
+
+/**
+ * The seek command's preview. Only it follows the playback position (several updates a second),
+ * so its default target stays current without re-rendering any other command's form.
+ */
+function SeekPreview(props: CommandPreviewProps) {
+  const position = usePlayerPosition();
+
+  return <CommandForm {...props} positionMs={position} />;
+}
+
+function CommandForm({
   name,
   fields,
   context,
   onClose,
   onBack,
   registerPrimary,
-}: PreviewProps & {
-  readonly name: MutationName;
-  readonly fields: ReadonlyArray<FieldSpec>;
-  readonly context: MenuContext;
-}) {
+  positionMs,
+}: CommandPreviewProps & { readonly positionMs: number | null }) {
   const convex = useConvex();
   const client = useMemo(() => makeMusicClient(convex), [convex]);
   const navigate = useNavigate();
-  const defaults = useCommandDefaults(name, fields);
+  const defaults = useCommandDefaults(name, fields, positionMs);
   // Only fields the person changed are kept; the rest follow live defaults such as the current song.
   const [edits, setEdits] = useState<FormValues>({});
   const values: FormValues = { ...defaults, ...edits };
