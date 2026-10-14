@@ -245,6 +245,11 @@ test("an admin sees another admin's private library read-only, and the screen st
     const dialog = admin.getByRole("dialog", { name: "Who can listen" });
 
     await expect(dialog.getByText(/can change who listens to this folder/)).toBeVisible();
+    // It offers nothing the admin can't do here.
+    await expect(
+      dialog.getByText(/Only the server's owner manages a library you can't hear/),
+    ).toBeVisible();
+    await expect(dialog.getByText(/rename|rescan|remove/)).toHaveCount(0);
     await expect(dialog.getByRole("list", { name: "People who can listen" })).toHaveCount(0);
     await dialog.getByRole("button", { name: "Done" }).click();
 
