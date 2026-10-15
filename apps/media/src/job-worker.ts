@@ -11,7 +11,18 @@
 import { hostname } from "node:os";
 
 import type { JobId } from "@music/commands/ids";
-import { Cause, Data, Effect, Layer, Option, Ref, Schedule, Semaphore, Stream } from "effect";
+import {
+  Cause,
+  Data,
+  Effect,
+  HashSet,
+  Layer,
+  Option,
+  Ref,
+  Schedule,
+  Semaphore,
+  Stream,
+} from "effect";
 
 import { collectReleasedArt, collectUnusedArt } from "./art-collector.ts";
 import {
@@ -52,10 +63,10 @@ const outcomeOf = (end: JobEnd): JobOutcome | undefined =>
  * Deletes the artwork scans released that nothing uses any more. Hashes too new to delete yet,
  * and all of them when Convex cannot be asked, stay in `releasedArt` for the next try.
  */
-const collectReleased = (releasedArt: Ref.Ref<ReadonlySet<string>>) =>
+const collectReleased = (releasedArt: Ref.Ref<HashSet.HashSet<string>>) =>
   Ref.get(releasedArt).pipe(
     Effect.flatMap(collectReleasedArt),
-    Effect.flatMap((waiting) => Ref.set(releasedArt, waiting)),
+    Effect.flatMap((waiting) => Ref.set(releasedArt, HashSet.fromIterable(waiting))),
     Effect.catchTags({
       BackendError: (error) => Effect.logWarning("JobWorker.art_collection_failed", error),
       FileError: (error) => Effect.logWarning("JobWorker.art_collection_failed", error),
@@ -63,7 +74,7 @@ const collectReleased = (releasedArt: Ref.Ref<ReadonlySet<string>>) =>
   );
 
 const runJob = Effect.fn("JobWorker.runJob")(
-  function* (jobId: JobId, workerId: string, releasedArt: Ref.Ref<ReadonlySet<string>>) {
+  function* (jobId: JobId, workerId: string, releasedArt: Ref.Ref<HashSet.HashSet<string>>) {
     const backend = yield* MediaBackend;
     const claimed = yield* backend.claimJob(jobId, workerId);
 
@@ -141,7 +152,7 @@ export const layer: Layer.Layer<never, never, MediaBackend | MediaConfig> = Laye
     // Jobs and collections take turns: a scan stores artwork before it stores the songs using it.
     const turns = yield* Semaphore.make(1);
     // Artwork scans released and not yet deleted, kept across jobs.
-    const releasedArt = yield* Ref.make<ReadonlySet<string>>(new Set());
+    const releasedArt = yield* Ref.make(HashSet.empty<string>());
 
     const collect = turns.withPermits(1)(
       collectUnusedArt().pipe(

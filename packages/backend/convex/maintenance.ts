@@ -274,8 +274,8 @@ export const releaseExpiredLeases = internalMutation({
       expired.map((job) => {
         // `done` counts files this lease saved: claiming resets it, and the scanner adds a batch
         // only once it is written. Files already saved are skipped on the next try. A `total` of
-        // 0 (claiming clears it too) means this lease compared every file and found none to read:
-        // an unchanged library made all the progress it could.
+        // 0 (claiming clears it too) means this lease compared every file, found none to read,
+        // and marked the missing ones: an unchanged library made all the progress it could.
         const progressed = job.done > 0 || job.total === 0;
         const stalls = progressed ? 0 : (job.stalls ?? 0) + 1;
 

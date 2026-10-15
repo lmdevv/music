@@ -423,15 +423,32 @@ const presentQueue = async (
     return track === undefined ? [] : [{ item, track }];
   });
 
-  // Presented together, so a long queue looks the viewer's likes up in one read (see `tracks`).
-  const presented = await present.tracks(entries.map(({ track }) => track));
+  const shared = entries.map(
+    ({ item, track }) => jamHost === null || jamShareableEntry(jamHost, item, track),
+  );
+
+  // The songs shown are presented together, so a long queue looks the viewer's likes up in one
+  // read (see `tracks`); withheld entries are never presented.
+  const presented = await present.tracks(
+    entries.flatMap(({ track }, position) => (shared[position] === true ? [track] : [])),
+  );
+
+  // Where each shown entry's song is in `presented`.
+  const slots: Array<number> = [];
+  let shownBefore = 0;
+
+  for (const isShared of shared) {
+    slots.push(shownBefore);
+
+    if (isShared) shownBefore += 1;
+  }
 
   return {
     queue: await Promise.all(
       entries.map(async ({ item, track }, position) => {
-        const shown = presented[position];
+        const shown = shared[position] === true ? presented[slots[position] ?? -1] : undefined;
 
-        return (jamHost !== null && !jamShareableEntry(jamHost, item, track)) || shown === undefined
+        return shown === undefined
           ? withheldEntry(item, track)
           : // The presented track is a new object made for this entry.
             Object.assign(shown, {

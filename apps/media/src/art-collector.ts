@@ -11,6 +11,9 @@ import { deleteArt, sweepArt } from "./art-store.ts";
 import { type ArtHashPage, type ArtworkTable, MediaBackend } from "./media-backend.ts";
 import { MediaConfig } from "./media-config.ts";
 
+/** `artInUse` calls in flight at once while collecting what scans released. */
+const CHECK_CONCURRENCY = 4;
+
 /** Artwork younger than this stays: a scan may have saved it and not stored its songs yet. */
 const GRACE = Duration.minutes(10);
 
@@ -72,21 +75,24 @@ export const collectUnusedArt = Effect.fn("ArtCollector.collect")(function* () {
  *   `FileError` when a file could not be deleted.
  */
 export const collectReleasedArt = Effect.fn("ArtCollector.collectReleased")(function* (
-  released: ReadonlySet<string>,
+  released: Iterable<string>,
 ) {
+  const hashes = [...released];
   const none: ReadonlySet<string> = new Set();
 
-  if (released.size === 0) return none;
+  if (hashes.length === 0) return none;
   const backend = yield* MediaBackend;
   const { dataDir } = yield* MediaConfig;
-  const hashes = [...released];
-  const inUse = new Set<string>();
 
-  for (let start = 0; start < hashes.length; start += ART_IN_USE_MAX) {
-    const used = yield* backend.artInUse(hashes.slice(start, start + ART_IN_USE_MAX));
+  const checked = yield* Effect.forEach(
+    Array.from({ length: Math.ceil(hashes.length / ART_IN_USE_MAX) }, (_, chunk) =>
+      hashes.slice(chunk * ART_IN_USE_MAX, (chunk + 1) * ART_IN_USE_MAX),
+    ),
+    backend.artInUse,
+    { concurrency: CHECK_CONCURRENCY },
+  );
 
-    for (const hash of used) inUse.add(hash);
-  }
+  const inUse = new Set(checked.flatMap((used) => Array.from(used)));
 
   const now = yield* Clock.currentTimeMillis;
 

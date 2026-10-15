@@ -10,7 +10,7 @@ import { basename, dirname, join } from "node:path";
 
 import type { LibraryId } from "@music/commands/ids";
 import { compareText } from "@music/commands/text-order";
-import { Cache, Effect, Option, Ref, Schema, Stream } from "effect";
+import { Cache, Effect, HashSet, Option, Ref, Schema, Stream } from "effect";
 
 import { saveArt } from "./art-store.ts";
 import { extensionOf, isAudioFile } from "./audio-format.ts";
@@ -196,7 +196,7 @@ const knownFingerprints = Effect.fn("Scan.knownFingerprints")(function* (
 export const scanLibrary = Effect.fn("Scan.library")(function* (
   library: ScanTarget,
   progress: Ref.Ref<JobProgress>,
-  releasedArt: Ref.Ref<ReadonlySet<string>>,
+  releasedArt: Ref.Ref<HashSet.HashSet<string>>,
 ) {
   const backend = yield* MediaBackend;
   const { dataDir } = yield* MediaConfig;
@@ -231,10 +231,11 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
     (file) => !isUnchanged(known.get(file.relativePath), file, folderArtKey(folderArtOf(file))),
   );
 
-  // A total of 0 tells Convex this lease made all the progress an unchanged library can make.
+  // A total of 0 tells Convex this lease made all the progress an unchanged library can make, so
+  // it is reported only at the end, once missing files are marked too (`releaseExpiredLeases`).
   yield* Ref.set(progress, {
     done: 0,
-    total: changed.length,
+    total: changed.length > 0 ? changed.length : undefined,
     message: `Found ${files.length} files, ${changed.length} changed`,
   });
 
@@ -316,10 +317,17 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
   const claimed = new Set<string>();
   let moved = 0;
 
-  const release = (hashes: ReadonlyArray<string>) =>
-    hashes.length === 0
-      ? Effect.void
-      : Ref.update(releasedArt, (current) => new Set([...current, ...hashes]));
+  // A batch's write and the art it released are recorded together: a cancel between the two
+  // would lose that art until the next full collection.
+  const saved = <E>(write: Effect.Effect<ReadonlyArray<string>, E>) =>
+    write.pipe(
+      Effect.tap((hashes) =>
+        Ref.update(releasedArt, (current) =>
+          hashes.reduce((set, hash) => HashSet.add(set, hash), current),
+        ),
+      ),
+      Effect.uninterruptible,
+    );
 
   let done = 0;
   let failed = 0;
@@ -339,14 +347,19 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
     failed += read.length - tracks.length;
 
     if (upserts.length > 0) {
-      yield* release(yield* backend.upsertTracks(library.id, upserts));
+      yield* saved(backend.upsertTracks(library.id, upserts));
     }
 
     if (moves.length > 0) {
-      const outcome = yield* backend.moveTracks(library.id, moves);
-      moved += outcome.moved;
+      yield* saved(
+        backend.moveTracks(library.id, moves).pipe(
+          Effect.map((result) => {
+            moved += result.moved;
 
-      yield* release(outcome.released);
+            return result.released;
+          }),
+        ),
+      );
     }
 
     for (const { from } of moves) claimed.add(from);
@@ -370,7 +383,7 @@ export const scanLibrary = Effect.fn("Scan.library")(function* (
     .map((file) => file.path);
 
   for (const batch of chunks(gone, MISSING_BATCH)) {
-    yield* release(yield* backend.markMissing(library.id, batch));
+    yield* saved(backend.markMissing(library.id, batch));
   }
 
   const summary: ScanSummary = {

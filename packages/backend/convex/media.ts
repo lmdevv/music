@@ -378,13 +378,17 @@ export const artInUse = query({
       return fail("invalid_args", `Check at most ${ART_IN_USE_MAX} hashes at once`);
     }
 
+    // Tracks first: they hold most art, and a hash a track uses needs no other look.
     const used = await Promise.all(
       hashes.map(async (hash) => {
-        const [track, album, artist] = await Promise.all([
-          ctx.db
-            .query("tracks")
-            .withIndex("by_art", (q) => q.eq("artHash", hash))
-            .first(),
+        const track = await ctx.db
+          .query("tracks")
+          .withIndex("by_art", (q) => q.eq("artHash", hash))
+          .first();
+
+        if (track !== null) return true;
+
+        const [album, artist] = await Promise.all([
           ctx.db
             .query("albums")
             .withIndex("by_art", (q) => q.eq("artHash", hash))
@@ -395,7 +399,7 @@ export const artInUse = query({
             .first(),
         ]);
 
-        return track !== null || album !== null || artist !== null;
+        return album !== null || artist !== null;
       }),
     );
 

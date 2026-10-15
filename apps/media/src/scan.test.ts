@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { compareText } from "@music/commands/text-order";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Ref } from "effect";
+import { Effect, HashSet, Layer, Ref } from "effect";
 
 import { artPath, imageContentType } from "./art-store.ts";
 import { runTool } from "./ffmpeg.ts";
@@ -28,7 +28,7 @@ const setup = Effect.gen(function* () {
   const control = yield* MemoryMediaBackendControl.pipe(Effect.provideContext(context));
   const libraryId = yield* control.addLibrary(library.root);
   const progress = yield* Ref.make<JobProgress>({ done: 0 });
-  const releasedArt = yield* Ref.make<ReadonlySet<string>>(new Set());
+  const releasedArt = yield* Ref.make(HashSet.empty<string>());
 
   const scan = scanLibrary({ id: libraryId, path: library.root }, progress, releasedArt).pipe(
     Effect.provideContext(context),
@@ -496,7 +496,7 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           yield* scanLibrary(
             { id: libraryId, path: empty },
             progress,
-            yield* Ref.make<ReadonlySet<string>>(new Set()),
+            yield* Ref.make(HashSet.empty<string>()),
           ).pipe(Effect.provideContext(context)),
         ).toMatchObject({ files: 0, missing: 0 });
       }),
@@ -515,7 +515,7 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         const error = yield* scanLibrary(
           { id: libraryId, path: missing },
           progress,
-          yield* Ref.make<ReadonlySet<string>>(new Set()),
+          yield* Ref.make(HashSet.empty<string>()),
         ).pipe(Effect.provideContext(context), Effect.flip);
 
         expect(error).toBeInstanceOf(LibraryUnavailable);
