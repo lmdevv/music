@@ -14,7 +14,8 @@ import { CheckIcon, CopyIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
-import { ProgressBar, jobPercent } from "@/components/auth/scan-progress";
+import { ProgressBar } from "@/components/auth/scan-progress";
+import { jobPercent } from "@/lib/job-progress";
 import { describeFailure, toastFailure } from "@/lib/action";
 import { formatCount } from "@/lib/format";
 
