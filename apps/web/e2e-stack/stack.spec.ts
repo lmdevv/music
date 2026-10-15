@@ -655,7 +655,18 @@ test("autoplay keeps the music going after the last song", async ({ page }) => {
       { timeout: 60_000 },
     )
     .toBe(true);
-  await expectAudioPast(page, 1);
+
+  // The last song played past one second already; the autoplay song must play on from here.
+  const autoplayBaseline = await page.evaluate(() =>
+    Math.max(
+      0,
+      ...[...(window.musicTestMedia ?? [])].map((element) =>
+        element.paused ? 0 : element.currentTime,
+      ),
+    ),
+  );
+
+  await expectAudioPast(page, autoplayBaseline + 1);
 });
 
 test("the command menu rescans the only library folder with Enter", async ({ page }) => {

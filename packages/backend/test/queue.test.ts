@@ -380,8 +380,11 @@ describe("autoplay", () => {
   it("has a song ready after the current one however the queue was changed by hand", async () => {
     const { admin, id } = await catalog();
 
-    // Added to an empty queue: the player can preload what comes after it.
-    await admin.music.run("queue.add", { trackIds: [id("seed-1")] });
+    // Added to an empty queue: the player can preload what comes after it. The result still
+    // says `ok`, as clients from before entry IDs read it.
+    expect(await admin.music.run("queue.add", { trackIds: [id("seed-1")] })).toMatchObject({
+      ok: true,
+    });
     expect((await autoplayTitles(admin)).length).toBeGreaterThan(0);
 
     await admin.music.run("queue.clear", {});
@@ -395,6 +398,31 @@ describe("autoplay", () => {
     expect(await autoplayTitles(admin)).toEqual([]);
     await admin.music.run("queue.remove", { itemId: pick(await entries(admin), 1).itemId });
     expect((await autoplayTitles(admin)).length).toBeGreaterThan(0);
+  });
+
+  it("looks in the seed's own library first when the listener reads many", async () => {
+    const backend = makeBackend();
+    const admin = await signUp(backend, "admin");
+
+    // 24 libraries with nothing alike come first, then the seed's.
+    await Array.from({ length: 24 }, (_, index) => index).reduce(async (previous, index) => {
+      await previous;
+      await seedLibrary(backend, admin, { name: `Empty${String(index)}`, count: 0 });
+    }, Promise.resolve());
+
+    const { libraryId } = await seedLibrary(backend, admin, { name: "Last", count: 0 });
+
+    await upsertFiles(backend, libraryId, [
+      file("seed-1", "Seed", "First", "Rock", 1999),
+      file("genre-1", "Genre Mate", "Mates", "Rock", 1980),
+    ]);
+    await admin.music.run("devices.heartbeat", { deviceId: DEVICE, name: "Laptop", kind: "web" });
+    const seed = (await allTracks(admin)).find((track) => track.title === "seed-1");
+
+    if (seed === undefined) throw new Error("No seed song");
+    await admin.music.run("playback.play", { trackIds: [seed.id], deviceId: DEVICE });
+
+    expect(await autoplayTitles(admin)).toContain("genre-1");
   });
 
   it("stays out of the way of repeat", async () => {

@@ -423,6 +423,10 @@ describe("lists and links", () => {
     expect(
       await failureCode(member.music.read("links.get", { kind: "playlist", id: playlistId })),
     ).toBe("not_found");
+    // An ID of another kind names nothing of this one.
+    expect(await failureCode(member.music.read("links.get", { kind: "album", id: song.id }))).toBe(
+      "not_found",
+    );
 
     const guest = await signUp(backend, "guest");
 

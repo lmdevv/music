@@ -188,15 +188,16 @@ const presentEntry = async (
 
 /** Deletes a playlist with its entries and shares. */
 const deletePlaylist = async (ctx: MutationCtx, playlist: Doc<"playlists">): Promise<void> => {
+  // Adding stops at these limits, so they bound what a playlist holds.
   const [items, shares] = await Promise.all([
     ctx.db
       .query("playlistItems")
       .withIndex("by_playlist", (q) => q.eq("playlistId", playlist._id))
-      .collect(),
+      .take(MAX_PLAYLIST),
     ctx.db
       .query("playlistShares")
       .withIndex("by_playlist", (q) => q.eq("playlistId", playlist._id))
-      .collect(),
+      .take(MAX_SHARES),
   ]);
 
   await Promise.all([...items, ...shares].map((doc) => ctx.db.delete(doc._id)));
@@ -659,11 +660,12 @@ export const collectionMutations = {
       return ok;
     }
 
-    // Stop sharing at all: nobody but the owner can open it from now on.
+    // Stop sharing at all: nobody but the owner can open it from now on. Sharing stops at
+    // `MAX_SHARES`, so this takes them all.
     const shares = await ctx.db
       .query("playlistShares")
       .withIndex("by_playlist", (q) => q.eq("playlistId", playlist._id))
-      .collect();
+      .take(MAX_SHARES);
 
     await Promise.all(shares.map((share) => ctx.db.delete(share._id)));
     await ctx.db.patch(playlist._id, { visibility: "private", updatedAt: Date.now() });

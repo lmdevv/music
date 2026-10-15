@@ -23,6 +23,12 @@ import type { Viewer } from "../lib/viewer";
 import type { MutationHandlers, QueryHandlers } from "./types";
 import { ok } from "./types";
 
+/**
+ * People `people.directory` reads at most. A server is a household or a small group; this bounds a
+ * query any member can run, and a server past it lists its first accounts.
+ */
+const DIRECTORY_LIMIT = 1000;
+
 /** How long a password reset link works. */
 const RESET_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -188,7 +194,7 @@ export const peopleQueries = {
   // Names and roles only: sharing a playlist with someone should not show members each other's
   // email addresses.
   "people.directory": async (ctx, viewer) => {
-    const users = await ctx.db.query("users").collect();
+    const users = await ctx.db.query("users").take(DIRECTORY_LIMIT);
 
     return users
       .filter((user) => user._id !== viewer.id && user.suspendedAt === undefined)

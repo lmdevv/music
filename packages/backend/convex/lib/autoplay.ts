@@ -40,9 +40,35 @@ const SONGS_PER_ALBUM = 25;
 const share = (budget: number, parts: number): number =>
   Math.max(1, Math.floor(budget / Math.max(1, parts)));
 
-/** The libraries a step reads albums from, few enough that each gets at least one album. */
-const stepLibraries = (viewer: Viewer): ReadonlyArray<Doc<"libraries">> =>
-  viewer.libraries.slice(0, ALBUMS_PER_STEP);
+/** A library a step reads, and how many of its albums. */
+interface StepLibrary {
+  readonly library: Doc<"libraries">;
+  readonly albums: number;
+}
+
+/**
+ * The libraries a step reads albums from, within `ALBUMS_PER_STEP`: half for the seed album's
+ * library, where the likeliest neighbours are (all of it when the listener reads no other), and
+ * the rest shared among the others, as many as get at least one album each.
+ */
+const stepLibraries = (
+  viewer: Viewer,
+  seedLibraryId: Id<"libraries"> | undefined,
+): ReadonlyArray<StepLibrary> => {
+  const seed = viewer.libraries.find((library) => library._id === seedLibraryId);
+  const others = viewer.libraries.filter((library) => library._id !== seedLibraryId);
+  const half = ALBUMS_PER_STEP / 2;
+  const othersBudget = seed === undefined ? ALBUMS_PER_STEP : half;
+  const chosen = others.slice(0, othersBudget);
+  const each = share(othersBudget, chosen.length);
+
+  const seedEntry: ReadonlyArray<StepLibrary> =
+    seed === undefined
+      ? []
+      : [{ library: seed, albums: chosen.length === 0 ? ALBUMS_PER_STEP : half }];
+
+  return [...seedEntry, ...chosen.map((library) => ({ library, albums: each }))];
+};
 
 /** How many years either side of the seed's album counts as "around the same time". */
 export const YEAR_RANGE = 2;
@@ -156,11 +182,10 @@ const sameGenre = async (
 
   if (genre === undefined) return [];
 
-  const libraries = stepLibraries(picker.viewer);
-  const perLibrary = share(ALBUMS_PER_STEP, libraries.length);
-
   const albums = await Promise.all(
-    libraries.map((library) => genreAlbums(ctx, library._id, genre, album?.year, perLibrary)),
+    stepLibraries(picker.viewer, album?.libraryId).map((step) =>
+      genreAlbums(ctx, step.library._id, genre, album?.year, step.albums),
+    ),
   );
 
   return songsOfAlbums(ctx, picker, albums.flat());
@@ -175,20 +200,17 @@ const sameEra = async (
 
   if (year === undefined) return [];
 
-  const libraries = stepLibraries(picker.viewer);
-  const perLibrary = share(ALBUMS_PER_STEP, libraries.length);
-
   const albums = await Promise.all(
-    libraries.map((library) =>
+    stepLibraries(picker.viewer, album?.libraryId).map((step) =>
       ctx.db
         .query("albums")
         .withIndex("by_library_year", (q) =>
           q
-            .eq("libraryId", library._id)
+            .eq("libraryId", step.library._id)
             .gte("year", year - YEAR_RANGE)
             .lte("year", year + YEAR_RANGE),
         )
-        .take(perLibrary),
+        .take(step.albums),
     ),
   );
 

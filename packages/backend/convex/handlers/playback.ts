@@ -701,7 +701,7 @@ export const playbackMutations = {
 
       await restartSession(ctx, session, { playing: false });
 
-      return { itemIds: items.map((item) => item.id) };
+      return { ok: true, itemIds: items.map((item) => item.id) } as const;
     }
 
     const insertAt = args.next === true ? queue.index + 1 : endOfQueued(queue);
@@ -741,7 +741,7 @@ export const playbackMutations = {
 
     const kept = new Set(items.map((item) => item.id));
 
-    return { itemIds: addedIds.filter((id) => kept.has(id)) };
+    return { ok: true, itemIds: addedIds.filter((id) => kept.has(id)) } as const;
   },
 
   "queue.remove": async (ctx, viewer, args) => {

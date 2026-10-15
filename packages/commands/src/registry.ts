@@ -316,7 +316,8 @@ export const commands = {
     access: "user",
     job: false,
     args: Schema.Struct({ trackIds: TrackIds, next: Schema.optionalKey(Schema.Boolean) }),
-    result: Schema.Struct({ itemIds: Schema.Array(QueueItemId) }),
+    // `ok` stays for clients from before entries had IDs, which read `{ ok: true }`.
+    result: Schema.Struct({ ok: Schema.Literal(true), itemIds: Schema.Array(QueueItemId) }),
   }),
   "queue.remove": command({
     summary: "Remove a queue entry by its item ID",
