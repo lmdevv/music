@@ -900,7 +900,7 @@ describe("names given at sign-up", () => {
           flow: "signUp",
           email: "blank@music.test",
           password: PASSWORD,
-          name: "\u3164\u115F",
+          name: "\u3164\u115F\u2800\u034F",
           inviteCode,
         }),
       ),

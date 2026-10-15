@@ -38,10 +38,11 @@ const clean = SchemaGetter.transform(cleanText);
 export const Text = Schema.String.pipe(Schema.decode({ decode: clean, encode: clean }));
 
 /**
- * A character that shows: not whitespace, not a format character, and not one of the Hangul
- * fillers (U+115F, U+1160, U+3164, U+FFA0), which draw nothing.
+ * A character that shows on its own: not whitespace, not a format character, not a combining mark
+ * (such as U+034F, the combining grapheme joiner), and not one of the Hangul fillers (U+115F,
+ * U+1160, U+3164, U+FFA0) or the blank Braille pattern (U+2800), which draw nothing.
  */
-const VISIBLE = /[^\s\p{Cf}\u115F\u1160\u3164\uFFA0]/u;
+const VISIBLE = /[^\s\p{Cf}\p{M}\u115F\u1160\u3164\uFFA0\u2800]/u;
 
 /** Whether cleaned text shows nothing at all. */
 export const isBlank = (text: string): boolean => !VISIBLE.test(text);
