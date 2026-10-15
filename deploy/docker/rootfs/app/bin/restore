@@ -25,6 +25,10 @@ if [ -d /run/service/media ] && ! /command/s6-svc -wD -T 30000 -d /run/service/m
   exit 1
 fi
 
+# From here the media service is down; if anything below fails, say so. It isn't started again
+# here, since the data may be partly restored.
+trap 'status=$?; if [ "$status" -ne 0 ]; then echo "[restore] the restore failed; the media service stays stopped until the container restarts." >&2; fi' EXIT
+
 cd /app/backend
 CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210 \
   CONVEX_SELF_HOSTED_ADMIN_KEY="$(cat "$data/secrets/admin_key")" \

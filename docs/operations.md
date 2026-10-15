@@ -197,7 +197,7 @@ Every service runs as its own unprivileged user; only the start-up script runs a
   or removed, and can hand ownership to an admin. `admin`s run people, invites, libraries, and
   jobs, but only the owner changes, suspends, resets, or removes another admin. `member`s listen
   and keep their own playlists, likes, history, and API keys. `guest`s only hear the libraries
-  they were added to and have no API keys.
+  they were added to, and any they own (from before they became a guest), and have no API keys.
 - **Libraries.** `shared` is everyone but guests, `restricted` is only the people added, and
   `private` is only the library's owner. Admins rename and rescan the libraries they can listen
   to; the server's owner manages every library. Only a library's own owner, or the
@@ -226,7 +226,8 @@ Every service runs as its own unprivileged user; only the start-up script runs a
 - **Suspend and remove** end the person's sessions and API key sign-ins at once.
 - **Password reset without email.** An admin makes a one-time link in Settings → People (or
   `music people reset <user-id>`); it lasts 24 hours, and stops working if its maker loses the
-  right to reset that person (demoted, suspended, removed, or the person became an admin). If the
+  right to reset that person (demoted, suspended, removed, the person became an admin, or the
+  person was let into a library the maker can't hear). If the
   owner is locked out, make a link with the admin key:
 
   ```sh
