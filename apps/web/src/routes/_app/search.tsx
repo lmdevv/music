@@ -12,13 +12,14 @@ import { cn } from "@music/ui/lib/utils";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Match, Schema } from "effect";
 import { PlayIcon, SearchIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Artwork, PlayingBars } from "@/components/library/artwork";
 import { usePlayAlbum, usePlayArtist, usePlayTracks } from "@/components/library/cards";
 import { TrackMenu } from "@/components/playlists/track-menu";
 import { SEARCH_INPUT_ID } from "@/components/shell/keyboard";
 import { formatCount, formatDuration, plural } from "@/lib/format";
+import { useHeld } from "@/lib/use-held";
 
 const SearchParams = Schema.Struct({ q: Schema.optionalKey(Schema.String) });
 
@@ -61,14 +62,12 @@ const useSearch = (query: string): ShownSearch => {
   const settled = useDebounced(query.trim(), DEBOUNCE_MS);
   const live = useRead("search", settled.length === 0 ? "skip" : { query: settled, limit: LIMIT });
 
-  const [shown, setShown] = useState<{
-    readonly results: SearchResults;
-    readonly query: string;
-  } | null>(null);
-
-  // Held while rendering, as React documents for state that follows a value: an effect showed one
-  // frame of the old results and cost another render per result.
-  if (live !== undefined && shown?.results !== live) setShown({ results: live, query: settled });
+  const shown = useHeld(
+    useMemo(
+      () => (live === undefined ? undefined : { results: live, query: settled }),
+      [live, settled],
+    ),
+  );
 
   if (query.trim().length === 0) return { results: null, updating: false, forQuery: "" };
 

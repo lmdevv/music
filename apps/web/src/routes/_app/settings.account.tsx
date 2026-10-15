@@ -24,9 +24,14 @@ function AccountSettings() {
   const [draft, setDraft] = useState<string | null>(null);
   const name = draft ?? me?.name ?? "";
 
-  const [save, saving] = useAction(() => rename({ name: name.trim() }), {
-    success: () => "Saved your name",
-  });
+  const [save, saving] = useAction(
+    async () => {
+      await rename({ name: name.trim() });
+      // The saved name shows again, so a later rename elsewhere isn't hidden behind this draft.
+      setDraft(null);
+    },
+    { success: () => "Saved your name" },
+  );
 
   const [leave, leaving] = useAction(async () => {
     await signOut();

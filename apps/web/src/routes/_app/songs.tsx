@@ -6,12 +6,13 @@ import { SearchIcon, ShuffleIcon } from "lucide-react";
 import { memo, useDeferredValue, useEffect, useRef, useState } from "react";
 
 import { PageHeader, usePlayTracks } from "@/components/library/cards";
-import { useHeldPage, usePageChain, useReportPage } from "@/components/library/page-chain";
+import { usePageChain, useReportPage } from "@/components/library/page-chain";
 import type { PageResult } from "@/components/library/page-chain";
 import { TrackList, TrackListSkeleton } from "@/components/library/track-list";
 import { toastFailure } from "@/lib/action";
 import { formatTotal, plural } from "@/lib/format";
 import { readPages } from "@/lib/read-pages";
+import { useHeld } from "@/lib/use-held";
 import { scrollRootOf } from "@/lib/scroll-root";
 import { useWindowed } from "@/lib/use-windowed";
 
@@ -86,7 +87,7 @@ function FilteredSongs({ query }: { readonly query: string }) {
   const results = useRead("search", { query, limit: 50 });
   // The previous results stay while a new query loads, held during render (an effect cost an
   // extra render and commit per result).
-  const shown = useHeldPage(results);
+  const shown = useHeld(results);
 
   if (shown === undefined) return <TrackListSkeleton />;
 
@@ -149,10 +150,10 @@ const SongPage = memo(function SongPage({
   readonly onMore: (cursor: string) => void;
   readonly onReport: (cursor: string | null, page: PageResult<unknown>) => void;
 }) {
-  const page = useHeldPage(useRead("tracks.list", { cursor, end, limit: PAGE_SIZE }));
+  const page = useHeld(useRead("tracks.list", { cursor, end, limit: PAGE_SIZE }));
   useReportPage(cursor, page, onReport);
   const sentinel = useRef<HTMLDivElement>(null);
-  const windowed = useWindowed();
+  const windowed = useWindowed({ size: page?.items.length ?? 0 });
   const more = page !== undefined && !page.done && last ? page.cursor : null;
 
   useEffect(() => {

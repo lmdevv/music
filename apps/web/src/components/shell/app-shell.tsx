@@ -1,7 +1,7 @@
 import { usePlayer } from "@music/player/react";
 import { TooltipProvider } from "@music/ui/components/tooltip";
 import { useLocation } from "@tanstack/react-router";
-import { Suspense, lazy, useEffect } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { JamBand } from "@/components/jam/jam-band";
@@ -41,9 +41,11 @@ const surface = (load: () => Promise<() => ReactNode>): Surface => {
 
   return {
     Component: () => {
-      const Ready = ready ?? Pending;
+      // Chosen once per mount: switching from `Pending` to the loaded component later would be a
+      // different element type, and React would remount an open surface and lose its state.
+      const [Shown] = useState(() => ready ?? Pending);
 
-      return <Ready />;
+      return <Shown />;
     },
     preload: async () => {
       await loadReady();

@@ -81,21 +81,6 @@ export const usePageChain = (): PageChain => {
   };
 };
 
-/**
- * The page at `cursor`, kept on screen while it re-subscribes. A page gets `end` once the page
- * after it loads, so it keeps covering the same range as rows are added; changing it starts a new
- * subscription, and showing the previous result meanwhile keeps the list from flashing.
- */
-export const useHeldPage = <Page>(page: Page | undefined): Page | undefined => {
-  const [held, setHeld] = useState(page);
-
-  // Updating state while rendering, as React documents for values that follow a prop: the render
-  // restarts at once, with no effect and no extra frame.
-  if (page !== undefined && page !== held) setHeld(page);
-
-  return page ?? held;
-};
-
 /** Tells the chain what `page` shows, and where it ends, once it loads or changes. */
 export const useReportPage = (
   cursor: string | null,

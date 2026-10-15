@@ -3,7 +3,9 @@ import type { ReactNode } from "react";
 
 import { scrollRootOf } from "@/lib/scroll-root";
 
-import { keyOf, useHeldPage, usePageChain, useReportPage } from "./page-chain";
+import { useHeld } from "@/lib/use-held";
+
+import { keyOf, usePageChain, useReportPage } from "./page-chain";
 import type { PageResult } from "./page-chain";
 
 /**
@@ -64,7 +66,9 @@ function Page<Item>({
   readonly onMore: (cursor: string) => void;
   readonly onReport: (cursor: string | null, page: PageResult<unknown>) => void;
 }) {
-  const page = useHeldPage(usePage(cursor, end));
+  // A page gets `end` once the page after it loads, which re-subscribes it; the previous result
+  // stays meanwhile so the list doesn't flash.
+  const page = useHeld(usePage(cursor, end));
   useReportPage(cursor, page, onReport);
   const sentinel = useRef<HTMLDivElement>(null);
   const more = page !== undefined && !page.done && last ? page.cursor : null;

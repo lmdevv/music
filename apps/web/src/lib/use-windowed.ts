@@ -27,6 +27,17 @@ export interface WindowedOptions {
   readonly initiallyNear?: boolean;
   /** The block's height before it has rendered, such as its row count times a row's height. */
   readonly estimate?: number | null;
+  /**
+   * How many items the block holds. A measured height belongs to the count it was measured at; a
+   * block whose rows change while it is empty falls back to the estimate, or renders to measure.
+   */
+  readonly size: number;
+}
+
+/** A block's rendered height, and how many items it held then. */
+interface Measured {
+  readonly height: number;
+  readonly size: number;
 }
 
 /**
@@ -38,10 +49,11 @@ export interface WindowedOptions {
 export const useWindowed = ({
   initiallyNear = true,
   estimate = null,
-}: WindowedOptions = {}): Windowed => {
+  size,
+}: WindowedOptions): Windowed => {
   const [node, setNode] = useState<HTMLElement | null>(null);
   const [near, setNear] = useState(initiallyNear);
-  const [measured, setMeasured] = useState<number | null>(null);
+  const [measured, setMeasured] = useState<Measured | null>(null);
 
   useEffect(() => {
     if (node === null) return undefined;
@@ -65,17 +77,17 @@ export const useWindowed = ({
     if (node === null || !near) return undefined;
 
     const observer = new ResizeObserver((entries) => {
-      const size = entries.at(-1)?.borderBoxSize[0]?.blockSize;
+      const blockSize = entries.at(-1)?.borderBoxSize[0]?.blockSize;
 
-      if (size !== undefined && size > 0) setMeasured(size);
+      if (blockSize !== undefined && blockSize > 0) setMeasured({ height: blockSize, size });
     });
 
     observer.observe(node);
 
     return () => observer.disconnect();
-  }, [node, near]);
+  }, [node, near, size]);
 
-  const height = measured ?? estimate;
+  const height = measured !== null && measured.size === size ? measured.height : estimate;
 
   // A block with no height to keep renders its rows, so it can't collapse to nothing.
   return { ref: setNode, near: near || height === null, height };

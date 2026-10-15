@@ -144,7 +144,7 @@ export function TrackList({
       count={tracks.length}
       reorder={reorder}
       onPlay={play}
-      menuExtra={menuExtra?.(track, index)}
+      menuExtra={menuExtra}
     />
   );
 
@@ -186,11 +186,7 @@ export function TrackList({
         </span>
         <span aria-hidden className="w-9 shrink-0" />
       </div>
-      {tracks.length <= BLOCK_ROWS ? (
-        tracks.map(renderRow)
-      ) : (
-        <WindowedRows tracks={tracks} renderRow={renderRow} pinned={highlightIndex} />
-      )}
+      <WindowedRows tracks={tracks} renderRow={renderRow} pinned={highlightIndex} />
     </div>
   );
 }
@@ -205,9 +201,11 @@ const BLOCK_ROWS = 100;
 const ESTIMATED_ROW_PX = 52;
 
 /**
- * The rows of a long list in blocks of {@link BLOCK_ROWS}, rendered only near the visible part of
- * the list, so a 1,000-song playlist mounts a few hundred rows instead of all of them. The first
- * block (and the one holding `pinned`, a row to scroll to) renders at once.
+ * The rows of a list in blocks of {@link BLOCK_ROWS}, rendered only near the visible part of the
+ * list, so a 1,000-song playlist mounts a few hundred rows instead of all of them. The first block
+ * (and the one holding `pinned`, a row to scroll to) renders at once, and a list of one block
+ * always renders. Short lists use the same blocks, so a list growing past one block keeps its
+ * rows (and their open menus, focus, and drags) mounted.
  */
 function WindowedRows({
   tracks,
@@ -219,7 +217,9 @@ function WindowedRows({
   /** A row index whose block always renders, or -1. */
   readonly pinned: number;
 }) {
-  const [rowHeight, setRowHeight] = useState<number | null>(null);
+  // The first block's rows are measured here and size the empty blocks below.
+  const [firstBlock, setFirstBlock] = useState<HTMLElement | null>(null);
+  const rowHeight = useRowHeight(firstBlock, Math.min(BLOCK_ROWS, tracks.length));
 
   const starts = Array.from(
     { length: Math.ceil(tracks.length / BLOCK_ROWS) },
@@ -233,12 +233,33 @@ function WindowedRows({
       start={start}
       renderRow={renderRow}
       first={start === 0}
-      pinned={pinned >= start && pinned < start + BLOCK_ROWS}
+      pinned={tracks.length <= BLOCK_ROWS || (pinned >= start && pinned < start + BLOCK_ROWS)}
       rowHeight={rowHeight}
-      onRowHeight={start === 0 ? setRowHeight : undefined}
+      blockRef={start === 0 ? setFirstBlock : undefined}
     />
   ));
 }
+
+/** The height of one row of `block`, which holds `count` rows; null until it has a size. */
+const useRowHeight = (block: HTMLElement | null, count: number): number | null => {
+  const [height, setHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (block === null || count === 0) return undefined;
+
+    const observer = new ResizeObserver((entries) => {
+      const size = entries.at(-1)?.borderBoxSize[0]?.blockSize;
+
+      if (size !== undefined && size > 0) setHeight(size / count);
+    });
+
+    observer.observe(block);
+
+    return () => observer.disconnect();
+  }, [block, count]);
+
+  return height;
+};
 
 function RowBlock({
   tracks,
@@ -247,7 +268,7 @@ function RowBlock({
   first,
   pinned,
   rowHeight,
-  onRowHeight,
+  blockRef,
 }: {
   readonly tracks: ReadonlyArray<Track>;
   readonly start: number;
@@ -255,27 +276,31 @@ function RowBlock({
   readonly first: boolean;
   readonly pinned: boolean;
   readonly rowHeight: number | null;
-  /** The first block reports its rows' measured height, which sizes the empty blocks. */
-  readonly onRowHeight: ((height: number) => void) | undefined;
+  /** Receives the block's element, for the list to measure its rows. */
+  readonly blockRef: ((node: HTMLElement | null) => void) | undefined;
 }) {
   const count = Math.min(BLOCK_ROWS, tracks.length - start);
 
   const windowed = useWindowed({
     initiallyNear: first || pinned,
     estimate: (rowHeight ?? ESTIMATED_ROW_PX) * count,
+    size: count,
   });
 
   const shown = windowed.near || pinned;
+  const windowRef = windowed.ref;
 
-  useEffect(() => {
-    if (onRowHeight !== undefined && shown && windowed.height !== null) {
-      onRowHeight(windowed.height / count);
-    }
-  }, [onRowHeight, shown, windowed.height, count]);
+  const ref = useCallback(
+    (node: HTMLElement | null) => {
+      windowRef(node);
+      blockRef?.(node);
+    },
+    [windowRef, blockRef],
+  );
 
   return (
     <div
-      ref={windowed.ref}
+      ref={ref}
       role="rowgroup"
       style={shown ? undefined : { height: windowed.height ?? undefined }}
     >
@@ -371,9 +396,11 @@ const TrackRow = memo(function TrackRow({
   readonly reorder: ListReorder | undefined;
   /** Plays the list from the row at `index`. */
   readonly onPlay: (index: number) => void;
-  readonly menuExtra: ReactNode;
+  /** Builds the row menu's extra items; called here so a stable function keeps the row memoized. */
+  readonly menuExtra: ((track: Track, index: number) => ReactNode) | undefined;
 }) {
   const number = track.trackNumber ?? index + 1;
+  const extra = menuExtra?.(track, index);
   const playRow = () => onPlay(index);
   const row = useRef<HTMLDivElement>(null);
   const move = movable(reorder, index);
@@ -392,7 +419,7 @@ const TrackRow = memo(function TrackRow({
         reason={unavailable}
         withheld={withheld}
         byline={byline}
-        menuExtra={menuExtra}
+        menuExtra={extra}
         mover={{ reorder, index, count }}
       />
     );
@@ -530,7 +557,7 @@ const TrackRow = memo(function TrackRow({
       <span role="cell" className="relative flex w-12 shrink-0 justify-center lg:w-9">
         <TrackMenu
           track={track}
-          extra={menuExtra}
+          extra={extra}
           className="lg:opacity-0 lg:group-hover/row:opacity-100 lg:focus-visible:opacity-100 lg:data-popup-open:opacity-100"
           trigger={<MoreHorizontalIcon className="size-5" />}
         />

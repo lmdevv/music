@@ -2,13 +2,14 @@ import { usePlayer } from "@music/player/react";
 import { useRead, useReadOnce } from "@music/sdk/react";
 import { useNavigate } from "@tanstack/react-router";
 import { HeartIcon, ListMusicIcon, PlusIcon, SpeakerIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { toast } from "sonner";
 
 import { usePlayTracks } from "@/components/library/cards";
 import { useUi } from "@/components/shell/ui-state";
 import { toastFailure } from "@/lib/action";
 import { readPages } from "@/lib/read-pages";
+import { useHeld } from "@/lib/use-held";
 
 import { offeredCommands, offeredScreens } from "./catalog";
 import type { Route } from "./catalog";
@@ -45,15 +46,11 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
   const readLikes = useReadOnce("likes.page");
   const playTracks = usePlayTracks();
   const search = useRead("search", query.length === 0 ? "skip" : { query, limit: 6 });
-  const [lastSearch, setLastSearch] = useState(search);
   // Until the account loads, offer only what everyone may do.
   const role = me?.role ?? "guest";
 
-  // Remember the last results during render (not in an effect, which would show one frame with
-  // the new results missing). While a new query loads, the previous results stay on screen.
-  if (search !== undefined && search !== lastSearch) setLastSearch(search);
-
-  const results = search ?? lastSearch;
+  // While a new query loads, the previous results stay on screen.
+  const results = useHeld(search);
   // The actions only change with whether something plays, not with each queue or position update.
   const hasTrack = player.track !== null;
 
