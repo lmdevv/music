@@ -431,8 +431,11 @@ const opened = async (
   return opened(sessions, count, attemptsLeft - 1);
 };
 
+/** Sign-ins at once in `raceSignIns`: enough to keep sessions opening throughout the race. */
+const SIGN_IN_LOOPS = 24;
+
 /**
- * Signs in as `email` with `PASSWORD` from 24 loops at once, the way a script hammering sign-in
+ * Signs in as `email` with `PASSWORD` from `SIGN_IN_LOOPS` loops at once, the way a script hammering sign-in
  * would; once sign-ins are landing, runs `act` against them, then stops the loops, even when
  * `act` fails. Returns what `act` returned and every session that opened.
  */
@@ -441,21 +444,31 @@ const raceSignIns = async <A>(
   act: () => Promise<A>,
 ): Promise<{ readonly result: A; readonly sessions: ReadonlyArray<Session> }> => {
   const sessions: Array<Session> = [];
+  const failures: Array<string> = [];
   const stop = { done: false };
 
   const loop = async (): Promise<void> => {
     if (stop.done) return;
-    const session = await passwordSignIn(server, email, PASSWORD).catch(() => null);
+
+    const session = await passwordSignIn(server, email, PASSWORD).catch((error: Error) => {
+      failures.push(error.message);
+
+      return null;
+    });
 
     if (session !== null) sessions.push(session);
 
     return loop();
   };
 
-  const loops = Promise.all(Array.from({ length: 24 }, loop));
+  const loops = Promise.all(Array.from({ length: SIGN_IN_LOOPS }, loop));
 
   try {
     await opened(sessions, 1);
+
+    if (sessions.length === 0) {
+      throw new Error(`No sign-in opened a session; the first failure: ${failures[0] ?? "none"}`);
+    }
 
     return { result: await act(), sessions };
   } finally {
@@ -1499,7 +1512,7 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     async () => {
       const { adminA } = fixture;
 
-      // Suspension, with 24 sign-ins at a time racing it.
+      // Suspension, with sign-ins racing it.
       const busy = `busy-${id}@music.test`;
       const busyPerson = await invite(adminA, busy, "member");
       const { id: busyId } = await busyPerson.music.read("account.me", {});
@@ -1512,7 +1525,7 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       expect(suspension.sessions.length).toBeGreaterThan(0);
       expect(await endedEverywhere(suspension.sessions)).toEqual(new Set(["unauthenticated"]));
 
-      // A password reset, with 24 sign-ins on the old password racing it.
+      // A password reset, with sign-ins on the old password racing it.
       const rushed = `rushed-${id}@music.test`;
       const rushedPerson = await invite(adminA, rushed, "member");
       const { id: rushedId } = await rushedPerson.music.read("account.me", {});
