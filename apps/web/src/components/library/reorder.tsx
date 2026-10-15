@@ -1,6 +1,6 @@
 import { cn } from "@music/ui/lib/utils";
 import { ChevronDownIcon, ChevronUpIcon, GripVerticalIcon } from "lucide-react";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent, KeyboardEvent } from "react";
 
 import {
@@ -70,9 +70,28 @@ export const useReorder = <Id extends string>(
     latest.current = { ids, anchor, onMove, drag };
   });
 
+  // A drag whose source row remounted (it moved to another block of a windowed list) never gets
+  // its dragend. Browsers send no pointer events during a drag, so the first one after it means
+  // the drag is over.
+  const dragging = drag.id !== null;
+
+  useEffect(() => {
+    if (!dragging) return undefined;
+
+    const end = () => setDrag(NO_DRAG);
+
+    window.addEventListener("pointermove", end, { once: true });
+    window.addEventListener("pointerdown", end, { once: true });
+
+    return () => {
+      window.removeEventListener("pointermove", end);
+      window.removeEventListener("pointerdown", end);
+    };
+  }, [dragging]);
+
   const handlers = useMemo(() => {
     /** Moves `id` to `to` in the order the list is heading to. */
-    const move = (id: Id, to: (from: number) => number) => {
+    const move = (id: Id, to: (from: number, base: ReadonlyArray<Id>) => number) => {
       const { ids: current, anchor: top, onMove: report } = latest.current;
 
       // The server reached the last order expected: nothing is in flight any more.
@@ -80,7 +99,7 @@ export const useReorder = <Id extends string>(
 
       const base = orderToMoveFrom(current, expected.current);
       const from = base.indexOf(id);
-      const target = to(from);
+      const target = to(from, base);
 
       if (from === -1 || target === from || target < 0 || target >= base.length) return;
       expected.current = [
@@ -123,14 +142,16 @@ export const useReorder = <Id extends string>(
       },
       onDrop: (event) => {
         event.preventDefault();
-        const { ids: current, drag: now } = latest.current;
-        const at = dragPositions(current, now);
+        const { id, over } = latest.current.drag;
 
-        // Where the person saw the drop line, in the list as it is now.
-        if (now.id !== null && at?.over != null) {
-          const target = dropIndex(at.from, at.over.index, at.over.side);
+        // Next to the entry the person saw the drop line on, in the order the list is heading to
+        // (an earlier move may still be on its way to the server).
+        if (id !== null && over !== null) {
+          move(id, (from, base) => {
+            const target = base.indexOf(over.id);
 
-          move(now.id, () => target);
+            return target === -1 ? from : dropIndex(from, target, over.side);
+          });
         }
 
         reset();
@@ -149,13 +170,11 @@ export const useReorder = <Id extends string>(
 
   return {
     ...handlers,
-    dropSide: (index) =>
-      positions?.over !== null &&
-      positions?.over !== undefined &&
-      positions.over.index === index &&
-      positions.from !== index
-        ? positions.over.side
-        : null,
+    dropSide: (index) => {
+      const over = positions?.over ?? null;
+
+      return over !== null && over.index === index && positions?.from !== index ? over.side : null;
+    },
     dragging: positions?.from ?? null,
   };
 };

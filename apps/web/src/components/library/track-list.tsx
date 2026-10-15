@@ -197,22 +197,27 @@ export function TrackList({
   const scrolledTo = useRef<TrackId | null>(null);
 
   // A shared song link opens the list scrolled to the song: once per song, after the row height is
-  // read and a frame later, so the empty blocks above have their heights.
+  // read and a frame later, so the empty blocks above have their heights. Found by its index (its
+  // block is pinned), so an unavailable row counts too, and tried again when the songs arrive.
   useEffect(() => {
-    if (highlight === undefined || highlight === null || rowHeight === null) return undefined;
+    if (highlight === undefined || highlight === null || highlightIndex === -1) return undefined;
 
-    if (scrolledTo.current === highlight) return undefined;
+    if (rowHeight === null || scrolledTo.current === highlight) return undefined;
 
     const frame = requestAnimationFrame(() => {
-      const row = table.current?.querySelector("[data-highlighted]");
+      const block = table.current?.querySelectorAll(":scope > [role=rowgroup]")[
+        Math.floor(highlightIndex / BLOCK_ROWS)
+      ];
 
-      if (row === null || row === undefined) return;
+      const row = block?.children[highlightIndex % BLOCK_ROWS];
+
+      if (row === undefined) return;
       row.scrollIntoView({ block: "center" });
       scrolledTo.current = highlight;
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [highlight, rowHeight]);
+  }, [highlight, highlightIndex, rowHeight]);
 
   const renderRow = (track: Track, index: number, now: NowPlaying) => (
     <TrackRow

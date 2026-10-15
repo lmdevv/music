@@ -33,26 +33,18 @@ function PlainMessage({ description }: { readonly description: string }) {
 const UNREACHABLE = "[music] can't reach the server. Check the connection, then reload the page.";
 
 /**
- * In place of a screen whose code couldn't load (offline, or the server was upgraded under an open
- * tab). Any other error goes on up to the parent route's error screen.
+ * In place of an error or not-found screen that failed: its code couldn't load (offline, or the
+ * server was upgraded under an open tab), or it threw. It never rethrows: the next boundary up is
+ * the signed-in layout's, which would replace the shell and stop the music, and above the root
+ * nothing would catch it at all. React still logs the error.
  */
 function Unloaded({ error }: ErrorComponentProps): ReactNode {
-  if (!(error instanceof ChunkLoadError)) throw error;
-
-  return <PlainMessage description={UNREACHABLE} />;
-}
-
-/**
- * Like {@link Unloaded}, for the root route, where nothing above would catch a rethrown error and
- * the whole app (and the music) would go: it shows a plain message for any error.
- */
-function RootUnloaded({ error }: ErrorComponentProps): ReactNode {
   return (
     <PlainMessage
       description={
         error instanceof ChunkLoadError
           ? UNREACHABLE
-          : "Something went wrong, and the error screen couldn't show it. Reload the page to try again."
+          : "Something went wrong, and this screen couldn't show it. Reload the page to try again."
       }
     />
   );
@@ -65,17 +57,6 @@ function RootUnloaded({ error }: ErrorComponentProps): ReactNode {
 export function LazyRouteError(props: ErrorComponentProps) {
   return (
     <CatchBoundary getResetKey={() => props.error} errorComponent={Unloaded}>
-      <Suspense fallback={null}>
-        <RouteError {...props} />
-      </Suspense>
-    </CatchBoundary>
-  );
-}
-
-/** The root route's error screen: {@link LazyRouteError}, but it never lets an error past. */
-export function LazyRootError(props: ErrorComponentProps) {
-  return (
-    <CatchBoundary getResetKey={() => props.error} errorComponent={RootUnloaded}>
       <Suspense fallback={null}>
         <RouteError {...props} />
       </Suspense>
