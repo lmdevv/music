@@ -431,8 +431,12 @@ const opened = async (
   return opened(sessions, count, attemptsLeft - 1);
 };
 
-/** Sign-ins at once in `raceSignIns`: enough to keep sessions opening throughout the race. */
-const SIGN_IN_LOOPS = 24;
+/**
+ * Sign-ins at once in `raceSignIns`. Each checks a password with scrypt inside a Convex
+ * mutation, so a small CI runner keeps up with about 8; 24, as the security review ran it, shows
+ * the old OCC failures on a workstation (`MUSIC_SIGN_IN_LOOPS=24 scripts/backend-e2e.sh security`).
+ */
+const SIGN_IN_LOOPS = Number(process.env["MUSIC_SIGN_IN_LOOPS"] ?? "8");
 
 /**
  * Signs in as `email` with `PASSWORD` from `SIGN_IN_LOOPS` loops at once, the way a script hammering sign-in
