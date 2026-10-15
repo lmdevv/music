@@ -192,6 +192,56 @@ describe("people management at scale", () => {
     expect(owners).toEqual([next.id]);
   });
 
+  it("purges every ended session, one with many tokens on an early page too", async () => {
+    const backend = makeBackend();
+    const person = await signUp(backend, "member");
+
+    // More sessions than a page holds; the first, on the first page, has more refresh tokens
+    // than a pass deletes per session.
+    await insertMany(backend, 150, async (ctx) => {
+      await ctx.db.insert("authSessions", {
+        userId: person.id,
+        expirationTime: Date.now() + 60_000,
+        generation: 0,
+      });
+    });
+
+    // The first of them (signing up opened one before, which stays).
+    const first = await backend.run(async (ctx) =>
+      ctx.db
+        .query("authSessions")
+        .withIndex("userId", (q) => q.eq("userId", person.id))
+        .filter((q) => q.eq(q.field("generation"), 0))
+        .first(),
+    );
+
+    if (first === null) throw new Error("No session was made");
+
+    await insertMany(backend, 15, async (ctx) => {
+      await ctx.db.insert("authRefreshTokens", {
+        sessionId: first._id,
+        expirationTime: Date.now() + 60_000,
+      });
+    });
+
+    // Every one of them ended.
+    await backend.run(async (ctx) => {
+      await ctx.db.patch(person.id, { sessionGeneration: 1 });
+    });
+
+    await backend.mutation(internal.people.purgeSessions, { userId: person.id, cursor: null });
+    await drainScheduled(backend);
+
+    const left = await backend.run(async (ctx) => ({
+      sessions: (await ctx.db.query("authSessions").collect()).filter(
+        (session) => session.userId === person.id,
+      ).length,
+      tokens: (await ctx.db.query("authRefreshTokens").collect()).length,
+    }));
+
+    expect(left).toEqual({ sessions: 1, tokens: 0 });
+  });
+
   it("revokes a new guest's keys in batches", async () => {
     const backend = makeBackend({ documentsWritten: LIMIT });
     const owner = await signUp(backend, "owner");

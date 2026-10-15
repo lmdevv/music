@@ -11,11 +11,14 @@
  */
 import type { LibraryId } from "@music/commands/ids";
 import { isSystemFolder, SYSTEM_FOLDER_MESSAGE } from "@music/commands/system-folders";
-import { Effect, FiberMap, Layer, Ref, Schedule, Schema, Semaphore, Stream } from "effect";
+import { Effect, FiberMap, Layer, Ref, Schema, Semaphore, Stream } from "effect";
+
+import { cappedBackoff } from "./backoff.ts";
 
 import * as Files from "./files.ts";
 import { type LibraryFolder, MediaBackend, resubscribeSchedule } from "./media-backend.ts";
 import { MediaConfig } from "./media-config.ts";
+import { fsPathOf, type Mount } from "./mounts.ts";
 import * as NodeFiles from "./platform/node-files.ts";
 
 /** The library's folder may not be scanned. The message is safe to show on the job. */
@@ -28,15 +31,27 @@ class RootRefused extends Schema.TaggedError<RootRefused>()("RootRefused", {
   }
 }
 
+/** What a claim reads of the machine: its mount table and its boot (see `files.ts`). */
+interface Host {
+  readonly mounts: ReadonlyArray<Mount> | null;
+  readonly bootId: string | null;
+}
+
+const readHost: Effect.Effect<Host> = Effect.all({
+  mounts: Files.readMounts,
+  bootId: Files.readBootId,
+});
+
 /**
  * Resolves the library's folder, checks it, and claims it with Convex. Returns the real folder,
  * which the scan then reads instead of the path the library was added with. Fails with
  * `FileError` when the folder does not resolve, and with `RootRefused` when it may not be read.
  */
-export const claimRoot = Effect.fn("RootClaim.claim")(function* (library: {
-  readonly id: LibraryId;
-  readonly path: string;
-}) {
+export const claimRoot = Effect.fn("RootClaim.claim")(function* (
+  library: { readonly id: LibraryId; readonly path: string },
+  /** The mount table and boot, when the caller read them once for many claims. */
+  given?: Host,
+) {
   const backend = yield* MediaBackend;
   const { musicRoots } = yield* MediaConfig;
 
@@ -65,9 +80,10 @@ export const claimRoot = Effect.fn("RootClaim.claim")(function* (library: {
     }
   }
 
+  const host = given ?? (yield* readHost);
   const rootIds = yield* Files.folderIds(real);
-  const fsPath = yield* Files.fsPath(real);
-  const claim = yield* backend.claimRoot(library.id, real, rootIds, fsPath);
+  const fsPath = host.mounts === null ? null : fsPathOf(host.mounts, real);
+  const claim = yield* backend.claimRoot(library.id, real, rootIds, fsPath, host.bootId);
 
   if (!claim.ok) return yield* new RootRefused({ libraryId: library.id, reason: claim.error });
 
@@ -78,10 +94,10 @@ export const claimRoot = Effect.fn("RootClaim.claim")(function* (library: {
 const CLAIM_CONCURRENCY = 4;
 
 /** Backoff for a claim that failed but wasn't refused: from half a second, capped at a minute. */
-const RETRY_SCHEDULE = Schedule.min([
-  Schedule.exponential("500 millis"),
-  Schedule.spaced("1 minute"),
-]);
+const RETRY_SCHEDULE = cappedBackoff("500 millis", "1 minute");
+
+/** A claim still failing is a warning on its first failure and every this many after. */
+const WARN_EVERY = 10;
 
 const claimKey = (library: LibraryFolder): string => `${library.id}:${library.path}`;
 
@@ -103,29 +119,48 @@ export const layer: Layer.Layer<never, never, MediaBackend | MediaConfig> = Laye
     const listed = yield* Ref.make<ReadonlySet<string>>(new Set());
     const permits = yield* Semaphore.make(CLAIM_CONCURRENCY);
 
+    // Folder identities from another boot mean nothing now; a library claimed in one is
+    // claimed again, which refreshes them.
+    const bootId = yield* Files.readBootId;
+
     // A claim that failed for another reason (the folder not mounted yet, Convex unreachable)
     // is tried again with backoff until it succeeds or is refused.
-    const claimOnce = (library: LibraryFolder) =>
-      permits
-        .withPermits(1)(claimRoot(library))
-        .pipe(
-          Effect.tapError((error) =>
-            error instanceof RootRefused
-              ? Effect.void
-              : Effect.logDebug("RootClaim.retrying", { libraryId: library.id, error }),
-          ),
-          Effect.retry({
-            schedule: RETRY_SCHEDULE,
-            while: (error) => !(error instanceof RootRefused),
-          }),
-          Effect.tap(() => Effect.logInfo("RootClaim.claimed", { libraryId: library.id })),
-          Effect.catch((error) =>
-            Effect.logWarning("RootClaim.not_claimed", { libraryId: library.id, error }),
-          ),
-          Effect.andThen(Ref.update(settled, (keys) => new Set([...keys, claimKey(library)]))),
-          Effect.provideService(MediaBackend, backend),
-          Effect.provideService(MediaConfig, config),
-        );
+    const claimOnce = (library: LibraryFolder, host: Host) =>
+      Effect.gen(function* () {
+        const failures = yield* Ref.make(0);
+
+        const warn = (error: Error) =>
+          Ref.updateAndGet(failures, (count) => count + 1).pipe(
+            Effect.flatMap((count) =>
+              count === 1 || count % WARN_EVERY === 0
+                ? Effect.logWarning("RootClaim.retrying", { libraryId: library.id, count, error })
+                : Effect.logDebug("RootClaim.retrying", { libraryId: library.id, count, error }),
+            ),
+          );
+
+        yield* permits
+          .withPermits(1)(claimRoot(library, host))
+          .pipe(
+            Effect.tapError((error) => (error instanceof RootRefused ? Effect.void : warn(error))),
+            Effect.retry({
+              schedule: RETRY_SCHEDULE,
+              while: (error) => !(error instanceof RootRefused),
+            }),
+            Effect.tap(() => Effect.logInfo("RootClaim.claimed", { libraryId: library.id })),
+            Effect.catch((error) =>
+              Effect.logWarning("RootClaim.not_claimed", { libraryId: library.id, error }),
+            ),
+          );
+
+        yield* Ref.update(settled, (keys) => new Set([...keys, claimKey(library)]));
+      }).pipe(
+        Effect.provideService(MediaBackend, backend),
+        Effect.provideService(MediaConfig, config),
+      );
+
+    /** Whether a library needs a claim: none yet, or one whose identities are from another boot. */
+    const unclaimed = (library: LibraryFolder): boolean =>
+      !library.claimed || library.bootId !== bootId;
 
     const claimNew = Effect.fn("RootClaim.claimNew")(function* (
       libraries: ReadonlyArray<LibraryFolder>,
@@ -142,10 +177,21 @@ export const layer: Layer.Layer<never, never, MediaBackend | MediaConfig> = Laye
         { discard: true },
       );
 
+      const fresh = libraries.filter(
+        (library) => unclaimed(library) && !done.has(claimKey(library)),
+      );
+
+      if (fresh.length === 0) return;
+
+      // One read of the mount table for the whole batch.
+      const host: Host = { mounts: yield* Files.readMounts, bootId };
+
       yield* Effect.forEach(
-        libraries.filter((library) => !library.claimed && !done.has(claimKey(library))),
+        fresh,
         (library) =>
-          FiberMap.run(claims, claimKey(library), claimOnce(library), { onlyIfMissing: true }),
+          FiberMap.run(claims, claimKey(library), claimOnce(library, host), {
+            onlyIfMissing: true,
+          }),
         { discard: true },
       );
     });

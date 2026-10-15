@@ -116,8 +116,10 @@ export const claimRoot = mutation({
     rootIds: v.array(v.string()),
     /** Where the folder is on its file system (see `folder-ids`); null without a mount table. */
     fsPath: v.union(v.string(), v.null()),
+    /** The boot those identities were read in (see `schema.ts`); null without one. */
+    bootId: v.union(v.string(), v.null()),
   },
-  handler: async (ctx, { secret, libraryId, realPath, rootIds, fsPath }) => {
+  handler: async (ctx, { secret, libraryId, realPath, rootIds, fsPath, bootId }) => {
     requireService(secret);
     const library = await ctx.db.get(libraryId);
     const real = normaliseLibraryPath(realPath);
@@ -134,8 +136,12 @@ export const claimRoot = mutation({
       (other) =>
         other._id !== libraryId &&
         (firstOverlap([other], real) !== null ||
-          (other.rootIds !== undefined && chainsOverlap(other.rootIds, rootIds)) ||
-          (fsPath !== null && other.fsPath !== undefined && fsPathsOverlap(other.fsPath, fsPath))),
+          // Identities read in another boot may name other folders now; paths still count.
+          ((other.bootId ?? null) === bootId &&
+            ((other.rootIds !== undefined && chainsOverlap(other.rootIds, rootIds)) ||
+              (fsPath !== null &&
+                other.fsPath !== undefined &&
+                fsPathsOverlap(other.fsPath, fsPath))))),
     );
 
     // The library added first keeps a folder two libraries name, whichever scan claims it first:
@@ -149,14 +155,15 @@ export const claimRoot = mutation({
 
     await Promise.all(overlapping.map(async (other) => unclaim(ctx, other)));
 
-    const stored = fsPath ?? undefined;
+    const stored = { fsPath: fsPath ?? undefined, bootId: bootId ?? undefined };
 
     if (
       library.realPath !== real ||
       library.rootIds?.join("/") !== rootIds.join("/") ||
-      library.fsPath !== stored
+      library.fsPath !== stored.fsPath ||
+      library.bootId !== stored.bootId
     ) {
-      await ctx.db.patch(libraryId, { realPath: real, rootIds: [...rootIds], fsPath: stored });
+      await ctx.db.patch(libraryId, { realPath: real, rootIds: [...rootIds], ...stored });
     }
 
     return { ok: true } as const;
@@ -169,7 +176,12 @@ export const claimRoot = mutation({
  */
 const unclaim = async (ctx: MutationCtx, library: Doc<"libraries">): Promise<void> => {
   if (library.realPath !== undefined || library.rootIds !== undefined) {
-    await ctx.db.patch(library._id, { realPath: undefined, rootIds: undefined, fsPath: undefined });
+    await ctx.db.patch(library._id, {
+      realPath: undefined,
+      rootIds: undefined,
+      fsPath: undefined,
+      bootId: undefined,
+    });
   }
 };
 
@@ -394,6 +406,7 @@ export const libraries = query({
       id: library._id,
       path: library.path,
       claimed: isClaimed(library) && library.rootIds !== undefined,
+      bootId: library.bootId ?? null,
     }));
   },
 });

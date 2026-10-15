@@ -21,7 +21,9 @@ fi
 # nothing this image writes lands on the restored data before the container restarts. It stays
 # down until then.
 if [ -d /run/service/media ] && ! /command/s6-svc -wD -T 30000 -d /run/service/media; then
-  echo "[restore] refusing to restore: the media service did not stop within 30 seconds, and it could write to the restored data. Nothing was changed; try again, and check the container's log if it keeps happening." >&2
+  # It was told to stop; tell it to run again, so a refused restore leaves it as it found it.
+  /command/s6-svc -u /run/service/media || true
+  echo "[restore] refusing to restore: the media service did not stop within 30 seconds, and it could write to the restored data. Nothing was restored, and the media service was told to run again; try again, and check the container's log if it keeps happening." >&2
   exit 1
 fi
 

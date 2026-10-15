@@ -62,7 +62,13 @@ export const keyLapsed = (
   user: Pick<Doc<"users">, "keysValidAfter">,
 ): boolean => user.keysValidAfter !== undefined && key._creationTime <= user.keysValidAfter;
 
-/** Whether a session was ended by `endUserSessions` but its row is not purged yet. */
+/**
+ * Whether a session was ended by `endUserSessions` but its row is not purged yet. A session
+ * [music] opened records its generation, which alone decides: a time cutoff can't tell a session
+ * opened in the same transaction as the cutoff (a reset's own) from one before it. Sessions
+ * Convex Auth opens itself (sign-up) have none and go by the cutoff time.
+ */
 export const isStale = (session: Doc<"authSessions">, user: Doc<"users">): boolean =>
-  (user.sessionsValidAfter !== undefined && session._creationTime <= user.sessionsValidAfter) ||
-  (session.generation !== undefined && session.generation < (user.sessionGeneration ?? 0));
+  session.generation === undefined
+    ? user.sessionsValidAfter !== undefined && session._creationTime <= user.sessionsValidAfter
+    : session.generation < (user.sessionGeneration ?? 0);

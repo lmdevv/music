@@ -49,6 +49,20 @@ describe("fsPathOf", () => {
     expect(fsPathsOverlap(data, x)).toBe(false);
   });
 
+  it("lets a later mount over a parent folder hide an earlier one deeper down", () => {
+    const stacked = parseMountinfo(
+      [
+        "21 1 0:50 / / rw - overlay overlay rw",
+        // /music/x was bound first, then a whole other disk mounted over /music.
+        "30 21 8:1 /srv/media/a/sub /music/x rw - ext4 /dev/sda1 rw",
+        "31 21 8:2 /other /music rw - ext4 /dev/sdb1 rw",
+      ].join("\n"),
+    );
+
+    expect(fsPathOf(stacked, "/music/x")).toBe("8:2:/other/x");
+    expect(fsPathOf(stacked, "/music")).toBe("8:2:/other");
+  });
+
   it("covers nothing without mounts", () => {
     expect(fsPathOf([], "/music")).toBeNull();
   });

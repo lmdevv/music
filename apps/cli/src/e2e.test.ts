@@ -89,6 +89,7 @@ const claimRoot = makeFunctionReference<
     realPath: string;
     rootIds: ReadonlyArray<string>;
     fsPath: string | null;
+    bootId: string | null;
   },
   { ok: boolean }
 >("media:claimRoot");
@@ -178,6 +179,7 @@ const completeNextScan = async (url: string, secret: string): Promise<void> => {
     realPath: claimed.library.path,
     rootIds: [`e2e:${claimed.library.id}`],
     fsPath: null,
+    bootId: null,
   });
 
   if (!root.ok) throw new Error("The fake media service's folder claim was refused");

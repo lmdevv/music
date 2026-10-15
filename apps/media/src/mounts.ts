@@ -8,7 +8,7 @@
  */
 
 /** One mount: the file system it shows, the folder of it, and where it is mounted. */
-interface Mount {
+export interface Mount {
   readonly device: string;
   readonly root: string;
   readonly mountPoint: string;
@@ -42,18 +42,12 @@ const under = (mountPoint: string, path: string): boolean =>
 
 /**
  * The file system path of an absolute, resolved `path` (`major:minor:/folder/in/fs`), or null
- * when no mount covers it. The mount is the deepest one whose mount point holds the path; of
- * several mounted at one point, the last, which is on top.
+ * when no mount covers it. The mount is the last one, in mountinfo's order (the order they were
+ * mounted), whose mount point holds the path: a later mount over a parent folder hides an
+ * earlier one deeper down, and of several at one point the last is on top.
  */
 export const fsPathOf = (mounts: ReadonlyArray<Mount>, path: string): string | null => {
-  const mount = mounts.reduce<Mount | undefined>(
-    (best, candidate) =>
-      under(candidate.mountPoint, path) &&
-      (best === undefined || candidate.mountPoint.length >= best.mountPoint.length)
-        ? candidate
-        : best,
-    undefined,
-  );
+  const mount = mounts.findLast((candidate) => under(candidate.mountPoint, path));
 
   if (mount === undefined) return null;
 

@@ -4,11 +4,14 @@
  */
 import { Effect, Option, Schema } from "effect";
 
-import { fsPathOf, parseMountinfo } from "./mounts.ts";
+import { type Mount, parseMountinfo } from "./mounts.ts";
 import * as NodeFiles from "./platform/node-files.ts";
 
 /** The mount table of the service's own mount namespace. */
 const MOUNTINFO = "/proc/self/mountinfo";
+
+/** The kernel's identity for this boot. */
+const BOOT_ID = "/proc/sys/kernel/random/boot_id";
 
 /** A file system operation failed. `missing` is true when the path does not exist. */
 export class FileError extends Schema.TaggedError<FileError>()("FileError", {
@@ -111,14 +114,29 @@ export const realPath = (path: string): Effect.Effect<string, FileError> =>
   attempt("realpath", path, () => NodeFiles.realPath(path));
 
 /**
- * Where a resolved folder is on its file system (`major:minor:/path`, see `mounts.ts`), from
- * `/proc/self/mountinfo`; null where there is no mount table to read (not Linux).
+ * The service's mount table (`/proc/self/mountinfo`, see `mounts.ts`), or null where there is
+ * none to read (not Linux).
  */
-export const fsPath = (path: string): Effect.Effect<string | null> =>
-  attempt("read", MOUNTINFO, () => NodeFiles.readWholeFile(MOUNTINFO)).pipe(
-    Effect.map((bytes) => fsPathOf(parseMountinfo(new TextDecoder().decode(bytes)), path)),
-    Effect.orElseSucceed(() => null),
-  );
+export const readMounts: Effect.Effect<ReadonlyArray<Mount> | null> = attempt(
+  "read",
+  MOUNTINFO,
+  () => NodeFiles.readWholeFile(MOUNTINFO),
+).pipe(
+  Effect.map((bytes) => parseMountinfo(new TextDecoder().decode(bytes))),
+  Effect.orElseSucceed(() => null),
+);
+
+/**
+ * This boot of the machine (`/proc/sys/kernel/random/boot_id`), or null where there is none (not
+ * Linux). Device numbers and inodes can change or be reused across reboots, so folder identities
+ * are compared only within one boot.
+ */
+export const readBootId: Effect.Effect<string | null> = attempt("read", BOOT_ID, () =>
+  NodeFiles.readWholeFile(BOOT_ID),
+).pipe(
+  Effect.map((bytes) => new TextDecoder().decode(bytes).trim() || null),
+  Effect.orElseSucceed(() => null),
+);
 
 /** A folder's identity and its parents' up to `/`, the folder first (`NodeFiles.folderIds`). */
 export const folderIds = (path: string): Effect.Effect<ReadonlyArray<string>, FileError> =>

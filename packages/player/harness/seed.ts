@@ -44,6 +44,7 @@ const claimRoot = makeFunctionReference<
     realPath: string;
     rootIds: ReadonlyArray<string>;
     fsPath: string | null;
+    bootId: string | null;
   },
   { ok: boolean }
 >("media:claimRoot");
@@ -88,6 +89,7 @@ export const seedSession = async (): Promise<ReadonlyArray<TrackId>> => {
     realPath: fixturesDir,
     rootIds: [`harness:${libraryId}`],
     fsPath: null,
+    bootId: null,
   });
 
   await http.mutation(upsertTracks, {

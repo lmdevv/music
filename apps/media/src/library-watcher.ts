@@ -10,6 +10,7 @@
  */
 import { Cause, Effect, FiberMap, Layer, Queue, Ref, Schedule, Schema, Stream } from "effect";
 
+import { cappedBackoff } from "./backoff.ts";
 import * as Files from "./files.ts";
 import { type LibraryFolder, MediaBackend, resubscribeSchedule } from "./media-backend.ts";
 import { MediaConfig } from "./media-config.ts";
@@ -18,10 +19,7 @@ import { watchTree } from "./platform/node-watch.ts";
 const DEBOUNCE = "5 seconds";
 
 /** Backoff for starting a failed watch again: exponential from one second, capped at a minute. */
-const RESTART_SCHEDULE = Schedule.min([
-  Schedule.exponential("1 second"),
-  Schedule.spaced("1 minute"),
-]);
+const RESTART_SCHEDULE = cappedBackoff("1 second", "1 minute");
 
 const errorCode = (cause: unknown): string =>
   cause instanceof Error && "code" in cause ? String(cause.code) : "";

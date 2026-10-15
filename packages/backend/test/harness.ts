@@ -72,6 +72,7 @@ const claimRootMutation = makeFunctionReference<
     realPath: string;
     rootIds: ReadonlyArray<string>;
     fsPath: string | null;
+    bootId: string | null;
   },
   { ok: true } | { ok: false; error: string }
 >("media:claimRoot");
@@ -175,6 +176,7 @@ const claimFolder = async (url: string, secret: string, libraryId: string) => {
     realPath: library.path,
     rootIds: [`test:${libraryId}`],
     fsPath: null,
+    bootId: null,
   });
 
   if (!claim.ok) throw new Error(`The claim on ${library.path} was refused: ${claim.error}`);

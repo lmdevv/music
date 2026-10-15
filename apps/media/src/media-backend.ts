@@ -6,19 +6,9 @@ import type { FolderChain } from "@music/commands/folder-ids";
 import { JobId, LibraryId, type TrackId } from "@music/commands/ids";
 import { ConvexClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
-import {
-  Cause,
-  Context,
-  Effect,
-  Layer,
-  Option,
-  Queue,
-  Redacted,
-  Schedule,
-  Schema,
-  Stream,
-} from "effect";
+import { Cause, Context, Effect, Layer, Option, Queue, Redacted, Schema, Stream } from "effect";
 
+import { cappedBackoff } from "./backoff.ts";
 import { MediaConfig } from "./media-config.ts";
 
 /** A Convex call failed or returned data the service does not understand. */
@@ -41,6 +31,8 @@ const LibraryFolder = Schema.Struct({
   path: Schema.String,
   /** Whether its folder is claimed, with identities (`media:claimRoot`), so its songs stream. */
   claimed: Schema.Boolean,
+  /** The boot its claim's identities were read in (`Files.readBootId`); null without one. */
+  bootId: Schema.NullOr(Schema.String),
 });
 
 /** A library, the folder it reads, and whether that folder is claimed. */
@@ -175,6 +167,7 @@ const functions = {
       realPath: string;
       rootIds: ReadonlyArray<string>;
       fsPath: string | null;
+      bootId: string | null;
     },
     unknown
   >("media:claimRoot"),
@@ -264,6 +257,8 @@ export interface Interface {
     rootIds: FolderChain,
     /** Where the folder is on its file system (`mounts.ts`); null without a mount table. */
     fsPath: string | null,
+    /** The boot those identities belong to (`Files.readBootId`). */
+    bootId: string | null,
   ) => Effect.Effect<RootClaim, BackendError>;
   /**
    * Drops a library's claim after the service refused its folder itself (outside `MUSIC_ROOTS`,
@@ -326,10 +321,7 @@ export class MediaBackend extends Context.Service<MediaBackend, Interface>()(
 const CALL_TIMEOUT = "30 seconds";
 
 /** Backoff for restarting a dropped subscription: exponential from one second, capped at 30. */
-export const resubscribeSchedule = Schedule.min([
-  Schedule.exponential("1 second"),
-  Schedule.spaced("30 seconds"),
-]);
+export const resubscribeSchedule = cappedBackoff("1 second", "30 seconds");
 
 const decodeClaim = Schema.decodeUnknownEffect(Schema.NullOr(ClaimedJob));
 
@@ -418,6 +410,7 @@ const make = Effect.gen(function* () {
       realPath: string,
       rootIds: FolderChain,
       fsPath: string | null,
+      bootId: string | null,
     ) {
       const result = yield* call("claimRoot", () =>
         client.mutation(functions.claimRoot, {
@@ -426,6 +419,7 @@ const make = Effect.gen(function* () {
           realPath,
           rootIds,
           fsPath,
+          bootId,
         }),
       );
 

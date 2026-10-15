@@ -394,6 +394,7 @@ const claimRoot = (
   realPath: string,
   rootIds: ReadonlyArray<string>,
   fsPath: string | null = null,
+  bootId: string | null = "security-boot",
 ) =>
   anonymous(server).convex.mutation(
     makeFunctionReference<
@@ -404,10 +405,11 @@ const claimRoot = (
         realPath: string;
         rootIds: ReadonlyArray<string>;
         fsPath: string | null;
+        bootId: string | null;
       },
       { ok: boolean; error?: string }
     >("media:claimRoot"),
-    { secret: mediaSecret, libraryId, realPath, rootIds, fsPath },
+    { secret: mediaSecret, libraryId, realPath, rootIds, fsPath, bootId },
   );
 
 const pause = (ms: number) =>
@@ -975,6 +977,7 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
         realPath: "/",
         rootIds: [],
         fsPath: null,
+        bootId: null,
       }),
       visitor.mutation(makeFunctionReference<"mutation">("media:refuseRoot"), {
         secret,

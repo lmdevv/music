@@ -146,6 +146,13 @@ export default defineSchema({
      * mount table, or on claims from before it was recorded. Cleared with `realPath`.
      */
     fsPath: v.optional(v.string()),
+    /**
+     * The boot of the media service's machine that read `rootIds` and `fsPath`. Device numbers
+     * and inodes can change or be reused across reboots, so another library's identities are
+     * compared only when read in the same boot; claims from another boot are made again within
+     * seconds by the media service's claim pass. Cleared with `realPath`.
+     */
+    bootId: v.optional(v.string()),
     visibility,
     ownerId: v.id("users"),
     lastScanAt: v.optional(v.number()),

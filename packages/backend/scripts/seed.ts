@@ -367,6 +367,7 @@ const claimRoot = makeFunctionReference<
     realPath: string;
     rootIds: ReadonlyArray<string>;
     fsPath: string | null;
+    bootId: string | null;
   },
   { ok: boolean }
 >("media:claimRoot");
@@ -412,6 +413,7 @@ const finishPendingJobs = async (client: ConvexHttpClient, secret: string): Prom
       realPath: claim.library.path,
       rootIds: [`seed:${claim.library.id}`],
       fsPath: null,
+      bootId: null,
     });
 
     await inOrder(batches, async (batch, index) => {

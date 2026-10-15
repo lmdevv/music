@@ -44,19 +44,24 @@ export interface MemoryJob {
   readonly outcome: JobOutcome | undefined;
 }
 
-/** What a claim stores: the folder's identities (`@music/commands/folder-ids`). */
+/** What a claim stores: the folder's identities (`@music/commands/folder-ids`) and their boot. */
 interface Claim {
   readonly rootIds: FolderChain;
   readonly fsPath: string | null;
+  readonly bootId: string | null;
 }
 
-/** Whether two claims are the same folder, or one is inside the other, by either identity. */
+/**
+ * Whether two claims are the same folder, or one is inside the other, by either identity; only
+ * identities read in the same boot are compared, as `media:claimRoot` does.
+ */
 const claimsOverlap = (left: Claim, right: Claim): boolean =>
-  chainsOverlap(left.rootIds, right.rootIds) ||
-  (left.fsPath !== null && right.fsPath !== null && fsPathsOverlap(left.fsPath, right.fsPath));
+  left.bootId === right.bootId &&
+  (chainsOverlap(left.rootIds, right.rootIds) ||
+    (left.fsPath !== null && right.fsPath !== null && fsPathsOverlap(left.fsPath, right.fsPath)));
 
 interface State {
-  readonly libraries: ReadonlyArray<Omit<LibraryFolder, "claimed">>;
+  readonly libraries: ReadonlyArray<Omit<LibraryFolder, "claimed" | "bootId">>;
   /**
    * The identities of the folders libraries claimed, as `media:claimRoot` stores them. Compared
    * by identity only, so tests show the service reports identities that catch any overlap.
@@ -214,6 +219,7 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
             current.libraries.map((library) => ({
               ...library,
               claimed: current.roots.has(library.id),
+              bootId: current.roots.get(library.id)?.bootId ?? null,
             })),
           ),
         ),
@@ -223,11 +229,12 @@ export const layerMemory: Layer.Layer<MediaBackend | MemoryMediaBackendControl> 
           _realPath: string,
           rootIds: FolderChain,
           fsPath: string | null,
+          bootId: string | null,
         ) {
           return yield* SubscriptionRef.modify(state, (current): [RootClaim, State] => {
             const others = [...current.roots].filter(([other]) => other !== libraryId);
 
-            const claim: Claim = { rootIds, fsPath };
+            const claim: Claim = { rootIds, fsPath, bootId };
 
             if (others.some(([, root]) => claimsOverlap(root, claim))) {
               return [

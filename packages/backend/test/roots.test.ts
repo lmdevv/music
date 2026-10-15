@@ -44,6 +44,7 @@ const claim = async (
   realPath: string,
   rootIds: ReadonlyArray<string> = [`path:${realPath}`],
   fsPath: string | null = null,
+  bootId: string | null = "boot-1",
 ) => {
   const library = await libraryDoc(backend, libraryId);
 
@@ -53,6 +54,7 @@ const claim = async (
     realPath,
     rootIds: [...rootIds],
     fsPath,
+    bootId,
   });
 };
 
@@ -164,6 +166,52 @@ describe("real folder claims", () => {
     expect(await claim(backend, alias.libraryId, "/mnt/b", ["1:31", mnt, top])).toEqual({
       ok: true,
     });
+  });
+
+  it("compare identities only within one boot, and paths always", async () => {
+    const backend = makeBackend();
+    const owner = await signUp(backend, "owner");
+    const admin = await signUp(backend, "admin");
+
+    const kept = await owner.music.run("libraries.create", { name: "Kept", path: "/music/a" });
+
+    expect(
+      await claim(backend, kept.libraryId, "/music/a", ["8:5", "8:1", "0:1"], "8:1:/a", "boot-old"),
+    ).toEqual({ ok: true });
+
+    const other = await admin.music.run("libraries.create", { name: "Other", path: "/music/b" });
+
+    // After a reboot the same numbers can name another folder: an identity from another boot
+    // refuses nothing.
+    expect(
+      await claim(
+        backend,
+        other.libraryId,
+        "/music/b",
+        ["8:5", "8:1", "0:1"],
+        "8:1:/a",
+        "boot-new",
+      ),
+    ).toEqual({ ok: true });
+    expect((await libraryDoc(backend, kept.libraryId)).realPath).toBe("/music/a");
+
+    // In the same boot, the same identity is the same folder.
+    await claim(backend, kept.libraryId, "/music/a", ["8:5", "8:1", "0:1"], "8:1:/a", "boot-new");
+    expect(
+      await claim(
+        backend,
+        other.libraryId,
+        "/music/b",
+        ["8:5", "8:1", "0:1"],
+        "8:1:/a",
+        "boot-new",
+      ),
+    ).toEqual({ ok: false, error: OVERLAP });
+
+    // Paths count in any boot.
+    expect(
+      await claim(backend, other.libraryId, "/music/a/sub", ["9:9"], null, "boot-other"),
+    ).toEqual({ ok: false, error: OVERLAP });
   });
 
   it("refuse a library on a bound subfolder of another, by file system path", async () => {

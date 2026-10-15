@@ -167,6 +167,29 @@ describe("password reset links", () => {
     });
   });
 
+  it("leave the person signed in with the session the reset opened", async () => {
+    const { backend, admin, member } = await household();
+    const { token } = await admin.music.run("people.reset", { userId: member.userId });
+    const back = await redeem(backend, token);
+
+    // The cutoff time and the new session's can be the same instant (one transaction, one
+    // clock); the session still counts, by its generation.
+    await backend.run(async (ctx) => {
+      const sessions = await ctx.db
+        .query("authSessions")
+        .withIndex("userId", (q) => q.eq("userId", member.id))
+        .collect();
+
+      const newest = sessions.at(-1);
+
+      if (newest !== undefined) {
+        await ctx.db.patch(member.id, { sessionsValidAfter: newest._creationTime });
+      }
+    });
+
+    expect(await failureCode(back.music.read("account.me", {}))).toBe("succeeded");
+  });
+
   it("stop working once the person is promoted to admin", async () => {
     const { backend, owner, admin, member } = await household();
     const { token } = await admin.music.run("people.reset", { userId: member.userId });
@@ -610,6 +633,49 @@ describe("password sign-up and sign-in", () => {
 });
 
 describe("library access", () => {
+  it("finds a grant past the bounded read when removed libraries left very many", async () => {
+    const { backend, owner, member } = await household();
+
+    const gone = await owner.music.run("libraries.create", {
+      name: "Gone",
+      path: "/music/gone",
+      visibility: "restricted",
+    });
+
+    const goneId = await backend.run(async (ctx) => {
+      const id = ctx.db.normalizeId("libraries", gone.libraryId);
+
+      if (id !== null) await ctx.db.delete(id);
+
+      return id;
+    });
+
+    if (goneId === null) throw new Error("The library was not created");
+
+    // Far more leftovers than anyone holds grants, so the reader looks each library up.
+    await backend.run(async (ctx) => {
+      await Promise.all(
+        Array.from({ length: 300 }, async () =>
+          ctx.db.insert("libraryAccess", {
+            libraryId: goneId,
+            userId: member.id,
+            grantedBy: owner.id,
+          }),
+        ),
+      );
+    });
+
+    const kept = await owner.music.run("libraries.create", {
+      name: "Kept",
+      path: "/music/kept",
+      visibility: "restricted",
+    });
+
+    await owner.music.run("libraries.grant", { libraryId: kept.libraryId, userId: member.userId });
+
+    expect(await listedAs(member, kept.libraryId)).toMatchObject({ readable: true });
+  });
+
   it("finds a grant however many a removed library left behind", async () => {
     const { backend, owner, member } = await household();
 

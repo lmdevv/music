@@ -28,8 +28,13 @@ const TOKENS_PER_SESSION = 10;
  * `endUserSessions` has already made them stop counting.
  */
 export const purgeSessions = internalMutation({
-  args: { userId: v.id("users"), cursor },
-  handler: async (ctx, { userId, cursor: from }) => {
+  args: {
+    userId: v.id("users"),
+    cursor,
+    /** Whether an earlier page of this pass kept a session with tokens left to delete. */
+    leftover: v.optional(v.boolean()),
+  },
+  handler: async (ctx, { userId, cursor: from, leftover = false }) => {
     const user = await ctx.db.get(userId);
 
     const page = await ctx.db
@@ -57,12 +62,17 @@ export const purgeSessions = internalMutation({
       }),
     );
 
+    // A session kept on any page of this pass means another pass, from the start, once this
+    // one is through.
+    const kept = leftover || gone.includes(false);
+
     if (!page.isDone) {
       await ctx.scheduler.runAfter(0, internal.people.purgeSessions, {
         userId,
         cursor: page.continueCursor,
+        leftover: kept,
       });
-    } else if (gone.includes(false)) {
+    } else if (kept) {
       await ctx.scheduler.runAfter(0, internal.people.purgeSessions, { userId, cursor: null });
     }
   },

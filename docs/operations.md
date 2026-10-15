@@ -212,7 +212,9 @@ Every service runs as its own unprivileged user; only the start-up script runs a
   removed, their libraries move to the server's owner.
 - **Library folders (`MUSIC_ROOTS`).** Before every scan the media service resolves a library's
   folder through links and claims it, with the device and inode of the folder and of each folder
-  above it, which a bind mount can't change. A folder that is, sits inside, or holds another
+  above it, which a bind mount can't change, and where the folder sits on its file system (from the
+  mount table). Those numbers can change across reboots, so they count only within one boot, and
+  the media service claims every library again within seconds of starting. A folder that is, sits inside, or holds another
   library's folder, by path or by identity, is not scanned, and the job says so without naming
   the other folder. Library folders must also be inside `MUSIC_ROOTS` (comma-separated absolute
   folders): the image sets `/music`, where Docker, Compose, and the NixOS module mount your music,
