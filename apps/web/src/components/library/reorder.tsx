@@ -13,6 +13,12 @@ import {
 } from "@/lib/reorder";
 import type { DragState, DropSide } from "@/lib/reorder";
 
+/**
+ * How long without a dragover before a pointer event counts as the drag being over. Browsers send
+ * dragover about every 50 ms during a drag.
+ */
+const DRAG_IDLE_MS = 500;
+
 /** No drag in progress. */
 const NO_DRAG = { id: null, over: null } as const;
 
@@ -71,21 +77,32 @@ export const useReorder = <Id extends string>(
   });
 
   // A drag whose source row remounted (it moved to another block of a windowed list) never gets
-  // its dragend. Browsers send no pointer events during a drag, so the first one after it means
-  // the drag is over.
+  // its dragend. While a drag is live the browser sends dragover every few dozen milliseconds, even
+  // with the pointer still; a pointer event long after the last one means the drag is over.
   const dragging = drag.id !== null;
+  const lastDragOver = useRef(0);
 
   useEffect(() => {
     if (!dragging) return undefined;
 
-    const end = () => setDrag(NO_DRAG);
+    lastDragOver.current = performance.now();
 
-    window.addEventListener("pointermove", end, { once: true });
-    window.addEventListener("pointerdown", end, { once: true });
+    const onDragOver = () => {
+      lastDragOver.current = performance.now();
+    };
+
+    const onPointer = () => {
+      if (performance.now() - lastDragOver.current > DRAG_IDLE_MS) setDrag(NO_DRAG);
+    };
+
+    window.addEventListener("dragover", onDragOver, { capture: true, passive: true });
+    window.addEventListener("pointermove", onPointer, { passive: true });
+    window.addEventListener("pointerdown", onPointer, { passive: true });
 
     return () => {
-      window.removeEventListener("pointermove", end);
-      window.removeEventListener("pointerdown", end);
+      window.removeEventListener("dragover", onDragOver, { capture: true });
+      window.removeEventListener("pointermove", onPointer);
+      window.removeEventListener("pointerdown", onPointer);
     };
   }, [dragging]);
 
