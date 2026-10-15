@@ -95,7 +95,7 @@ function NewPlaylistForm({
   };
 
   return (
-    <DialogContent title="New playlist" description="Private to you until you share it.">
+    <DialogContent title="New playlist" description="Private to you.">
       <form className="flex flex-col gap-6" onSubmit={onSubmit}>
         <div className="flex flex-col gap-1.5">
           <FieldLabel htmlFor="new-playlist-name">Name</FieldLabel>
