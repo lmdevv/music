@@ -22,6 +22,7 @@ import type { Queue, QueueItem, StoredQueue } from "../lib/queue";
 import {
   hostedJam,
   jamAutoplayViewer,
+  jamShareableEntry,
   listenAlong,
   requireAdds,
   requireControl,
@@ -244,11 +245,40 @@ const toppedUp = async (
  * may come from libraries granted to the host alone, which the Jam must not share.
  */
 export const refreshJamAutoplay = async (ctx: MutationCtx, host: Viewer): Promise<void> => {
+  const before = await loadQueue(ctx, host);
+
+  if (before.items.some((item, position) => position > before.index && item.autoplay)) {
+    await saveTopped(ctx, host, withoutAutoplay(before));
+  }
+
+  // A song autoplay picked from a library shared with the host alone may be playing: move on to
+  // the next one the Jam may share, so people listening along have something to play.
   const queue = await loadQueue(ctx, host);
+  const current = queue.items[queue.index];
+  const currentTrack = queue.tracks[queue.index];
 
-  if (!queue.items.some((item, position) => position > queue.index && item.autoplay)) return;
+  if (current === undefined || currentTrack === undefined) return;
 
-  await saveTopped(ctx, host, withoutAutoplay(queue));
+  if (jamShareableEntry(host, current, currentTrack)) return;
+
+  const next = queue.items.findIndex((item, position) => {
+    const track = queue.tracks[position];
+
+    return position > queue.index && track !== undefined && jamShareableEntry(host, item, track);
+  });
+
+  const session = await findSession(ctx, host.id);
+
+  if (next === -1) {
+    if (session !== null)
+      await ctx.db.patch(session._id, { playing: false, updatedAt: Date.now() });
+
+    return;
+  }
+
+  await saveTopped(ctx, host, { ...queue, index: next, reportedTrackId: undefined });
+
+  if (session !== null) await restartSession(ctx, session);
 };
 
 /**
@@ -341,10 +371,45 @@ const positionFor = async (
 };
 
 /** The entries of a loaded queue as clients see them. */
+/**
+ * A queue entry people in a Jam may not know about (`jamShareableEntry`): its place, length, and
+ * entry ID, and nothing about the song; the song, album, and artist IDs name only the entry.
+ */
+const withheldEntry = (
+  item: QueueItem,
+  track: Doc<"tracks">,
+): (typeof PlaybackQueue)["Encoded"]["queue"][number] => ({
+  id: `withheld-${item.id}`,
+  title: "",
+  artist: "",
+  artistId: `withheld-${item.id}`,
+  album: "",
+  albumId: `withheld-${item.id}`,
+  trackNumber: null,
+  discNumber: null,
+  durationMs: track.durationMs,
+  codec: "",
+  lossless: false,
+  bitrate: null,
+  sampleRate: null,
+  bitDepth: null,
+  artUrl: null,
+  liked: false,
+  itemId: item.id,
+  addedBy: null,
+  autoplay: true,
+  withheld: true,
+});
+
+/**
+ * A queue as `viewer` sees it. `jamHost` is set when they read someone else's Jam: then autoplay's
+ * picks from a library shared with the host alone show as withheld entries.
+ */
 const presentQueue = async (
   ctx: ReadCtx,
   viewer: Viewer,
   queue: Queue,
+  jamHost: Viewer | null,
 ): Promise<(typeof PlaybackQueue)["Encoded"]> => {
   const present = makePresenter(ctx, viewer);
   const contributor = makeContributors(ctx);
@@ -358,12 +423,14 @@ const presentQueue = async (
   return {
     queue: await Promise.all(
       entries.map(async ({ item, track }) =>
-        // The presented track is a new object made for this entry.
-        Object.assign(await present.track(track), {
-          itemId: item.id,
-          addedBy: item.addedBy === undefined ? null : await contributor(item.addedBy),
-          autoplay: item.autoplay,
-        }),
+        jamHost !== null && !jamShareableEntry(jamHost, item, track)
+          ? withheldEntry(item, track)
+          : // The presented track is a new object made for this entry.
+            Object.assign(await present.track(track), {
+              itemId: item.id,
+              addedBy: item.addedBy === undefined ? null : await contributor(item.addedBy),
+              autoplay: item.autoplay,
+            }),
       ),
     ),
     index: queue.index,
@@ -382,7 +449,12 @@ const queueFor = async (
   actor: Viewer,
   playback: Playback,
 ): Promise<(typeof PlaybackQueue)["Encoded"]> =>
-  presentQueue(ctx, actor, await loadQueue(ctx, playback.owner));
+  presentQueue(
+    ctx,
+    actor,
+    await loadQueue(ctx, playback.owner),
+    playback.kind === "member" ? playback.owner : null,
+  );
 
 /** Marks that a command moved playback to another song, from its start. */
 const restartSession = async (

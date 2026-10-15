@@ -359,6 +359,12 @@ export const QueueEntry = Schema.Struct({
   addedBy: Schema.NullOr(Contributor),
   /** Added by autoplay when the queue ran out, not by a person. */
   autoplay: Schema.Boolean,
+  /**
+   * Set on an entry of a Jam's queue that people in it may not know about: a song autoplay picked
+   * for the host from a library shared with the host alone. Its title, artist, album, and art are
+   * empty, and its song, album, and artist IDs are stand-ins that name nothing.
+   */
+  withheld: Schema.optionalKey(Schema.Literal(true)),
 });
 
 export interface QueueEntry extends Schema.Schema.Type<typeof QueueEntry> {}

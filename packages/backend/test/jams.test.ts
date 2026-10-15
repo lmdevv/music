@@ -558,6 +558,96 @@ describe("autoplay in a Jam", () => {
   });
 });
 
+describe("a Jam started on an autoplay song from a library shared with the host alone", () => {
+  it("moves on to a song it may share, and shows people none of what it held", async () => {
+    const backend = makeBackend();
+    const owner = await signUp(backend, "owner");
+    // The host owns nothing; Delta is granted to them alone.
+    const host = await signUp(backend, "member");
+    const member = await signUp(backend, "member");
+    const alpha = await seedLibrary(backend, owner, { name: "Alpha", count: 0 });
+    const delta = await seedLibrary(backend, owner, { name: "Delta", count: 0 });
+
+    // The seed shares its artist with Delta's songs only, so autoplay picks those first; Alpha's
+    // other songs share its genre, for after.
+    await upsertFiles(backend, alpha.libraryId, [
+      song("Alpha/0.flac", "Alpha song 0"),
+      ...Array.from({ length: 12 }, (_, index) => ({
+        ...song(`Alpha/${String(index + 1)}.flac`, `Alpha song ${String(index + 1)}`),
+        artist: "Alpha Artist",
+      })),
+    ]);
+    await upsertFiles(backend, delta.libraryId, [
+      song("Delta/1.flac", "Delta song 1"),
+      song("Delta/2.flac", "Delta song 2"),
+    ]);
+    await owner.music.run("libraries.update", {
+      libraryId: delta.libraryId,
+      visibility: "restricted",
+    });
+    await owner.music.run("libraries.grant", {
+      libraryId: delta.libraryId,
+      userId: UserId.make(host.id),
+    });
+
+    const tracks = await allTracks(host);
+
+    const idOf = (title: string) =>
+      pick(
+        tracks.filter((track) => track.title === title),
+        0,
+      ).id;
+
+    await host.music.run("devices.heartbeat", {
+      deviceId: HOST_DEVICE,
+      name: "Laptop",
+      kind: "web",
+    });
+    await host.music.run("playback.play", {
+      trackIds: [idOf("Alpha song 0")],
+      deviceId: HOST_DEVICE,
+    });
+
+    // Autoplay queued Delta songs, and the host skips to one.
+    const queued = (await host.music.read("queue.list", {})).queue;
+    const deltaEntry = queued.find((entry) => entry.autoplay && entry.title.startsWith("Delta"));
+
+    if (deltaEntry === undefined) throw new Error("Autoplay picked nothing from Delta");
+    await host.music.run("playback.jump", { itemId: deltaEntry.itemId });
+
+    const { code } = await host.music.run("jam.start", {});
+
+    await member.music.run("jam.join", { code, deviceId: MEMBER_DEVICE });
+
+    const seen = await member.music.read("playback.state", {});
+    const current = seen.queue[seen.index];
+
+    // The Jam plays a song it may share.
+    expect(current?.withheld).toBeUndefined();
+    expect(current?.title.startsWith("Alpha")).toBe(true);
+    expect(seen.playing).toBe(true);
+
+    // The Delta entry it moved past shows as withheld: nothing about the song, not even its IDs.
+    const hidden = seen.queue.find((entry) => entry.itemId === deltaEntry.itemId);
+
+    expect(hidden).toMatchObject({
+      withheld: true,
+      title: "",
+      artist: "",
+      album: "",
+      artUrl: null,
+    });
+    expect(hidden?.id).not.toBe(deltaEntry.id);
+    expect(hidden?.albumId).not.toBe(deltaEntry.albumId);
+    expect(seen.queue.some((entry) => entry.title.startsWith("Delta"))).toBe(false);
+
+    // The host still sees their own queue whole.
+    expect((await host.music.read("queue.list", {})).queue.map((entry) => entry.title)).toContain(
+      deltaEntry.title,
+    );
+  });
+});
+
 describe("listening along", () => {
   it("plays the Jam on the person's own device, with their own volume, until they stop", async () => {
     const { host, member, code } = await setup({}, false);
@@ -890,6 +980,44 @@ describe("guest accounts from Jam links", () => {
     await drainScheduled(fixture.backend);
 
     expect(await accountsLeft(fixture.backend, [guest.id])).toEqual([]);
+  });
+
+  it("go, with the Jam, when its host is made a guest, and the link makes no more", async () => {
+    const { backend, host, code } = await guestsAllowed(await setup({}, false));
+    const otherHost = await signUp(backend, "member");
+    const otherCode = (await otherHost.music.run("jam.start", {})).code;
+    const guest = await joinAsGuest(backend, otherCode);
+
+    await host.music.run("people.role", { userId: UserId.make(otherHost.id), role: "guest" });
+    await drainScheduled(backend);
+    clockAt(START);
+
+    const ended = await backend.run(async (ctx) =>
+      ctx.db
+        .query("jams")
+        .withIndex("by_code", (q) => q.eq("code", otherCode))
+        .unique(),
+    );
+
+    expect([ended?.status, ended?.endedReason]).toEqual(["ended", "host"]);
+    expect(await accountsLeft(backend, [guest.id])).toEqual([]);
+    expect(await createGuest(backend, otherCode)).toBe("signup_closed");
+    // The admin's own Jam goes on.
+    expect((await host.music.read("jam.get", {}))?.code).toBe(code);
+  });
+
+  it("make no account from the link of a host who is a guest, should their Jam still run", async () => {
+    const { backend, host } = await guestsAllowed(await setup({}, false));
+    const otherHost = await signUp(backend, "member");
+    const otherCode = (await otherHost.music.run("jam.start", {})).code;
+
+    // Made a guest behind the handlers' back, as an old deployment could leave it.
+    await backend.run(async (ctx) => {
+      await ctx.db.patch(otherHost.id, { role: "guest" });
+    });
+
+    expect(await createGuest(backend, otherCode)).toBe("signup_closed");
+    expect((await host.music.read("jam.get", {}))?.status).toBe("active");
   });
 
   it.each(["suspended", "removed"] as const)(

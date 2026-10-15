@@ -208,6 +208,9 @@ export const peopleMutations = {
         userId: user._id,
         cursor: null,
       });
+      // Guests can't host a Jam, whose link can make accounts: theirs ends, with its guests, as
+      // on suspension or removal.
+      await endHostedJam(ctx, user._id);
     }
 
     return ok;

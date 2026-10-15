@@ -14,6 +14,7 @@ import {
 import { takeAttempt } from "./lib/rateLimit";
 import { readServerSettings } from "./lib/serverSettings";
 import { openSession } from "./lib/sessions";
+import { roleOf } from "./lib/viewer";
 import type { ReadCtx } from "./lib/viewer";
 
 const TOO_MANY = "Too many people joined as guests just now. Try again in a few minutes.";
@@ -88,6 +89,14 @@ const jamPass = async (ctx: ReadCtx, code: string): Promise<SignUpPass> => {
     .unique();
 
   if (jam === null || jam.status !== "active" || joinPolicy(jam) === "locked") {
+    return fail("signup_closed", "This Jam link doesn't work any more");
+  }
+
+  // Only members and admins may hand out a link that makes accounts. Their Jam ends when they stop
+  // being one; this holds meanwhile, and for any Jam that slipped past.
+  const host = await ctx.db.get(jam.hostId);
+
+  if (host === null || host.suspendedAt !== undefined || roleOf(host) === "guest") {
     return fail("signup_closed", "This Jam link doesn't work any more");
   }
 

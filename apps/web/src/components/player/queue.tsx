@@ -16,6 +16,7 @@ import type { Reorder } from "@/components/library/reorder";
 import { useUi } from "@/components/shell/ui-state";
 import { toastFailure, useAction } from "@/lib/action";
 import { formatDuration } from "@/lib/format";
+import { WITHHELD_ARTIST, WITHHELD_TITLE } from "@/lib/playlist-entries";
 import { dropLine } from "@/lib/reorder";
 
 import { perform } from "./controls";
@@ -159,10 +160,12 @@ function QueueRowText({
   readonly current: boolean;
   readonly showAddedBy: boolean;
 }) {
+  // A song autoplay picked for the Jam's host from a library shared with them alone.
+  const title = entry.withheld === true ? WITHHELD_TITLE : entry.title;
+  const artist = entry.withheld === true ? WITHHELD_ARTIST : entry.artist;
+
   const byline =
-    showAddedBy && entry.addedBy !== null
-      ? `${entry.artist} · Added by ${entry.addedBy.name}`
-      : entry.artist;
+    showAddedBy && entry.addedBy !== null ? `${artist} · Added by ${entry.addedBy.name}` : artist;
 
   return (
     <div className="pointer-events-none flex min-w-0 grow flex-col gap-px">
@@ -173,7 +176,7 @@ function QueueRowText({
           current && !glass && "font-semibold",
         )}
       >
-        {entry.title}
+        {title}
       </span>
       <span
         className={cn("truncate font-sans text-sm/xs", glass ? "text-text/60" : "text-text-muted")}

@@ -95,6 +95,22 @@ export const joinPolicy = (jam: Doc<"jams">): JamJoinPolicy =>
 export const jamShareable = (library: Doc<"libraries">, hostId: Id<"users">): boolean =>
   library.ownerId === hostId || library.visibility === "shared";
 
+/**
+ * Whether a queue entry of the host's may reach the people in their Jam: anything a person chose,
+ * and autoplay's picks from libraries the Jam may share (`jamShareable`). `track` is the entry's
+ * song, `host` the host as a viewer (whose libraries include the song's).
+ */
+export const jamShareableEntry = (
+  host: Viewer,
+  item: Pick<QueueItem, "autoplay">,
+  track: Pick<Doc<"tracks">, "libraryId">,
+): boolean => {
+  if (!item.autoplay) return true;
+  const library = host.libraries.find((candidate) => candidate._id === track.libraryId);
+
+  return library !== undefined && jamShareable(library, host.id);
+};
+
 /** The host as autoplay sees them while they host a Jam: only the libraries a Jam may share. */
 export const jamAutoplayViewer = (host: Viewer): Viewer => {
   const libraries = host.libraries.filter((library) => jamShareable(library, host.id));
