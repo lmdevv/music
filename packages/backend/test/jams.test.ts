@@ -760,6 +760,31 @@ describe("guest accounts from Jam links", () => {
     expect(await failureCode(kept.music.read("account.me", {}))).toBe(ok);
   });
 
+  it("take every session with them, from sign-up and from signing in again", async () => {
+    const { backend, host, code } = await guestsAllowed(await setup());
+    const account = { email: "returning@jam.local", password: "a-guest-password" };
+
+    const fromSignUp = await passwordFlow(backend, {
+      flow: "signUp",
+      ...account,
+      name: "Noor",
+      jamCode: code,
+    });
+
+    // Signing in opens a session of the current generation, in the password check's transaction.
+    const fromSignIn = await passwordFlow(backend, { flow: "signIn", ...account });
+
+    await host.music.run("jam.end", {});
+    await drainScheduled(backend);
+
+    expect(await sessionsOf(backend, [fromSignUp.id])).toEqual([]);
+    expect(await failureCode(fromSignUp.music.read("account.me", {}))).toBe("unauthenticated");
+    expect(await failureCode(fromSignIn.music.read("account.me", {}))).toBe("unauthenticated");
+    expect(await failureCode(passwordFlow(backend, { flow: "signIn", ...account }))).toBe(
+      "unauthenticated",
+    );
+  });
+
   it("go when the cron ends their Jam", async () => {
     const fixture = await guestsAllowed(await setup());
     const guest = await joinAsGuest(fixture.backend, fixture.code);
