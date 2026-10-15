@@ -76,20 +76,26 @@ test("share a playlist: a collaborator adds a song, the owner reorders, then sto
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await signIn(page);
 
-  // The owner makes a playlist from an album.
+  // A friend joins the server.
+  const other = await join(browser, await createInvite(page, "Member"), freshEmail("noor"), friend);
+
+  // The owner makes a playlist from an album the friend can hear too: the copy the friend's
+  // library lists, since an earlier test may leave a private copy of the same files.
+  await other.goto("/albums");
+  await other.getByRole("link", { name: "Dummy" }).first().click();
+  await expect(other.getByRole("heading", { name: "Dummy" }).first()).toBeVisible();
+  const album = other.url();
+
+  await page.goto("/");
   await page.getByRole("button", { name: "New playlist" }).click();
   await page.getByLabel("Name").fill(name);
   await page.getByRole("button", { name: "Create" }).click();
   await expect(page.getByRole("heading", { name }).first()).toBeVisible();
-  await page.goto("/albums");
-  await page.getByRole("link", { name: "Dummy" }).first().click();
+  await page.goto(album);
   await page.getByRole("button", { name: "More actions for Dummy" }).first().click();
   await page.getByRole("menuitem", { name: "Add to playlist" }).hover();
   await page.getByRole("menuitem", { name }).click();
   await expect(page.getByText(`Added to ${name}`)).toBeVisible();
-
-  // A friend joins the server.
-  const other = await join(browser, await createInvite(page, "Member"), freshEmail("noor"), friend);
 
   // The owner shares it with them as a collaborator, and copies the link.
   await page.getByRole("navigation", { name: "Library" }).getByRole("link", { name }).click();
