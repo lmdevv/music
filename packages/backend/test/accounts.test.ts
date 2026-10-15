@@ -916,6 +916,29 @@ describe("names given at sign-up", () => {
     ).toBe("invalid_args");
   });
 
+  it("sign in with the address as typed at sign-up, though it was stored cleaned", async () => {
+    const { backend, owner } = await household();
+    const { code: inviteCode } = await owner.music.run("invites.create", {});
+    const typed = "tab\tafter@music.test";
+
+    await passwordFlow(backend, { flow: "signUp", email: typed, password: PASSWORD, inviteCode });
+
+    expect(
+      await failureCode(
+        passwordFlow(backend, { flow: "signIn", email: typed, password: PASSWORD }),
+      ),
+    ).toBe("succeeded");
+    expect(
+      await failureCode(
+        passwordFlow(backend, {
+          flow: "signIn",
+          email: "tab after@music.test",
+          password: PASSWORD,
+        }),
+      ),
+    ).toBe("succeeded");
+  });
+
   it("leave an account made before the cleaning able to sign in as it was made", async () => {
     const { backend } = await household();
     const email = "tab\tbefore@music.test";

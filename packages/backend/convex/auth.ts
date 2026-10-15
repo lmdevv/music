@@ -2,7 +2,7 @@ import { ConvexCredentials } from "@convex-dev/auth/providers/ConvexCredentials"
 import { convexAuth, retrieveAccount } from "@convex-dev/auth/server";
 import { ConvexError } from "convex/values";
 import { Scrypt } from "lucia";
-import { OptionalName, Text } from "@music/commands/text";
+import { OptionalName, Text, cleanText } from "@music/commands/text";
 import { Result, Schema } from "effect";
 
 import { internal } from "./_generated/api";
@@ -144,10 +144,19 @@ const password = ConvexCredentials<DataModel>({
     }
 
     if (input.flow === "signIn") {
+      // Sign-up keeps an email cleaned (`NewEmail`); one made before that keeps it as typed.
+      const typed = input.email.toLowerCase();
+
+      const id = await ctx.runQuery(internal.users.signInAccountId, {
+        provider: PASSWORD,
+        typed,
+        cleaned: cleanText(typed),
+      });
+
       // Fails on a wrong password before anything reveals that the account is suspended.
       const { account, user } = await retrieveAccount(ctx, {
         provider: PASSWORD,
-        account: { id: input.email.toLowerCase(), secret: input.password },
+        account: { id, secret: input.password },
       }).catch(async (cause: unknown) => {
         const reason = cause instanceof Error ? cause.message : "";
 
