@@ -5,7 +5,7 @@ import { Skeleton } from "@music/ui/components/skeleton";
 import { cn } from "@music/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { MoreHorizontalIcon, PlayIcon } from "lucide-react";
-import { memo, useCallback, useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { TrackMenu } from "@/components/playlists/track-menu";
@@ -15,6 +15,7 @@ import { Artwork, PlayingBars } from "./artwork";
 import { usePlayTracks } from "./cards";
 import { LikeButton } from "./like-button";
 import { dropLine } from "@/lib/reorder";
+import { useWindowed } from "@/lib/use-windowed";
 
 import { MoveButtons, ReorderHandle } from "./reorder";
 import type { Reorder } from "./reorder";
@@ -123,6 +124,30 @@ export function TrackList({
   const play = useRowPlay(tracks, unavailable);
   const playing = status === "playing" || status === "buffering";
 
+  const highlightIndex =
+    highlight === undefined || highlight === null
+      ? -1
+      : tracks.findIndex((track) => track.id === highlight);
+
+  const renderRow = (track: Track, index: number) => (
+    <TrackRow
+      key={`${index}-${track.id}`}
+      track={track}
+      index={index}
+      variant={variant}
+      current={track.id === currentId}
+      playing={track.id === currentId && playing}
+      unavailable={unavailable?.(index) ?? null}
+      withheld={withheld?.(index) ?? false}
+      byline={byline?.(index) ?? null}
+      highlighted={highlight === track.id}
+      count={tracks.length}
+      reorder={reorder}
+      onPlay={play}
+      menuExtra={menuExtra?.(track, index)}
+    />
+  );
+
   return (
     <div role="table" aria-label={label} className="flex flex-col">
       <div
@@ -161,24 +186,104 @@ export function TrackList({
         </span>
         <span aria-hidden className="w-9 shrink-0" />
       </div>
-      {tracks.map((track, index) => (
-        <TrackRow
-          key={`${index}-${track.id}`}
-          track={track}
-          index={index}
-          variant={variant}
-          current={track.id === currentId}
-          playing={track.id === currentId && playing}
-          unavailable={unavailable?.(index) ?? null}
-          withheld={withheld?.(index) ?? false}
-          byline={byline?.(index) ?? null}
-          highlighted={highlight === track.id}
-          count={tracks.length}
-          reorder={reorder}
-          onPlay={play}
-          menuExtra={menuExtra?.(track, index)}
-        />
-      ))}
+      {tracks.length <= BLOCK_ROWS ? (
+        tracks.map(renderRow)
+      ) : (
+        <WindowedRows tracks={tracks} renderRow={renderRow} pinned={highlightIndex} />
+      )}
+    </div>
+  );
+}
+
+/** Rows per block of a long list; blocks far from view keep only their height. */
+const BLOCK_ROWS = 100;
+
+/**
+ * A row's height in pixels until the first block has rendered and measured one (the desktop list
+ * row). Only empty blocks far below use it, so a wrong guess moves nothing on screen.
+ */
+const ESTIMATED_ROW_PX = 52;
+
+/**
+ * The rows of a long list in blocks of {@link BLOCK_ROWS}, rendered only near the visible part of
+ * the list, so a 1,000-song playlist mounts a few hundred rows instead of all of them. The first
+ * block (and the one holding `pinned`, a row to scroll to) renders at once.
+ */
+function WindowedRows({
+  tracks,
+  renderRow,
+  pinned,
+}: {
+  readonly tracks: ReadonlyArray<Track>;
+  readonly renderRow: (track: Track, index: number) => ReactNode;
+  /** A row index whose block always renders, or -1. */
+  readonly pinned: number;
+}) {
+  const [rowHeight, setRowHeight] = useState<number | null>(null);
+
+  const starts = Array.from(
+    { length: Math.ceil(tracks.length / BLOCK_ROWS) },
+    (_, block) => block * BLOCK_ROWS,
+  );
+
+  return starts.map((start) => (
+    <RowBlock
+      key={start}
+      tracks={tracks}
+      start={start}
+      renderRow={renderRow}
+      first={start === 0}
+      pinned={pinned >= start && pinned < start + BLOCK_ROWS}
+      rowHeight={rowHeight}
+      onRowHeight={start === 0 ? setRowHeight : undefined}
+    />
+  ));
+}
+
+function RowBlock({
+  tracks,
+  start,
+  renderRow,
+  first,
+  pinned,
+  rowHeight,
+  onRowHeight,
+}: {
+  readonly tracks: ReadonlyArray<Track>;
+  readonly start: number;
+  readonly renderRow: (track: Track, index: number) => ReactNode;
+  readonly first: boolean;
+  readonly pinned: boolean;
+  readonly rowHeight: number | null;
+  /** The first block reports its rows' measured height, which sizes the empty blocks. */
+  readonly onRowHeight: ((height: number) => void) | undefined;
+}) {
+  const count = Math.min(BLOCK_ROWS, tracks.length - start);
+
+  const windowed = useWindowed({
+    initiallyNear: first || pinned,
+    estimate: (rowHeight ?? ESTIMATED_ROW_PX) * count,
+  });
+
+  const shown = windowed.near || pinned;
+
+  useEffect(() => {
+    if (onRowHeight !== undefined && shown && windowed.height !== null) {
+      onRowHeight(windowed.height / count);
+    }
+  }, [onRowHeight, shown, windowed.height, count]);
+
+  return (
+    <div
+      ref={windowed.ref}
+      role="rowgroup"
+      style={shown ? undefined : { height: windowed.height ?? undefined }}
+    >
+      {shown
+        ? tracks
+            .slice(start, start + count)
+            .map((track, offset) => renderRow(track, start + offset))
+        : null}
     </div>
   );
 }
