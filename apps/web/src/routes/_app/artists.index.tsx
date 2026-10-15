@@ -5,7 +5,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { ArtistCircle, PageHeader } from "@/components/library/cards";
 import { Paged } from "@/components/library/paged";
-import type { PageResult } from "@/components/library/paged";
+import type { PageResult } from "@/components/library/page-chain";
 import { plural } from "@/lib/format";
 
 export const Route = createFileRoute("/_app/artists/")({ component: ArtistsPage });

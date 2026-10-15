@@ -14,7 +14,7 @@ import { PauseIcon, PlayIcon, ShuffleIcon, SkipForwardIcon } from "lucide-react"
 import { ProgressBar } from "@/components/auth/scan-progress";
 import { Artwork } from "@/components/library/artwork";
 import { usePlayAlbum, usePlayArtist, usePlayTracks } from "@/components/library/cards";
-import { perform } from "@/components/player/controls";
+import { perform } from "@/components/player/player-actions";
 import { useQueueActions } from "@/components/playlists/track-menu";
 import { useUi } from "@/components/shell/ui-state";
 import { formatDuration, formatTotal, plural } from "@/lib/format";

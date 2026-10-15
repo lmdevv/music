@@ -2,7 +2,7 @@ import { usePlayer, usePositionReader } from "@music/player/react";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
-import { perform } from "@/components/player/controls";
+import { perform } from "@/components/player/player-actions";
 import { hasMod, isTyping } from "@/lib/keys";
 import { useLike } from "@/lib/use-like";
 

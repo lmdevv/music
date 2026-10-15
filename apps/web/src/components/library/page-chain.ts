@@ -1,0 +1,90 @@
+import { useCallback, useEffect, useState } from "react";
+
+import { splitChain } from "./split-chain";
+
+/** One page from a cursor-paginated command. */
+export interface PageResult<Item> {
+  readonly items: ReadonlyArray<Item>;
+  readonly cursor: string;
+  readonly done: boolean;
+}
+
+/** What a loaded page reported: how many items it shows and whether it is the last. */
+interface PageReport {
+  readonly items: number;
+  readonly done: boolean;
+}
+
+/** The key a page is stored and rendered under. */
+export const keyOf = (cursor: string | null): string => cursor ?? "first";
+
+/**
+ * What a chain of pages shows, from each page's report in order (undefined while it loads): the
+ * list is empty when every page is empty and the last is done, and the first page with items
+ * carries a list header.
+ */
+export const summarizeChain = (reported: ReadonlyArray<PageReport | undefined>) => ({
+  empty: reported.every((page) => page?.items === 0) && reported.at(-1)?.done === true,
+  firstFilled: reported.findIndex((page) => (page?.items ?? 0) > 0),
+});
+
+/**
+ * The cursors of a list loaded page by page, and what each page reported. A page can be empty
+ * while more follow (its rows were in libraries you can't read), so emptiness is a property of the
+ * whole chain: every page loaded so far is empty and the last one is done.
+ */
+export const usePageChain = () => {
+  const [cursors, setCursors] = useState<ReadonlyArray<string | null>>([null]);
+  const [reports, setReports] = useState<ReadonlyMap<string, PageReport>>(new Map());
+
+  const more = useCallback((next: string) => {
+    setCursors((list) => (list.includes(next) ? list : [...list, next]));
+  }, []);
+
+  const report = useCallback((cursor: string | null, page: PageResult<unknown>) => {
+    const { items: shown, done, cursor: next } = page;
+    const items = shown.length;
+
+    setCursors((list) => splitChain(list, cursor, next));
+    setReports((current) => {
+      const previous = current.get(keyOf(cursor));
+
+      if (previous?.items === items && previous.done === done) return current;
+
+      return new Map(current).set(keyOf(cursor), { items, done });
+    });
+  }, []);
+
+  return {
+    cursors,
+    more,
+    report,
+    ...summarizeChain(cursors.map((cursor) => reports.get(keyOf(cursor)))),
+  };
+};
+
+/**
+ * The page at `cursor`, kept on screen while it re-subscribes. A page gets `end` once the page
+ * after it loads, so it keeps covering the same range as rows are added; changing it starts a new
+ * subscription, and showing the previous result meanwhile keeps the list from flashing.
+ */
+export const useHeldPage = <Page>(page: Page | undefined): Page | undefined => {
+  const [held, setHeld] = useState(page);
+
+  // Updating state while rendering, as React documents for values that follow a prop: the render
+  // restarts at once, with no effect and no extra frame.
+  if (page !== undefined && page !== held) setHeld(page);
+
+  return page ?? held;
+};
+
+/** Tells the chain what `page` shows, and where it ends, once it loads or changes. */
+export const useReportPage = (
+  cursor: string | null,
+  page: PageResult<unknown> | undefined,
+  report: (cursor: string | null, page: PageResult<unknown>) => void,
+): void => {
+  useEffect(() => {
+    if (page !== undefined) report(cursor, page);
+  }, [cursor, page, report]);
+};

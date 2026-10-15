@@ -13,7 +13,7 @@ import { PlayingBars } from "@/components/library/artwork";
 import { toastFailure } from "@/lib/action";
 import { formatAgo, formatDuration } from "@/lib/format";
 
-import { deviceIcon } from "./controls";
+import { deviceIcon } from "./player-actions";
 
 const TRANSFER_TIMEOUT_MS = 10_000;
 

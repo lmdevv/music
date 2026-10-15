@@ -6,7 +6,7 @@ import { ListMusicIcon, SearchIcon, XIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Artwork } from "@/components/library/artwork";
-import { deviceIcon, perform, useIsRemote } from "@/components/player/controls";
+import { deviceIcon, perform, useIsRemote } from "@/components/player/player-actions";
 
 import { useUi } from "./ui-state";
 

@@ -19,7 +19,7 @@ import { formatDuration } from "@/lib/format";
 import { WITHHELD_ARTIST, WITHHELD_TITLE } from "@/lib/playlist-entries";
 import { dropLine } from "@/lib/reorder";
 
-import { perform } from "./controls";
+import { perform } from "./player-actions";
 import { focusMove } from "./queue-focus";
 import type { LandedRemoval } from "./queue-focus";
 

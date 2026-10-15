@@ -6,8 +6,8 @@ import { SearchIcon, ShuffleIcon } from "lucide-react";
 import { memo, useDeferredValue, useEffect, useRef, useState } from "react";
 
 import { PageHeader, usePlayTracks } from "@/components/library/cards";
-import { useHeldPage, usePageChain, useReportPage } from "@/components/library/paged";
-import type { PageResult } from "@/components/library/paged";
+import { useHeldPage, usePageChain, useReportPage } from "@/components/library/page-chain";
+import type { PageResult } from "@/components/library/page-chain";
 import { TrackList, TrackListSkeleton } from "@/components/library/track-list";
 import { toastFailure } from "@/lib/action";
 import { formatTotal, plural } from "@/lib/format";

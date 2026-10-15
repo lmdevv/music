@@ -84,20 +84,25 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
 
   // A row clicked while another was selected: it runs once its own preview registers.
   const [runWhenShown, setRunWhenShown] = useState<string | null>(null);
+  const [selectionQuery, setSelectionQuery] = useState(deferred);
 
-  useEffect(() => {
+  // State that follows the query and the results is updated while rendering, as React documents,
+  // rather than in effects: each effect cost the menu another render and commit per keystroke.
+  // A new query starts with nothing selected and the list showing.
+  if (selectionQuery !== deferred) {
+    setSelectionQuery(deferred);
     setActiveId(null);
     setDetail(false);
     setRunWhenShown(null);
-  }, [deferred]);
+  }
 
   // Once results for the query settle, the selection follows its item, so results arriving later
   // never move what Enter runs.
-  useEffect(() => {
-    const [first] = items;
+  const [first] = items;
 
-    if (activeId === null && !searching && first !== undefined) setActiveId(first.id);
-  }, [activeId, items, searching]);
+  if (selectionQuery === deferred && activeId === null && !searching && first !== undefined) {
+    setActiveId(first.id);
+  }
 
   const active = Math.max(
     0,
