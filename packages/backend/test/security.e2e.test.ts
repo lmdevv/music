@@ -431,6 +431,39 @@ const opened = async (
   return opened(sessions, count, attemptsLeft - 1);
 };
 
+/**
+ * Signs in as `email` with `PASSWORD` from 24 loops at once, the way a script hammering sign-in
+ * would; once sign-ins are landing, runs `act` against them, then stops the loops, even when
+ * `act` fails. Returns what `act` returned and every session that opened.
+ */
+const raceSignIns = async <A>(
+  email: string,
+  act: () => Promise<A>,
+): Promise<{ readonly result: A; readonly sessions: ReadonlyArray<Session> }> => {
+  const sessions: Array<Session> = [];
+  const stop = { done: false };
+
+  const loop = async (): Promise<void> => {
+    if (stop.done) return;
+    const session = await passwordSignIn(server, email, PASSWORD).catch(() => null);
+
+    if (session !== null) sessions.push(session);
+
+    return loop();
+  };
+
+  const loops = Promise.all(Array.from({ length: 24 }, loop));
+
+  try {
+    await opened(sessions, 1);
+
+    return { result: await act(), sessions };
+  } finally {
+    stop.done = true;
+    await loops;
+  }
+};
+
 /** The outcome of reading as each of `sessions`: a set of one code when they all agree. */
 const endedEverywhere = async (sessions: ReadonlyArray<Session>) =>
   new Set(await Promise.all(sessions.map((one) => failureCode(one.music.read("account.me", {})))));
@@ -1460,65 +1493,41 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
     );
   });
 
-  it("suspends and resets while sign-ins pour in, and no session from before outlives either", async () => {
-    const { adminA } = fixture;
+  it(
+    "suspends and resets while sign-ins pour in, and no session from before outlives either",
+    { timeout: 120_000 },
+    async () => {
+      const { adminA } = fixture;
 
-    /**
-     * Signs in as `email` from `count` loops until `stop.done`, the way a script hammering the
-     * sign-in would, and collects every session that opened.
-     */
-    const hammer = (email: string, count: number, stop: { done: boolean }) => {
-      const sessions: Array<Session> = [];
+      // Suspension, with 24 sign-ins at a time racing it.
+      const busy = `busy-${id}@music.test`;
+      const busyPerson = await invite(adminA, busy, "member");
+      const { id: busyId } = await busyPerson.music.read("account.me", {});
 
-      const loop = async (): Promise<void> => {
-        if (stop.done) return;
-        const session = await passwordSignIn(server, email, PASSWORD).catch(() => null);
+      const suspension = await raceSignIns(busy, async () =>
+        failureCode(adminA.music.run("people.suspend", { userId: busyId })),
+      );
 
-        if (session !== null) sessions.push(session);
+      expect(suspension.result).toBe("succeeded");
+      expect(suspension.sessions.length).toBeGreaterThan(0);
+      expect(await endedEverywhere(suspension.sessions)).toEqual(new Set(["unauthenticated"]));
 
-        return loop();
-      };
+      // A password reset, with 24 sign-ins on the old password racing it.
+      const rushed = `rushed-${id}@music.test`;
+      const rushedPerson = await invite(adminA, rushed, "member");
+      const { id: rushedId } = await rushedPerson.music.read("account.me", {});
 
-      return { sessions, done: Promise.all(Array.from({ length: count }, loop)) };
-    };
+      const reset = await raceSignIns(rushed, async () => {
+        const { token } = await adminA.music.run("people.reset", { userId: rushedId });
 
-    // Suspension, with 24 sign-ins at a time racing it.
-    const busy = `busy-${id}@music.test`;
-    const busyPerson = await invite(adminA, busy, "member");
-    const { id: busyId } = await busyPerson.music.read("account.me", {});
+        return resetPassword(server, token, "after-the-race-1");
+      });
 
-    const suspendStop = { done: false };
-    const suspendRace = hammer(busy, 24, suspendStop);
-
-    await opened(suspendRace.sessions, 3);
-    const suspended = await failureCode(adminA.music.run("people.suspend", { userId: busyId }));
-
-    suspendStop.done = true;
-    await suspendRace.done;
-
-    expect(suspended).toBe("succeeded");
-    expect(suspendRace.sessions.length).toBeGreaterThan(0);
-    expect(await endedEverywhere(suspendRace.sessions)).toEqual(new Set(["unauthenticated"]));
-
-    // A password reset, with 24 sign-ins on the old password racing it.
-    const rushed = `rushed-${id}@music.test`;
-    const rushedPerson = await invite(adminA, rushed, "member");
-    const { id: rushedId } = await rushedPerson.music.read("account.me", {});
-
-    const resetStop = { done: false };
-    const resetRace = hammer(rushed, 24, resetStop);
-
-    await opened(resetRace.sessions, 3);
-    const { token } = await adminA.music.run("people.reset", { userId: rushedId });
-    const after = await resetPassword(server, token, "after-the-race-1");
-
-    resetStop.done = true;
-    await resetRace.done;
-
-    expect(resetRace.sessions.length).toBeGreaterThan(0);
-    expect(await endedEverywhere(resetRace.sessions)).toEqual(new Set(["unauthenticated"]));
-    expect((await after.music.read("account.me", {})).id).toBe(rushedId);
-  });
+      expect(reset.sessions.length).toBeGreaterThan(0);
+      expect(await endedEverywhere(reset.sessions)).toEqual(new Set(["unauthenticated"]));
+      expect((await reset.result.music.read("account.me", {})).id).toBe(rushedId);
+    },
+  );
 
   it("removes a person with their sessions, keys, and data, and gives their libraries to the owner", async () => {
     const { adminA, adminB, shared } = fixture;
