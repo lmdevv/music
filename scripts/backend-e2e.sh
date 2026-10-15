@@ -25,9 +25,12 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 base="${BASE_PORT:-3810}"
 e2e_port="${E2E_PORT:-3002}"
 suites=("$@")
-# Docker names allow letters, digits, `_`, `.`, and `-`.
+# Docker names allow letters, digits, `_`, `.`, and `-`. A name that needed changing gets a
+# suffix from the name as given, so two names that clean up the same still differ.
 prefix="${E2E_NAME:-e2e-$(basename "$root")}"
-prefix="${prefix//[^a-zA-Z0-9_.-]/-}"
+if [[ "$prefix" =~ [^a-zA-Z0-9_.-] ]]; then
+  prefix="${prefix//[^a-zA-Z0-9_.-]/-}-$(printf '%s' "$prefix" | cksum | cut -d' ' -f1)"
+fi
 [[ ${#suites[@]} -gt 0 ]] || suites=(security cli media web)
 started=()
 results="$(mktemp -d)"

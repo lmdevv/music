@@ -38,6 +38,15 @@ write_track() {
 }
 export -f write_track
 
+# Gives one existing file a new title, keeping its audio, pictures, and other tags.
+retitle_track() {
+  local target="$1" title="$2"
+  ffmpeg -v error -y -i "$target" -map 0 -c copy -metadata title="$title" \
+    "$target.part.${target##*.}"
+  mv -- "$target.part.${target##*.}" "$target"
+}
+export -f retitle_track
+
 generate() {
   local tracks="${1:-20000}" albums="${2:-1500}" artists="${3:-400}"
   local started genres album artist count first format year genre folder number title
@@ -69,26 +78,22 @@ generate() {
   done
 
   # A distinct 16x16 cover per album, so each album has artwork of its own.
-  tr '\t\n' '\0\0' <"$work/covers.tsv" | xargs -0 -n 2 -P "$jobs" bash -c \
+  tr '\t\n' '\0\0' <"$work/covers.tsv" | xargs -0 -r -n 2 -P "$jobs" bash -c \
     'ffmpeg -v error -y -f lavfi -i "color=c=0x$(printf %06x $(( ($0 * 2654435761) % 16777216 ))):s=16x16" -frames:v 1 "$1"'
-  tr '\t\n' '\0\0' <"$work/tracks.tsv" | xargs -0 -n 8 -P "$jobs" bash -c 'write_track "$0" "$@"'
+  tr '\t\n' '\0\0' <"$work/tracks.tsv" | xargs -0 -r -n 8 -P "$jobs" bash -c 'write_track "$0" "$@"'
 
   echo "Generated $(find "$dir" -type f \( -name '*.flac' -o -name '*.mp3' \) | wc -l) tracks in $dir" \
     "($(du -sh "$dir" | cut -f1)) in $((($(date +%s%N) - started) / 1000000)) ms"
 }
 
 mutate() {
-  local count="${1:-100}" file title stamp
+  local count="${1:-100}" file stamp
   stamp="$(date +%s)"
-  make_sources
   : >"$work/tracks.tsv"
   while IFS= read -r file; do
-    title="Changed ${stamp} $(basename "$file")"
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$work/source.${file##*.}" "$file" "$title" \
-      "$(basename "$(dirname "$(dirname "$file")")")" "$(basename "$(dirname "$file")")" \
-      "$(basename "$file" | cut -c1-2 | sed 's/^0//')" 2000 Rock >>"$work/tracks.tsv"
+    printf '%s\t%s\n' "$file" "Changed ${stamp} $(basename "$file")" >>"$work/tracks.tsv"
   done < <(find "$dir" -type f \( -name '*.flac' -o -name '*.mp3' \) | LC_ALL=C sort | head -n "$count")
-  tr '\t\n' '\0\0' <"$work/tracks.tsv" | xargs -0 -n 8 -P "$jobs" bash -c 'write_track "$0" "$@"'
+  tr '\t\n' '\0\0' <"$work/tracks.tsv" | xargs -0 -r -n 2 -P "$jobs" bash -c 'retitle_track "$0" "$@"'
   echo "Retitled $(wc -l <"$work/tracks.tsv") tracks in $dir"
 }
 
