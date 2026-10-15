@@ -3,7 +3,7 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -75,7 +75,8 @@ export function UiStateProvider({ children }: { readonly children: ReactNode }) 
   // don't rebuild when some other part of the UI opens or closes.
   const surface = useRef({ playOnPopoverMounted, nowPlayingOpen: nowPlaying !== null });
 
-  useEffect(() => {
+  // Right after the commit, before another event can call the openers.
+  useLayoutEffect(() => {
     surface.current = { playOnPopoverMounted, nowPlayingOpen: nowPlaying !== null };
   }, [playOnPopoverMounted, nowPlaying]);
 

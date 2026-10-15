@@ -15,6 +15,7 @@ import { Artwork, PlayingBars } from "./artwork";
 import { usePlayTracks } from "./cards";
 import { LikeButton } from "./like-button";
 import { dropLine } from "@/lib/reorder";
+import { useIsDesktop } from "@/lib/use-media";
 import { useWindowed } from "@/lib/use-windowed";
 
 import { MoveButtons, ReorderHandle } from "./reorder";
@@ -141,7 +142,8 @@ export function TrackList({
       withheld={withheld?.(index) ?? false}
       byline={byline?.(index) ?? null}
       highlighted={highlight === track.id}
-      count={tracks.length}
+      // Only the reorder controls use it; without them a song added or removed re-renders no rows.
+      count={reorder === undefined ? 0 : tracks.length}
       reorder={reorder}
       onPlay={play}
       menuExtra={menuExtra}
@@ -240,9 +242,17 @@ function WindowedRows({
   ));
 }
 
-/** The height of one row of `block`, which holds `count` rows; null until it has a size. */
+/**
+ * The height of one row of `block`, which holds `count` rows; null until it has a size, or after the
+ * layout crossed the desktop breakpoint, where row heights change.
+ */
 const useRowHeight = (block: HTMLElement | null, count: number): number | null => {
-  const [height, setHeight] = useState<number | null>(null);
+  const desktop = useIsDesktop();
+
+  const [measured, setMeasured] = useState<{
+    readonly height: number;
+    readonly desktop: boolean;
+  } | null>(null);
 
   useEffect(() => {
     if (block === null || count === 0) return undefined;
@@ -250,15 +260,15 @@ const useRowHeight = (block: HTMLElement | null, count: number): number | null =
     const observer = new ResizeObserver((entries) => {
       const size = entries.at(-1)?.borderBoxSize[0]?.blockSize;
 
-      if (size !== undefined && size > 0) setHeight(size / count);
+      if (size !== undefined && size > 0) setMeasured({ height: size / count, desktop });
     });
 
     observer.observe(block);
 
     return () => observer.disconnect();
-  }, [block, count]);
+  }, [block, count, desktop]);
 
-  return height;
+  return measured !== null && measured.desktop === desktop ? measured.height : null;
 };
 
 function RowBlock({

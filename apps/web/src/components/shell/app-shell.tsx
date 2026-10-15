@@ -1,6 +1,7 @@
-import { usePlayer } from "@music/player/react";
+import { useCurrentTrack } from "@music/player/react";
 import { TooltipProvider } from "@music/ui/components/tooltip";
 import { CatchBoundary, useLocation } from "@tanstack/react-router";
+import type { ErrorComponentProps } from "@tanstack/react-router";
 import { Suspense, lazy, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
@@ -16,6 +17,11 @@ import { KeyboardShortcuts } from "./keyboard";
 import { PhoneChrome } from "./phone-chrome";
 import { Sidebar } from "./sidebar";
 import { UiStateProvider, useUi } from "./ui-state";
+
+/** A surface's code didn't load: offline, or the server was upgraded and the old chunk is gone. */
+class SurfaceLoadError extends Error {
+  override readonly name = "SurfaceLoadError";
+}
 
 /** A surface the shell loads on demand, and the function that loads its chunk ahead of time. */
 interface Surface {
@@ -45,7 +51,7 @@ const surface = (load: () => Promise<() => ReactNode>): Surface => {
     } catch (cause) {
       Pending = pending();
 
-      throw cause;
+      throw new SurfaceLoadError("A surface's code didn't load", { cause });
     }
   };
 
@@ -104,23 +110,41 @@ const usePreloadSurfaces = (): void => {
   );
 };
 
-const NoSurface = () => null;
+/** Renders nothing in place of a surface whose code didn't load; any other error goes on up. */
+function NoSurface({ error }: ErrorComponentProps): ReactNode {
+  if (!(error instanceof SurfaceLoadError)) throw error;
 
-/** Says that a surface's code didn't load, with a way to reload the page and get it. */
-const reportUnloaded = () => {
-  toast.error("Couldn't load this part of [music]. Reload the page to try again.", {
-    action: { label: "Reload", onClick: () => window.location.reload() },
-  });
-};
+  return null;
+}
 
 /**
- * A lazily loaded surface. A chunk that fails to load (offline, or the server was upgraded and the
- * old chunk is gone) reports itself and renders nothing, rather than reaching the route's error
- * screen, which would replace the shell and stop the music. A new `attempt` tries again.
+ * A lazily loaded surface. A chunk that fails to load closes the surface and says so, rather than
+ * reaching the route's error screen, which would replace the shell and stop the music. A bug in a
+ * loaded surface still reaches that screen. A new `attempt` tries the chunk again.
  */
-function Loaded({ attempt, children }: { readonly attempt: number; readonly children: ReactNode }) {
+function Loaded({
+  attempt,
+  onFailed,
+  children,
+}: {
+  readonly attempt: number;
+  /** Closes the surface, so the shell (and its shortcuts) don't wait on one that isn't there. */
+  readonly onFailed: () => void;
+  readonly children: ReactNode;
+}) {
   return (
-    <CatchBoundary getResetKey={() => attempt} errorComponent={NoSurface} onCatch={reportUnloaded}>
+    <CatchBoundary
+      getResetKey={() => attempt}
+      errorComponent={NoSurface}
+      onCatch={(error) => {
+        if (!(error instanceof SurfaceLoadError)) return;
+
+        onFailed();
+        toast.error("Couldn't load this part of [music]. Reload the page to try again.", {
+          action: { label: "Reload", onClick: () => window.location.reload() },
+        });
+      }}
+    >
       <Suspense fallback={null}>{children}</Suspense>
     </CatchBoundary>
   );
@@ -130,7 +154,15 @@ function Loaded({ attempt, children }: { readonly attempt: number; readonly chil
  * Mounts a lazily loaded surface the first time it opens, and keeps it for its close animation.
  * Each opening is a new attempt, so a surface that failed to load tries again.
  */
-function OnDemand({ open, children }: { readonly open: boolean; readonly children: ReactNode }) {
+function OnDemand({
+  open,
+  onFailed,
+  children,
+}: {
+  readonly open: boolean;
+  readonly onFailed: () => void;
+  readonly children: ReactNode;
+}) {
   const opened = useOpenedOnce(open);
   const [attempt, setAttempt] = useState(0);
   const [wasOpen, setWasOpen] = useState(open);
@@ -141,7 +173,11 @@ function OnDemand({ open, children }: { readonly open: boolean; readonly childre
     if (open) setAttempt((count) => count + 1);
   }
 
-  return opened ? <Loaded attempt={attempt}>{children}</Loaded> : null;
+  return opened ? (
+    <Loaded attempt={attempt} onFailed={onFailed}>
+      {children}
+    </Loaded>
+  ) : null;
 }
 
 /**
@@ -165,8 +201,11 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
 
 /** The dialogs and sheets the shell opens over every page. */
 function Surfaces() {
-  const { commandOpen, newPlaylist, nowPlaying, setNowPlaying, jamOpen } = useUi();
-  const player = usePlayer();
+  const ui = useUi();
+  const { commandOpen, setCommandOpen, newPlaylist, closeNewPlaylist } = ui;
+  const { nowPlaying, setNowPlaying, jamOpen, setJamOpen } = ui;
+  // Only whether a song is loaded: a position report or queue change doesn't reach the surfaces.
+  const hasTrack = useCurrentTrack().trackId !== null;
   const { pathname } = useLocation();
 
   usePreloadSurfaces();
@@ -179,17 +218,17 @@ function Surfaces() {
 
   return (
     <>
-      <OnDemand open={commandOpen}>
+      <OnDemand open={commandOpen} onFailed={() => setCommandOpen(false)}>
         <CommandMenu />
       </OnDemand>
-      <OnDemand open={newPlaylist !== null}>
+      <OnDemand open={newPlaylist !== null} onFailed={closeNewPlaylist}>
         <NewPlaylistDialog />
       </OnDemand>
-      <OnDemand open={nowPlaying !== null && player.track !== null}>
+      <OnDemand open={nowPlaying !== null && hasTrack} onFailed={() => setNowPlaying(null)}>
         <NowPlaying />
       </OnDemand>
       <DeviceSheet />
-      <OnDemand open={jamOpen}>
+      <OnDemand open={jamOpen} onFailed={() => setJamOpen(false)}>
         <JamPanel />
       </OnDemand>
     </>
@@ -197,9 +236,8 @@ function Surfaces() {
 }
 
 function Frame({ children }: { readonly children: ReactNode }) {
-  const { queueOpen } = useUi();
-  const player = usePlayer();
-  const hasTrack = player.track !== null;
+  const { queueOpen, setQueueOpen } = useUi();
+  const hasTrack = useCurrentTrack().trackId !== null;
 
   return (
     <div className="flex h-dvh flex-col bg-bg dark:bg-dark-canvas">
@@ -216,7 +254,7 @@ function Frame({ children }: { readonly children: ReactNode }) {
           </main>
         </div>
         {queueOpen && hasTrack ? (
-          <Loaded attempt={0}>
+          <Loaded attempt={0} onFailed={() => setQueueOpen(false)}>
             <QueuePanel />
           </Loaded>
         ) : null}

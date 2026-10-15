@@ -1,6 +1,8 @@
-import { HeadContent, Outlet, createRootRoute, lazyRouteComponent } from "@tanstack/react-router";
+import { CatchBoundary, HeadContent, Outlet, createRootRoute } from "@tanstack/react-router";
 import { ThemeProvider } from "next-themes";
 import { Suspense, lazy } from "react";
+
+import { LazyRouteError } from "@/components/lazy-route-error";
 
 import "../index.css";
 
@@ -13,7 +15,7 @@ const Toaster = lazy(async () => ({
 
 export const Route = createRootRoute({
   component: RootComponent,
-  errorComponent: lazyRouteComponent(() => import("@/components/route-error"), "RouteError"),
+  errorComponent: LazyRouteError,
   head: () => ({
     meta: [
       { title: "[music]" },
@@ -21,6 +23,8 @@ export const Route = createRootRoute({
     ],
   }),
 });
+
+const NoToaster = () => null;
 
 function RootComponent() {
   return (
@@ -34,9 +38,12 @@ function RootComponent() {
     >
       <HeadContent />
       <Outlet />
-      <Suspense fallback={null}>
-        <Toaster />
-      </Suspense>
+      {/* Without its chunk there are no toasts, but the app (and the music) carries on. */}
+      <CatchBoundary getResetKey={() => 0} errorComponent={NoToaster}>
+        <Suspense fallback={null}>
+          <Toaster />
+        </Suspense>
+      </CatchBoundary>
     </ThemeProvider>
   );
 }

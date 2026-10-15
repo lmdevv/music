@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { scrollRootOf } from "./scroll-root";
+import { useIsDesktop } from "./use-media";
 
 /** How far past the visible part of the list a block stays rendered, as a share of its height. */
 const WINDOW_MARGIN = "150% 0px";
@@ -34,10 +35,14 @@ export interface WindowedOptions {
   readonly size: number;
 }
 
-/** A block's rendered height, and how many items it held then. */
+/**
+ * A block's rendered height, how many items it held, and the layout it was measured in: rows are
+ * taller in the desktop layout, so a height from the other side of the breakpoint is stale.
+ */
 interface Measured {
   readonly height: number;
   readonly size: number;
+  readonly desktop: boolean;
 }
 
 /**
@@ -54,6 +59,7 @@ export const useWindowed = ({
   const [node, setNode] = useState<HTMLElement | null>(null);
   const [near, setNear] = useState(initiallyNear);
   const [measured, setMeasured] = useState<Measured | null>(null);
+  const desktop = useIsDesktop();
 
   useEffect(() => {
     if (node === null) return undefined;
@@ -79,15 +85,18 @@ export const useWindowed = ({
     const observer = new ResizeObserver((entries) => {
       const blockSize = entries.at(-1)?.borderBoxSize[0]?.blockSize;
 
-      if (blockSize !== undefined && blockSize > 0) setMeasured({ height: blockSize, size });
+      if (blockSize !== undefined && blockSize > 0) {
+        setMeasured({ height: blockSize, size, desktop });
+      }
     });
 
     observer.observe(node);
 
     return () => observer.disconnect();
-  }, [node, near, size]);
+  }, [node, near, size, desktop]);
 
-  const height = measured !== null && measured.size === size ? measured.height : estimate;
+  const current = measured !== null && measured.size === size && measured.desktop === desktop;
+  const height = current ? measured.height : estimate;
 
   // A block with no height to keep renders its rows, so it can't collapse to nothing.
   return { ref: setNode, near: near || height === null, height };

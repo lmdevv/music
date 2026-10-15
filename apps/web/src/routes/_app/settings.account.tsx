@@ -26,9 +26,12 @@ function AccountSettings() {
 
   const [save, saving] = useAction(
     async () => {
-      await rename({ name: name.trim() });
-      // The saved name shows again, so a later rename elsewhere isn't hidden behind this draft.
-      setDraft(null);
+      const submitted = name.trim();
+
+      await rename({ name: submitted });
+      // The saved name shows again, so a later rename elsewhere isn't hidden behind this draft,
+      // unless the person kept typing while it saved.
+      setDraft((current) => (current?.trim() === submitted ? null : current));
     },
     { success: () => "Saved your name" },
   );
