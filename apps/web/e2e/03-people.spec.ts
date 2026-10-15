@@ -88,6 +88,7 @@ test("an admin invites a guest, changes their role, resets, suspends, and remove
 
   // A reset link sets a new password, signs in, and ends the other sessions.
   await personAction(page, name, "Create password reset link…");
+  await expect(page.getByText(/also turns off this person's API keys/)).toBeVisible();
   await page.getByRole("button", { name: "Create link" }).click();
 
   const resetLink = (await page.getByTestId("reset-link").textContent()) ?? "";
@@ -99,6 +100,7 @@ test("an admin invites a guest, changes their role, resets, suspends, and remove
 
   await resetter.goto(resetLink);
   await expect(resetter.getByRole("heading", { name: "Choose a new password" })).toBeVisible();
+  await expect(resetter.getByText(/also turns off this person's API keys/)).toBeVisible();
   await resetter.getByLabel("New password").fill("a-brand-new-password");
   await resetter.getByRole("button", { name: "Set password and sign in" }).click();
   await expect(resetter.getByRole("navigation", { name: "Library" })).toBeVisible();

@@ -68,7 +68,8 @@ export default defineSchema({
     /**
      * API keys created up to this time no longer work, nor do the sessions they opened. Demotion
      * to guest sets it, so a later promotion can't revive keys the batched revocation
-     * (`people:revokeKeys`) has not reached yet.
+     * (`people:revokeKeys`) has not reached yet, and so does a password reset, since whoever had
+     * the account may have made keys.
      */
     keysValidAfter: v.optional(v.number()),
     /** Carried from the sign-up form to `createOrUpdateUser`; never stored on a created user. */

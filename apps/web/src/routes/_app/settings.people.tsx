@@ -346,7 +346,7 @@ function ResetForm({ person, onDone }: { readonly person: Person; readonly onDon
     return (
       <DialogContent
         title={`Reset ${name}'s password?`}
-        description="You get a link to send them. It works once, lasts 24 hours, and replaces any earlier link. Choosing a new password signs them out everywhere else."
+        description="You get a link to send them. It works once, lasts 24 hours, and replaces any earlier link. Choosing a new password signs them out everywhere else. Signing in with the new password also turns off this person's API keys."
       >
         <DialogFooter>
           <DialogClose render={<Button variant="ghost" />}>Cancel</DialogClose>

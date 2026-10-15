@@ -6,6 +6,7 @@
  */
 import { v } from "convex/values";
 
+import { internal } from "./_generated/api";
 import { internalMutation } from "./_generated/server";
 import { createPasswordReset } from "./handlers/people";
 import { fail } from "./lib/errors";
@@ -17,7 +18,8 @@ import { SUSPENDED_MESSAGE } from "./lib/viewer";
  * Redeems the reset link with this token hash, in one transaction: checks the link and that its
  * maker may still reset the person, sets `secret` (the new password's hash) on the person's own
  * password account, found by their ID rather than by the email, uses the link up, and ends every
- * session they had. Returns the person, or fails saying why the link does not work. Nothing that
+ * session they had, and turns off every API key they had. Returns the person, or fails saying why
+ * the link does not work. Nothing that
  * changes who may reset them can land between the check and the new password.
  */
 export const redeem = internalMutation({
@@ -51,6 +53,12 @@ export const redeem = internalMutation({
 
     await ctx.db.patch(account._id, { secret });
     await ctx.db.patch(reset._id, { usedAt: Date.now() });
+
+    // Whoever had the account may have made API keys: every key made so far stops at once, with
+    // the sessions it opened (`keysValidAfter`); the rows are revoked in batches. Keys made
+    // after this work.
+    await ctx.db.patch(user._id, { keysValidAfter: Date.now() });
+    await ctx.scheduler.runAfter(0, internal.people.revokeKeys, { userId: user._id, cursor: null });
 
     // Every session ends, and the one the reset signs in with opens in the new generation, here,
     // so it is the only one left.

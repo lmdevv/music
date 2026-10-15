@@ -374,13 +374,15 @@ function RenameForm({
 }
 
 /**
- * Who hears a private library, said to its owner. Admins manage only libraries they hear, so
- * besides its owner only the server's owner may rename or rescan it, and never listen.
+ * Who hears a private library, said to its owner. It is hidden from other members and admins,
+ * not from the server's owner, who runs the machine: they may rename or rescan it, and could
+ * remove it and add the folder again as their own, which its owner would see.
  */
 const privateHint = (serverOwner: boolean): string =>
   serverOwner
     ? "Only you."
-    : "Only you. The server's owner can rename or rescan it, but can't listen or let anyone in.";
+    : "Only you, hidden from other members and admins. Not from the server's owner, who runs " +
+      "the machine: they can rename or rescan it, and removing it is something you'd see.";
 
 const VISIBILITY_HINTS: Readonly<
   Record<LibraryVisibility, (owner: string, serverOwner: boolean) => string>

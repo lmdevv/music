@@ -84,7 +84,7 @@ function ResetForm({
     <AuthLayout eyebrow="RESET PASSWORD">
       <AuthHeading
         title="Choose a new password"
-        lead={`For ${reset.name ?? reset.email} on ${host}. You'll be signed out everywhere else.`}
+        lead={`For ${reset.name ?? reset.email} on ${host}. You'll be signed out everywhere else. Signing in with the new password also turns off this person's API keys.`}
       />
       <form className="flex flex-col gap-7" onSubmit={(event) => void submit(event)}>
         <div className="flex flex-col gap-4">

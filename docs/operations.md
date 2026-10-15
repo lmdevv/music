@@ -199,7 +199,11 @@ Every service runs as its own unprivileged user; only the start-up script runs a
   and keep their own playlists, likes, history, and API keys. `guest`s only hear the libraries
   they were added to, and any they own (from before they became a guest), and have no API keys.
 - **Libraries.** `shared` is everyone but guests, `restricted` is only the people added, and
-  `private` is only the library's owner. Admins rename and rescan the libraries they can listen
+  `private` is only the library's owner. Private hides a library from other members and admins,
+  not from the server's owner: they run the machine and can always reach the files, directly or
+  by removing the person (whose libraries then go to them), and they could remove the library and
+  add its folder again as their own. Either is visible to the library's owner, and the server's
+  owner can never quietly let anyone into someone else's library. Admins rename and rescan the libraries they can listen
   to; the server's owner manages every library. Only a library's own owner, or the
   server's owner, removes it. Admins see that the other libraries exist (name, owner,
   visibility, song count) but not their folders. Only a library's own owner changes who listens

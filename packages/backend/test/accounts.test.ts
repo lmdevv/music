@@ -420,6 +420,34 @@ describe("access to a library whose owner doesn't run libraries", () => {
   });
 });
 
+describe("API keys around a password reset", () => {
+  it("stop at once with the reset, sessions too, while keys made after work", async () => {
+    const { backend, admin, member } = await household();
+    const { key } = await member.music.run("keys.create", { name: "Taken over" });
+    const cli = await keySignIn(backend, key);
+
+    if (cli === null) throw new Error("A fresh key did not sign in");
+
+    const { token } = await admin.music.run("people.reset", { userId: member.userId });
+
+    // The batches that revoke the key rows wait: the key is off at once regardless.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    try {
+      const back = await redeem(backend, token);
+
+      expect(await failureCode(cli.read("account.me", {}))).toBe("unauthenticated");
+      expect(await keySignIn(backend, key)).toBeNull();
+
+      const fresh = await back.music.run("keys.create", { name: "Mine again" });
+
+      expect(await keySignIn(backend, fresh.key)).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("API keys around a demotion to guest", () => {
   it("stop at once, before the batched revocation, and stay stopped after a promotion", async () => {
     const { backend, owner, member } = await household();

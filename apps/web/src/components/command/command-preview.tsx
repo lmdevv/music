@@ -42,7 +42,9 @@ const SECRET_COPY = {
   invite: { title: "Share the invite link", meta: "It works once and expires in 7 days." },
   reset: {
     title: "Share the reset link",
-    meta: "It works once, expires in 24 hours, and signs them out everywhere else.",
+    meta:
+      "It works once, expires in 24 hours, and signs them out everywhere else. " +
+      "Signing in with the new password also turns off this person's API keys.",
   },
 } as const;
 
