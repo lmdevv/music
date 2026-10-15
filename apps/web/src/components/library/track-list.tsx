@@ -1,11 +1,11 @@
 import type { TrackId } from "@music/commands/ids";
 import type { Track } from "@music/commands/models";
-import { usePlayer } from "@music/player/react";
+import { useCurrentTrack } from "@music/player/react";
 import { Skeleton } from "@music/ui/components/skeleton";
 import { cn } from "@music/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { MoreHorizontalIcon, PlayIcon } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
 import { TrackMenu } from "@/components/playlists/track-menu";
@@ -53,7 +53,7 @@ const formatCell = "hidden w-27.5 shrink-0 font-mono text-xs/xs text-text-muted 
 
 /**
  * Plays a song from a list on double click (desktop) or tap (phone), queueing the list's songs
- * that can play.
+ * that can play. Stable while the list is, so unchanged rows skip re-rendering.
  */
 const useRowPlay = (
   tracks: ReadonlyArray<Track>,
@@ -61,19 +61,22 @@ const useRowPlay = (
 ) => {
   const play = usePlayTracks();
 
-  return (index: number) => {
-    if (unavailable === undefined) {
-      void play(tracks, { index });
+  return useCallback(
+    (index: number) => {
+      if (unavailable === undefined) {
+        void play(tracks, { index });
 
-      return;
-    }
+        return;
+      }
 
-    const playable = tracks.filter((_, position) => unavailable(position) === null);
+      const playable = tracks.filter((_, position) => unavailable(position) === null);
 
-    const before = tracks.slice(0, index).filter((_, position) => unavailable(position) === null);
+      const before = tracks.slice(0, index).filter((_, position) => unavailable(position) === null);
 
-    void play(playable, { index: before.length });
-  };
+      void play(playable, { index: before.length });
+    },
+    [play, tracks, unavailable],
+  );
 };
 
 /**
@@ -115,10 +118,10 @@ export function TrackList({
   /** Lets rows be moved; the list's order then comes back from the server. */
   readonly reorder?: ListReorder | undefined;
 }) {
-  const player = usePlayer();
+  // Only the current song and status: a position report or queue change re-renders no rows.
+  const { trackId: currentId, status } = useCurrentTrack();
   const play = useRowPlay(tracks, unavailable);
-  const currentId = player.track?.id ?? null;
-  const playing = player.status === "playing" || player.status === "buffering";
+  const playing = status === "playing" || status === "buffering";
 
   return (
     <div role="table" aria-label={label} className="flex flex-col">
@@ -172,7 +175,7 @@ export function TrackList({
           highlighted={highlight === track.id}
           count={tracks.length}
           reorder={reorder}
-          onPlay={() => play(index)}
+          onPlay={play}
           menuExtra={menuExtra?.(track, index)}
         />
       ))}
@@ -231,7 +234,11 @@ const movable = (reorder: ListReorder | undefined, index: number) =>
       }
     : { props: {}, line: null };
 
-function TrackRow({
+/**
+ * One song row. Memoized: a list re-renders when the current song changes, and only the rows whose
+ * props changed (the old and new current song) render again.
+ */
+const TrackRow = memo(function TrackRow({
   track,
   index,
   variant,
@@ -257,10 +264,12 @@ function TrackRow({
   readonly highlighted: boolean;
   readonly count: number;
   readonly reorder: ListReorder | undefined;
-  readonly onPlay: () => void;
+  /** Plays the list from the row at `index`. */
+  readonly onPlay: (index: number) => void;
   readonly menuExtra: ReactNode;
 }) {
   const number = track.trackNumber ?? index + 1;
+  const playRow = () => onPlay(index);
   const row = useRef<HTMLDivElement>(null);
   const move = movable(reorder, index);
 
@@ -290,7 +299,7 @@ function TrackRow({
       aria-label={`Play ${track.title}`}
       onClick={(event) => {
         event.stopPropagation();
-        onPlay();
+        playRow();
       }}
       // Transparent until hovered or focused, never display:none, so keyboards and screen readers
       // reach it.
@@ -306,7 +315,7 @@ function TrackRow({
       role="row"
       aria-current={current ? "true" : undefined}
       data-highlighted={highlighted ? "" : undefined}
-      onDoubleClick={onPlay}
+      onDoubleClick={playRow}
       {...move.props}
       className={cn(
         rowClassName(variant),
@@ -360,7 +369,7 @@ function TrackRow({
         <button
           type="button"
           aria-label={`Play ${track.title}`}
-          onClick={onPlay}
+          onClick={playRow}
           className="absolute inset-0 lg:hidden"
         />
         <span
@@ -423,7 +432,7 @@ function TrackRow({
       </span>
     </div>
   );
-}
+});
 
 /**
  * A song that can't play here, greyed out like Spotify's unavailable songs: its file is gone, or

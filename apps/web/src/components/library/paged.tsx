@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { scrollRootOf } from "../../lib/scroll-root";
+
 import { splitChain } from "./split-chain";
 
 /** One page from a cursor-paginated command. */
@@ -161,7 +163,7 @@ function Page<Item>({
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) onMore(more);
       },
-      { rootMargin: "600px" },
+      { root: scrollRootOf(node), rootMargin: "600px" },
     );
 
     observer.observe(node);

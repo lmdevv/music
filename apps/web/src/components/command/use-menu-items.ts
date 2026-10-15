@@ -37,7 +37,7 @@ interface MenuItems {
  */
 export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
   const player = usePlayer();
-  const ui = useUi();
+  const { openPlayOn, openNewPlaylist, setNowPlaying } = useUi();
   const navigate = useNavigate();
   const me = useRead("account.me", {});
   const home = useRead("library.home", {});
@@ -54,6 +54,8 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
   if (search !== undefined && search !== lastSearch) setLastSearch(search);
 
   const results = search ?? lastSearch;
+  // The actions only change with whether something plays, not with each queue or position update.
+  const hasTrack = player.track !== null;
 
   const actions = useMemo((): ReadonlyArray<Item> => {
     const go = (to: Route) => () => {
@@ -98,7 +100,7 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
         label: "Choose",
         run: () => {
           onClose();
-          ui.openPlayOn();
+          openPlayOn();
         },
       },
       {
@@ -112,12 +114,12 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
         label: "Create",
         run: () => {
           onClose();
-          ui.openNewPlaylist();
+          openNewPlaylist();
         },
       },
     ];
 
-    if (player.track !== null) {
+    if (hasTrack) {
       quick.push({
         kind: "action",
         id: "open-queue",
@@ -128,7 +130,7 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
         label: "Open",
         run: () => {
           onClose();
-          ui.setNowPlaying("queue");
+          setNowPlaying("queue");
         },
       });
     }
@@ -144,18 +146,26 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
       run: go(screen.to),
     }));
 
-    const registry = offeredCommands({ role, playing: player.track !== null }).map(
-      ({ name, fields }): Item => ({
-        kind: "command",
-        id: `cmd-${name}`,
-        section: "Commands",
-        name,
-        fields,
-      }),
-    );
+    const registry = offeredCommands({ role, playing: hasTrack }).map(({ name, fields }): Item => ({
+      kind: "command",
+      id: `cmd-${name}`,
+      section: "Commands",
+      name,
+      fields,
+    }));
 
     return [...quick, ...registry, ...screens];
-  }, [role, navigate, onClose, player.track, playTracks, readLikes, ui]);
+  }, [
+    role,
+    navigate,
+    onClose,
+    hasTrack,
+    playTracks,
+    readLikes,
+    openPlayOn,
+    openNewPlaylist,
+    setNowPlaying,
+  ]);
 
   const items = useMemo(
     (): ReadonlyArray<Item> =>

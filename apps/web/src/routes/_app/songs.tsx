@@ -3,7 +3,7 @@ import { Button } from "@music/ui/components/button";
 import { Input } from "@music/ui/components/input";
 import { createFileRoute } from "@tanstack/react-router";
 import { SearchIcon, ShuffleIcon } from "lucide-react";
-import { useDeferredValue, useEffect, useRef, useState } from "react";
+import { memo, useDeferredValue, useEffect, useRef, useState } from "react";
 
 import { PageHeader, usePlayTracks } from "@/components/library/cards";
 import { useHeldPage, usePageChain, useReportPage } from "@/components/library/paged";
@@ -12,6 +12,8 @@ import { TrackList, TrackListSkeleton } from "@/components/library/track-list";
 import { toastFailure } from "@/lib/action";
 import { formatTotal, plural } from "@/lib/format";
 import { readPages } from "@/lib/read-pages";
+import { scrollRootOf } from "@/lib/scroll-root";
+import { useWindowed } from "@/lib/use-windowed";
 
 export const Route = createFileRoute("/_app/songs")({ component: SongsPage });
 
@@ -128,7 +130,11 @@ function AllSongs() {
   );
 }
 
-function SongPage({
+/**
+ * One live page of the Songs list. Memoized, so loading the next page doesn't re-render the pages
+ * above it, and windowed, so pages far from view keep only their height.
+ */
+const SongPage = memo(function SongPage({
   cursor,
   end,
   header,
@@ -148,6 +154,7 @@ function SongPage({
   const page = useHeldPage(useRead("tracks.list", { cursor, end, limit: PAGE_SIZE }));
   useReportPage(cursor, page, onReport);
   const sentinel = useRef<HTMLDivElement>(null);
+  const windowed = useWindowed();
   const more = page !== undefined && !page.done && last ? page.cursor : null;
 
   useEffect(() => {
@@ -159,7 +166,7 @@ function SongPage({
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) onMore(more);
       },
-      { rootMargin: "600px" },
+      { root: scrollRootOf(node), rootMargin: "600px" },
     );
 
     observer.observe(node);
@@ -173,9 +180,16 @@ function SongPage({
   return (
     <>
       {page.items.length === 0 ? null : (
-        <TrackList tracks={page.items} variant="list" label="Songs" header={header} />
+        <div
+          ref={windowed.ref}
+          style={windowed.near ? undefined : { height: windowed.height ?? undefined }}
+        >
+          {windowed.near ? (
+            <TrackList tracks={page.items} variant="list" label="Songs" header={header} />
+          ) : null}
+        </div>
       )}
       {more === null ? null : <div ref={sentinel} aria-hidden className="h-px" />}
     </>
   );
-}
+});

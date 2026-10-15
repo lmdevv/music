@@ -1,73 +1,89 @@
 import type { AlbumId, ArtistId } from "@music/commands/ids";
 import type { AlbumCard as Album, ArtistCard as Artist, Track } from "@music/commands/models";
-import { usePlayer } from "@music/player/react";
+import { useLatestPlayer } from "@music/player/react";
 import { useReadOnce } from "@music/sdk/react";
 import { Skeleton } from "@music/ui/components/skeleton";
 import { cn } from "@music/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import type { LinkProps } from "@tanstack/react-router";
 import { ChevronRightIcon, PlayIcon } from "lucide-react";
+import { memo, useCallback } from "react";
 import type { ReactNode } from "react";
 
 import { toastFailure } from "@/lib/action";
 
 import { Artwork, PlayingBars } from "./artwork";
 
-/** Starts a list of songs, optionally shuffled, reporting failures as toasts. */
+/**
+ * Starts a list of songs, optionally shuffled, reporting failures as toasts. The function is
+ * stable and reads the player when it runs, so a list of cards or rows that can play doesn't
+ * re-render on every player change.
+ */
 export const usePlayTracks = (): ((
   tracks: ReadonlyArray<Pick<Track, "id">>,
   options?: { readonly index?: number; readonly shuffle?: boolean },
 ) => Promise<void>) => {
-  const player = usePlayer();
+  const latestPlayer = useLatestPlayer();
 
-  return async (tracks, options = {}) => {
-    if (tracks.length === 0) return;
+  return useCallback(
+    async (tracks, options = {}) => {
+      if (tracks.length === 0) return;
 
-    try {
-      if (options.shuffle !== undefined && options.shuffle !== player.shuffle) {
-        await player.setShuffle(options.shuffle);
+      const player = latestPlayer();
+
+      try {
+        if (options.shuffle !== undefined && options.shuffle !== player.shuffle) {
+          await player.setShuffle(options.shuffle);
+        }
+
+        const ids = tracks.map((track) => track.id);
+
+        const index =
+          options.shuffle === true ? Math.floor(Math.random() * ids.length) : options.index;
+
+        await player.playTracks(ids, index);
+      } catch (cause) {
+        toastFailure(cause);
       }
-
-      const ids = tracks.map((track) => track.id);
-
-      const index =
-        options.shuffle === true ? Math.floor(Math.random() * ids.length) : options.index;
-
-      await player.playTracks(ids, index);
-    } catch (cause) {
-      toastFailure(cause);
-    }
-  };
+    },
+    [latestPlayer],
+  );
 };
 
-/** Loads an album and plays it from the top (or shuffled). */
+/** Loads an album and plays it from the top (or shuffled). Stable, like `usePlayTracks`. */
 export const usePlayAlbum = (): ((albumId: AlbumId, shuffle?: boolean) => Promise<void>) => {
   const readAlbum = useReadOnce("albums.get");
   const play = usePlayTracks();
 
-  return async (albumId, shuffle = false) => {
-    try {
-      const album = await readAlbum({ albumId });
-      await play(album.tracks, { shuffle });
-    } catch (cause) {
-      toastFailure(cause);
-    }
-  };
+  return useCallback(
+    async (albumId, shuffle = false) => {
+      try {
+        const album = await readAlbum({ albumId });
+        await play(album.tracks, { shuffle });
+      } catch (cause) {
+        toastFailure(cause);
+      }
+    },
+    [readAlbum, play],
+  );
 };
 
-/** Loads an artist and plays their top songs. */
+/** Loads an artist and plays their top songs. Stable, like `usePlayTracks`. */
 export const usePlayArtist = (): ((artistId: ArtistId, shuffle?: boolean) => Promise<void>) => {
   const readArtist = useReadOnce("artists.get");
   const play = usePlayTracks();
 
-  return async (artistId, shuffle = false) => {
-    try {
-      const artist = await readArtist({ artistId });
-      await play(artist.topTracks, { shuffle });
-    } catch (cause) {
-      toastFailure(cause);
-    }
-  };
+  return useCallback(
+    async (artistId, shuffle = false) => {
+      try {
+        const artist = await readArtist({ artistId });
+        await play(artist.topTracks, { shuffle });
+      } catch (cause) {
+        toastFailure(cause);
+      }
+    },
+    [readArtist, play],
+  );
 };
 
 /** The heavy screen title with a mono eyebrow, from the Paper desktop headers. */
@@ -139,8 +155,11 @@ export function SectionHeader({
   );
 }
 
-/** An album cover with title and subtitle; hovering shows a play button on the cover. */
-export function AlbumCard({
+/**
+ * An album cover with title and subtitle; hovering shows a play button on the cover. Memoized:
+ * a grid of albums re-renders often as its pages load.
+ */
+export const AlbumCard = memo(function AlbumCard({
   album,
   subtitle,
   className,
@@ -175,10 +194,10 @@ export function AlbumCard({
       </Link>
     </div>
   );
-}
+});
 
-/** A round artist image with the name under it. */
-export function ArtistCircle({
+/** A round artist image with the name under it. Memoized, like `AlbumCard`. */
+export const ArtistCircle = memo(function ArtistCircle({
   artist,
   className,
 }: {
@@ -200,7 +219,7 @@ export function ArtistCircle({
       </span>
     </Link>
   );
-}
+});
 
 /** A 56px Home shortcut tile with the cover on the left; marks the album that is playing. */
 export function QuickTile({

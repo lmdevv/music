@@ -8,6 +8,7 @@ import { usePlayer, usePlayerPosition } from "@music/player/react";
 import { useRead } from "@music/sdk/react";
 import { Button } from "@music/ui/components/button";
 import { useNavigate } from "@tanstack/react-router";
+import { memo } from "react";
 import { PauseIcon, PlayIcon, ShuffleIcon, SkipForwardIcon } from "lucide-react";
 
 import { ProgressBar } from "@/components/auth/scan-progress";
@@ -27,9 +28,10 @@ import type { PreviewProps } from "./preview-frame";
 
 /**
  * The preview pane for the selected row: artwork, detail, and buttons for library records, the
- * form for commands. It registers its primary action so Enter and the footer run it.
+ * form for commands. It registers its primary action so Enter and the footer run it. Memoized,
+ * so typing in the search field doesn't re-render it until the selection changes.
  */
-export function Preview({
+export const Preview = memo(function Preview({
   item,
   context,
   onClose,
@@ -102,7 +104,7 @@ export function Preview({
     default:
       return null;
   }
-}
+});
 
 function NowPreview({
   track,

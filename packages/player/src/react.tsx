@@ -12,6 +12,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -105,6 +106,30 @@ const PlayerContext = createContext<Player | null>(null);
 
 const PositionContext = createContext<number>(0);
 
+/** The song that plays and what the player does with it: the slice a long song list needs. */
+export interface CurrentTrack {
+  readonly trackId: TrackId | null;
+  readonly status: PlayerStatus;
+}
+
+const CurrentTrackContext = createContext<CurrentTrack>({ trackId: null, status: "idle" });
+
+/** Reads the player when it is needed (in an event handler) without re-rendering on its changes. */
+interface PlayerReaders {
+  readonly player: () => Player;
+  readonly positionMs: () => number;
+}
+
+const ReadersContext = createContext<PlayerReaders | null>(null);
+
+const useReaders = (): PlayerReaders => {
+  const readers = useContext(ReadersContext);
+
+  if (readers === null) throw new Error("Player readers must be used inside PlayerProvider");
+
+  return readers;
+};
+
 /**
  * The player state and actions. Must be inside `PlayerProvider`. Actions never reject: server
  * failures show up in `error`.
@@ -119,6 +144,25 @@ export const usePlayer = (): Player => {
 
 /** The live position in milliseconds. Separate from `usePlayer` because it changes often. */
 export const usePlayerPosition = (): number => useContext(PositionContext);
+
+/**
+ * The current song's ID and the player status, which change far less often than the rest of the
+ * player (a position report, the queue, or the device list). Long lists use it to mark the playing
+ * row without re-rendering every row on each player change.
+ */
+export const useCurrentTrack = (): CurrentTrack => useContext(CurrentTrackContext);
+
+/**
+ * A stable function that returns the player as it is now. For event handlers and callbacks that
+ * act on the player but don't show it, so their component doesn't re-render on player changes.
+ */
+export const useLatestPlayer = (): (() => Player) => useReaders().player;
+
+/**
+ * A stable function that returns the live position in milliseconds, for handlers (such as a seek
+ * shortcut) that would otherwise re-render with every position tick.
+ */
+export const usePositionReader = (): (() => number) => useReaders().positionMs;
 
 /**
  * The engines the provider switches between. A fixed `engine` disables the switching (and is
@@ -190,8 +234,8 @@ function PositionTicker({
 }
 
 /**
- * Provides `usePlayer` and `usePlayerPosition`. Place it inside the Convex provider of a signed-in
- * user. It registers this browser as a device, plays audio while this browser is the session's
+ * Provides `usePlayer`, `usePlayerPosition`, `useCurrentTrack`, `useLatestPlayer`, and
+ * `usePositionReader`. Place it inside the Convex provider of a signed-in user. It registers this browser as a device, plays audio while this browser is the session's
  * active device, and stops the moment another device takes over.
  */
 export function PlayerProvider({
@@ -320,9 +364,32 @@ export function PlayerProvider({
     };
   }, [state, local, controller, convex, jam]);
 
+  const latest = useRef(player);
+
+  // Handlers run after the commit that rendered them, so the latest committed player is current.
+  useEffect(() => {
+    latest.current = player;
+  }, [player]);
+
+  const readers = useMemo(
+    (): PlayerReaders => ({
+      player: () => latest.current,
+      positionMs: () => Math.round(controller.positionMs()),
+    }),
+    [controller],
+  );
+
+  const trackId = player.track?.id ?? null;
+  const status = player.status;
+  const current = useMemo((): CurrentTrack => ({ trackId, status }), [trackId, status]);
+
   return (
-    <PlayerContext.Provider value={player}>
-      <PositionTicker controller={controller}>{children}</PositionTicker>
-    </PlayerContext.Provider>
+    <ReadersContext.Provider value={readers}>
+      <PlayerContext.Provider value={player}>
+        <CurrentTrackContext.Provider value={current}>
+          <PositionTicker controller={controller}>{children}</PositionTicker>
+        </CurrentTrackContext.Provider>
+      </PlayerContext.Provider>
+    </ReadersContext.Provider>
   );
 }
