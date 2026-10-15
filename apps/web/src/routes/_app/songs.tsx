@@ -48,7 +48,7 @@ function SongsPage() {
       <PageHeader
         eyebrow={
           home === undefined
-            ? undefined
+            ? null
             : `${plural(home.stats.tracks, "song")} · ${formatTotal(home.stats.durationMs)} of music`
         }
         title="Songs"

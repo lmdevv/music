@@ -86,14 +86,19 @@ export const usePlayArtist = (): ((artistId: ArtistId, shuffle?: boolean) => Pro
   );
 };
 
-/** The heavy screen title with a mono eyebrow, from the Paper desktop headers. */
+/**
+ * The heavy screen title with a mono eyebrow, from the Paper desktop headers.
+ *
+ * @param eyebrow - The line above the title; `null` while it loads, which keeps its line so the
+ *   page doesn't move down when it arrives.
+ */
 export function PageHeader({
   eyebrow,
   title,
   actions,
   className,
 }: {
-  readonly eyebrow?: string | undefined;
+  readonly eyebrow?: string | null | undefined;
   readonly title: string;
   readonly actions?: ReactNode;
   readonly className?: string;
@@ -102,8 +107,11 @@ export function PageHeader({
     <header className={cn("flex flex-wrap items-end justify-between gap-4", className)}>
       <div className="flex min-w-0 flex-col gap-1.5">
         {eyebrow === undefined ? null : (
-          <span className="font-mono text-xs/xs tracking-mono text-text-muted uppercase">
-            {eyebrow}
+          <span
+            aria-hidden={eyebrow === null ? true : undefined}
+            className="font-mono text-xs/xs tracking-mono text-text-muted uppercase"
+          >
+            {eyebrow ?? "\u00a0"}
           </span>
         )}
         <h1 className="font-sans text-phone-large-title leading-10.25 font-heavy tracking-tighter text-text lg:text-2xl/2xl lg:tracking-display">

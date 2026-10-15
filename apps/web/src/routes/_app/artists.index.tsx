@@ -28,7 +28,7 @@ function ArtistsPage() {
   return (
     <div className="flex flex-col gap-7 px-5 pt-safe-top lg:px-12 lg:pt-row">
       <PageHeader
-        eyebrow={home === undefined ? undefined : plural(home.stats.artists, "artist")}
+        eyebrow={home === undefined ? null : plural(home.stats.artists, "artist")}
         title="Artists"
       />
       <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 lg:gap-x-5 lg:gap-y-7 xl:grid-cols-6">
