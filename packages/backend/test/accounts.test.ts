@@ -890,6 +890,32 @@ describe("names given at sign-up", () => {
     });
   });
 
+  it("can't be only characters that draw nothing", async () => {
+    const { backend, owner } = await household();
+    const { code: inviteCode } = await owner.music.run("invites.create", {});
+
+    expect(
+      await failureCode(
+        passwordFlow(backend, {
+          flow: "signUp",
+          email: "blank@music.test",
+          password: PASSWORD,
+          name: "\u3164\u115F",
+          inviteCode,
+        }),
+      ),
+    ).toBe("invalid_args");
+    // Straight to the dispatcher: the SDK would refuse it before sending.
+    expect(
+      await failureCode(
+        owner.as.mutation(api.commands.run, {
+          name: "account.rename",
+          args: { name: "\u3164 \uFFA0" },
+        }),
+      ),
+    ).toBe("invalid_args");
+  });
+
   it("leave an account made before the cleaning able to sign in as it was made", async () => {
     const { backend } = await household();
     const email = "tab\tbefore@music.test";

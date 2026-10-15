@@ -27,6 +27,9 @@ describe("typed text", () => {
   it("cleans names and descriptions as they decode, then checks their length", () => {
     expect(decodeName(" \u001b[1mMix\u0007 ")).toBe("[1mMix");
     expect(() => decodeName("\u001b\u0007")).toThrow();
+    // Fillers and blanks draw nothing, so a name of only them is refused.
+    expect(() => decodeName("\u3164\u115F\u1160\uFFA0 \u3000")).toThrow("Name can't be blank");
+    expect(decodeName("\u3164Ann")).toBe("\u3164Ann");
     expect(() => decodeName("x".repeat(121))).toThrow();
     expect(Schema.decodeSync(Description)("Notes\u009b")).toBe("Notes");
   });

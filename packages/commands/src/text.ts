@@ -37,6 +37,26 @@ const clean = SchemaGetter.transform(cleanText);
 /** Any typed text, cleaned as it decodes. */
 export const Text = Schema.String.pipe(Schema.decode({ decode: clean, encode: clean }));
 
-export const Name = Text.check(Schema.isMinLength(1), Schema.isMaxLength(120));
+/**
+ * A character that shows: not whitespace, not a format character, and not one of the Hangul
+ * fillers (U+115F, U+1160, U+3164, U+FFA0), which draw nothing.
+ */
+const VISIBLE = /[^\s\p{Cf}\u115F\u1160\u3164\uFFA0]/u;
+
+/** Whether cleaned text shows nothing at all. */
+export const isBlank = (text: string): boolean => !VISIBLE.test(text);
+
+const notBlank = Schema.makeFilter((text: string) => !isBlank(text) || "Name can't be blank");
+
+export const Name = Text.check(notBlank, Schema.isMaxLength(120));
+
+/**
+ * A name that may be left out: empty means "not given", as a form sends it; anything else must
+ * show, like a `Name`.
+ */
+export const OptionalName = Text.check(
+  Schema.makeFilter((text: string) => text.length === 0 || !isBlank(text) || "Name can't be blank"),
+  Schema.isMaxLength(120),
+);
 
 export const Description = Text.check(Schema.isMaxLength(500));

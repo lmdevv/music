@@ -2,7 +2,7 @@ import { ConvexCredentials } from "@convex-dev/auth/providers/ConvexCredentials"
 import { convexAuth, retrieveAccount } from "@convex-dev/auth/server";
 import { ConvexError } from "convex/values";
 import { Scrypt } from "lucia";
-import { Text } from "@music/commands/text";
+import { OptionalName, Text } from "@music/commands/text";
 import { Result, Schema } from "effect";
 
 import { internal } from "./_generated/api";
@@ -31,7 +31,7 @@ const PasswordParams = Schema.Union([
     flow: Schema.Literal("signUp"),
     email: NewEmail,
     password: Schema.String,
-    name: Schema.optionalKey(Text.check(Schema.isMaxLength(120))),
+    name: Schema.optionalKey(OptionalName),
     inviteCode: Schema.optionalKey(Schema.Trimmed),
   }),
   Schema.Struct({ flow: Schema.Literal("signIn"), email: Email, password: Schema.String }),
