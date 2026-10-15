@@ -13,8 +13,14 @@ import { SUSPENDED_MESSAGE } from "./lib/viewer";
 /** The provider ID stored on every password account; it must never change. */
 const PASSWORD = "password";
 
-/** Cleaned like any typed text: an account without a name shows the part before the `@`. */
-const Email = Text.check(Schema.isMinLength(3));
+/**
+ * A new account's email, cleaned like any typed text: an account without a name shows the part
+ * before the `@`. Sign-in looks an email up as typed (`Email`), so an account made before the
+ * cleaning still finds its own.
+ */
+const NewEmail = Text.check(Schema.isMinLength(3));
+
+const Email = Schema.Trimmed.check(Schema.isMinLength(3));
 
 /**
  * The password provider's flows. `signUp` and `signIn` match Convex Auth's `Password` provider;
@@ -23,7 +29,7 @@ const Email = Text.check(Schema.isMinLength(3));
 const PasswordParams = Schema.Union([
   Schema.Struct({
     flow: Schema.Literal("signUp"),
-    email: Email,
+    email: NewEmail,
     password: Schema.String,
     name: Schema.optionalKey(Text.check(Schema.isMaxLength(120))),
     inviteCode: Schema.optionalKey(Schema.Trimmed),

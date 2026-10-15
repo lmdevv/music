@@ -248,11 +248,14 @@ describe("guests", () => {
       [false, "no_access", null],
       [false, "no_access", null],
     ]);
-    // The song's name shows; its file details don't.
-    expect(items.map((item) => [item.track.codec, item.track.bitrate])).toEqual([
-      ["", null],
-      ["", null],
-      ["", null],
+    // Nothing about the song shows: not its name, album, or file details.
+    const titles = new Set((await allTracks(owner)).map((track) => track.title));
+
+    expect(items.some((item) => titles.has(item.track.title))).toBe(false);
+    expect(items.map((item) => [item.track.album, item.track.codec, item.track.bitrate])).toEqual([
+      ["", "", null],
+      ["", "", null],
+      ["", "", null],
     ]);
   });
 
@@ -425,6 +428,60 @@ describe("lists and links", () => {
 
     expect(
       await failureCode(guest.music.read("links.get", { kind: "track", id: pick(rock, 0) })),
+    ).toBe("not_found");
+  });
+
+  it("closes a removed person's playlists at once, before the batches reach them", async () => {
+    const { backend, owner, member } = await setup();
+    const friend = await signUp(backend, "member");
+    const { playlistId } = await member.music.run("playlists.create", { name: "Mine" });
+
+    await member.music.run("playlists.share", { playlistId, userId: userId(friend) });
+    await member.music.run("playlists.visibility", { playlistId, visibility: "shared" });
+    await owner.music.run("people.remove", { userId: userId(member) });
+
+    // No batch has run: the playlist is still stored, and nobody can open or list it.
+    expect(await failureCode(friend.music.read("playlists.get", { playlistId }))).toBe("not_found");
+    expect(await failureCode(owner.music.read("playlists.get", { playlistId }))).toBe("not_found");
+    expect(await friend.music.read("playlists.shared", {})).toEqual([]);
+  });
+
+  it("keeps a guest's playlists to themselves until they may share again", async () => {
+    const { backend, owner, member } = await setup();
+    const friend = await signUp(backend, "member");
+    const { playlistId } = await member.music.run("playlists.create", { name: "Mine" });
+
+    await member.music.run("playlists.share", { playlistId, userId: userId(friend) });
+    await owner.music.run("people.role", { userId: userId(member), role: "guest" });
+
+    expect(await failureCode(friend.music.read("playlists.get", { playlistId }))).toBe("not_found");
+    expect(await friend.music.read("playlists.shared", {})).toEqual([]);
+    expect(await failureCode(member.music.read("playlists.get", { playlistId }))).toBe("succeeded");
+
+    await owner.music.run("people.role", { userId: userId(member), role: "member" });
+    expect(await failureCode(friend.music.read("playlists.get", { playlistId }))).toBe("succeeded");
+  });
+
+  it("shares again without taking edit rights away, and never with someone suspended", async () => {
+    const { backend, owner, member, playlistId } = await setup();
+    const suspended = await signUp(backend, "member");
+
+    await owner.music.run("playlists.share", {
+      playlistId,
+      userId: userId(member),
+      role: "collaborator",
+    });
+    await owner.music.run("playlists.share", { playlistId, userId: userId(member) });
+
+    const sharing = await owner.music.read("playlists.sharing", { playlistId });
+
+    expect(sharing.people.map((share) => share.role)).toEqual(["collaborator"]);
+
+    await owner.music.run("people.suspend", { userId: userId(suspended) });
+    expect(
+      await failureCode(
+        owner.music.run("playlists.share", { playlistId, userId: userId(suspended) }),
+      ),
     ).toBe("not_found");
   });
 

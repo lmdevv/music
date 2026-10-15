@@ -10,6 +10,7 @@ import { tableId } from "../lib/ids";
 import { isClaimed } from "../lib/paths";
 import {
   findShare,
+  ownerShares,
   isSharedWithPeople,
   openPlaylist,
   positionBetween,
@@ -100,6 +101,30 @@ const appendTracks = async (
   });
 };
 
+/**
+ * Changes a playlist's name or description (owner only). `undefined` in a patch removes a field,
+ * so only the fields asked for go in; an empty description, already cleaned and trimmed by its
+ * schema, removes it.
+ */
+const updatePlaylist = async (
+  ctx: MutationCtx,
+  viewer: Viewer,
+  args: { readonly playlistId: string; readonly name?: string; readonly description?: string },
+): Promise<typeof ok> => {
+  const { playlist } = await openPlaylist(ctx, viewer, args.playlistId, "manage");
+  const changes: Partial<Doc<"playlists">> = { updatedAt: Date.now() };
+
+  if (args.name !== undefined) changes.name = args.name;
+
+  if (args.description !== undefined) {
+    changes.description = args.description.length === 0 ? undefined : args.description;
+  }
+
+  await ctx.db.patch(playlist._id, changes);
+
+  return ok;
+};
+
 /** A playlist summary for someone who opened it with `opened.access`. */
 const summary = async (ctx: ReadCtx, viewer: Viewer, present: Presenter, opened: OpenedPlaylist) =>
   presentPlaylist(ctx, viewer, present, opened.playlist, {
@@ -107,17 +132,22 @@ const summary = async (ctx: ReadCtx, viewer: Viewer, present: Presenter, opened:
     sharedWithPeople: await isSharedWithPeople(ctx, opened.playlist._id),
   });
 
+/** What a playlist shows in place of a song in a library the viewer can't read. */
+const WITHHELD_TITLE = "A song you can't play";
+
+const WITHHELD_ARTIST = "In a library that isn't shared with you";
+
 /**
- * A song in a library the viewer can't read, as a shared playlist shows it: what the person who
- * added it chose to share (title, artist, album, length) and nothing more. No cover is signed and
- * no file details are given, so sharing a playlist never opens the library behind it.
+ * A song in a library the viewer can't read, as a playlist shows it: a row that holds its place
+ * and its length, and nothing about the song. No name, cover, or file detail is given, so neither
+ * sharing a playlist nor a library's access narrowing later shows what the library holds.
  */
 const withheldTrack = (track: Doc<"tracks">): (typeof PlaylistEntry)["Encoded"]["track"] => ({
   id: track._id,
-  title: track.title,
-  artist: track.artistName,
+  title: WITHHELD_TITLE,
+  artist: WITHHELD_ARTIST,
   artistId: track.artistId,
-  album: track.albumTitle,
+  album: "",
   albumId: track.albumId,
   trackNumber: null,
   discNumber: null,
@@ -311,10 +341,18 @@ export const collectionQueries = {
     const present = makePresenter(ctx, viewer);
     const playlists = await Promise.all(shares.map((share) => ctx.db.get(share.playlistId)));
 
+    const owners = await Promise.all(
+      playlists.map(async (playlist) => (playlist === null ? null : ctx.db.get(playlist.ownerId))),
+    );
+
     const opened = shares.flatMap((share, index) => {
       const playlist = playlists[index];
+      const owner = owners[index];
 
-      return playlist === undefined || playlist === null ? [] : [{ playlist, access: share.role }];
+      // A removed owner's playlists go with them; a guest's are theirs alone (`playlistAccess`).
+      return playlist === undefined || playlist === null || !ownerShares(owner ?? null)
+        ? []
+        : [{ playlist, access: share.role }];
     });
 
     // Each of these is shared with the viewer, so none needs looking up.
@@ -435,7 +473,11 @@ export const collectionMutations = {
     const playlistId = await ctx.db.insert("playlists", {
       ownerId: viewer.id,
       name: args.name,
-      description: args.description,
+      // Cleaned and trimmed by its schema; empty means none, as `playlists.update` treats it.
+      description:
+        args.description === undefined || args.description.length === 0
+          ? undefined
+          : args.description,
       trackCount: 0,
       durationMs: 0,
       updatedAt: Date.now(),
@@ -451,31 +493,10 @@ export const collectionMutations = {
     return { playlistId };
   },
 
-  "playlists.rename": async (ctx, viewer, args) => {
-    const { playlist } = await openPlaylist(ctx, viewer, args.playlistId, "manage");
-    await ctx.db.patch(playlist._id, { name: args.name, updatedAt: Date.now() });
+  // Kept for clients from before `playlists.update`; it is that command with only a name.
+  "playlists.rename": async (ctx, viewer, args) => updatePlaylist(ctx, viewer, args),
 
-    return ok;
-  },
-
-  "playlists.update": async (ctx, viewer, args) => {
-    const { playlist } = await openPlaylist(ctx, viewer, args.playlistId, "manage");
-    const description = args.description?.trim();
-
-    // `undefined` in a patch removes a field, so only the fields asked for go in; an empty
-    // description removes it.
-    const changes: Partial<Doc<"playlists">> = { updatedAt: Date.now() };
-
-    if (args.name !== undefined) changes.name = args.name;
-
-    if (description !== undefined) {
-      changes.description = description.length === 0 ? undefined : description;
-    }
-
-    await ctx.db.patch(playlist._id, changes);
-
-    return ok;
-  },
+  "playlists.update": updatePlaylist,
 
   "playlists.delete": async (ctx, viewer, args) => {
     const { playlist } = await openPlaylist(ctx, viewer, args.playlistId, "manage");
@@ -565,11 +586,15 @@ export const collectionMutations = {
   "playlists.share": async (ctx, viewer, args) => {
     const { playlist } = await openPlaylist(ctx, viewer, args.playlistId, "manage");
     const person = await loadPerson(ctx, args.userId);
-    const role = args.role ?? "viewer";
 
     if (person._id === viewer.id) return fail("invalid_args", "You already own this playlist");
 
+    // The directory leaves suspended people out; a share made by ID can't reach them either.
+    if (person.suspendedAt !== undefined) return fail("not_found", "Person not found");
+
     const existing = await findShare(ctx, playlist._id, person._id);
+    // Sharing again without a role keeps theirs, so it never quietly takes edit rights away.
+    const role = args.role ?? existing?.role ?? "viewer";
 
     if (existing === null) {
       // Lists of shares stop at this many, so a share past it could never be seen or left.

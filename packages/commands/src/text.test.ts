@@ -12,6 +12,9 @@ describe("typed text", () => {
     expect(cleanText("a\u0000b\u007fc\u0080d\u009be")).toBe("abcde");
     expect(cleanText("one\ntwo\r\nthree\tfour\u0085five")).toBe("one two  three four five");
     expect(cleanText("  Café ☕ 東京  ")).toBe("Café ☕ 東京");
+    // Bidi overrides and isolates go; joiners inside emoji stay.
+    expect(cleanText("Admin\u202Egnp.exe\u2066x\u2069")).toBe("Admingnp.exex");
+    expect(cleanText("👩\u200D💻")).toBe("👩\u200D💻");
   });
 
   it("never leaves a control character, whatever goes in", () => {

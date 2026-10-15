@@ -11,9 +11,11 @@ const WHITESPACE_CONTROLS = new Set(["\t", "\n", "\v", "\f", "\r", "\u0085"]);
 
 /**
  * A control character: C0 (U+0000 to U+001F), DEL (U+007F), and C1 (U+0080 to U+009F), which is
- * Unicode's `Cc`. The CLI escapes the same set when it prints.
+ * Unicode's `Cc`, and the bidi embedding, override, and isolate controls (U+202A to U+202E,
+ * U+2066 to U+2069), which can make a name read differently from what it holds. The CLI escapes
+ * the same set when it prints.
  */
-export const CONTROL_CHARACTER = /\p{Cc}/u;
+export const CONTROL_CHARACTER = /[\p{Cc}\u202A-\u202E\u2066-\u2069]/u;
 
 export const isControlCharacter = (character: string): boolean => CONTROL_CHARACTER.test(character);
 

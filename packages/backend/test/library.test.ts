@@ -340,6 +340,24 @@ describe("typed names and descriptions", () => {
     expect(await owner.music.read("libraries.list", {})).toEqual([]);
   });
 
+  it("store an empty description as none, whether made or changed", async () => {
+    const backend = makeBackend();
+    const owner = await signUp(backend, "owner");
+
+    const { playlistId } = await raw(owner, "playlists.create", {
+      name: "Quiet",
+      description: "\t\u0007 ",
+    });
+
+    expect(
+      await backend.run(async (ctx) => {
+        const id = ctx.db.normalizeId("playlists", playlistId);
+
+        return id === null ? null : ((await ctx.db.get(id))?.description ?? "absent");
+      }),
+    ).toBe("absent");
+  });
+
   it("refuse a name that is only control characters", async () => {
     const backend = makeBackend();
     const owner = await signUp(backend, "owner");

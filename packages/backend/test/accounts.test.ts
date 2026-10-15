@@ -5,6 +5,7 @@
 import { UserId } from "@music/commands/ids";
 import { makeMusicClient, type MusicClient } from "@music/sdk/client";
 import { decodeJwt } from "jose";
+import { Scrypt } from "lucia";
 import { sha256Hex } from "../convex/lib/crypto";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -887,5 +888,26 @@ describe("names given at sign-up", () => {
       email: "]0;xevil@music.test",
       name: "]0;xevil",
     });
+  });
+
+  it("leave an account made before the cleaning able to sign in as it was made", async () => {
+    const { backend } = await household();
+    const email = "tab\tbefore@music.test";
+    const secret = await new Scrypt().hash(PASSWORD);
+
+    await backend.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", { email, name: "Old", role: "member" });
+
+      await ctx.db.insert("authAccounts", {
+        userId,
+        provider: "password",
+        providerAccountId: email,
+        secret,
+      });
+    });
+
+    expect(
+      await failureCode(passwordFlow(backend, { flow: "signIn", email, password: PASSWORD })),
+    ).toBe("succeeded");
   });
 });

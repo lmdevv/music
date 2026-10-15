@@ -8,11 +8,12 @@
  * reads as not found, so a link never tells someone what a private playlist is called.
  */
 import type { PlaylistAccess } from "@music/commands/models";
-import { canEditPlaylistItems, canManagePlaylist } from "@music/commands/permissions";
+import { can, canEditPlaylistItems, canManagePlaylist } from "@music/commands/permissions";
 
 import type { Doc, Id } from "../_generated/dataModel";
 import { fail } from "./errors";
 import { tableId } from "./ids";
+import { roleOf } from "./viewer";
 import type { ReadCtx, Viewer } from "./viewer";
 
 /** The share naming `userId` on a playlist, if any. */
@@ -36,6 +37,14 @@ export const isSharedWithPeople = async (
     .withIndex("by_playlist", (q) => q.eq("playlistId", playlistId))
     .first()) !== null;
 
+/**
+ * Whether a playlist's owner may still have it open to others: they exist (a removed person's
+ * playlists go in batches after, unreachable meanwhile) and may share (a person made a guest
+ * keeps their playlists to themselves, though their shares and visibility stay for a promotion).
+ */
+export const ownerShares = (owner: Doc<"users"> | null): boolean =>
+  owner !== null && can(roleOf(owner), "share");
+
 /** What the viewer may do with a playlist, or null when they can't open it. */
 export const playlistAccess = async (
   ctx: ReadCtx,
@@ -43,6 +52,8 @@ export const playlistAccess = async (
   playlist: Doc<"playlists">,
 ): Promise<PlaylistAccess | null> => {
   if (playlist.ownerId === viewer.id) return "owner";
+
+  if (!ownerShares(await ctx.db.get(playlist.ownerId))) return null;
   const share = await findShare(ctx, playlist._id, viewer.id);
 
   if (share !== null) return share.role;
