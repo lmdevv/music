@@ -1,8 +1,9 @@
 import { usePlayer } from "@music/player/react";
 import { TooltipProvider } from "@music/ui/components/tooltip";
-import { useLocation } from "@tanstack/react-router";
+import { CatchBoundary, useLocation } from "@tanstack/react-router";
 import { Suspense, lazy, useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import { toast } from "sonner";
 
 import { JamBand } from "@/components/jam/jam-band";
 import { DeviceSheet } from "@/components/player/device-sheet";
@@ -31,13 +32,22 @@ const surface = (load: () => Promise<() => ReactNode>): Surface => {
   // The loaded component, kept for the page's life like the module it comes from.
   let ready: (() => ReactNode) | null = null;
 
+  const pending = () => lazy(async () => ({ default: await loadReady() }));
+
+  // `React.lazy` keeps a failure for good, so a failed load swaps in a fresh one for the next try.
+  let Pending = pending();
+
   const loadReady = async () => {
-    ready = await load();
+    try {
+      ready = await load();
 
-    return ready;
+      return ready;
+    } catch (cause) {
+      Pending = pending();
+
+      throw cause;
+    }
   };
-
-  const Pending = lazy(async () => ({ default: await loadReady() }));
 
   return {
     Component: () => {
@@ -85,7 +95,8 @@ const usePreloadSurfaces = (): void => {
     () =>
       whenSettled(() => {
         for (const { preload } of Object.values(surfaces)) {
-          // A chunk that fails here loads again, and reports its error, when it is opened.
+          // A chunk that fails here is asked for again when its surface opens; if that fails too,
+          // the surface says so (browsers may keep a failed module until the page reloads).
           preload().catch(() => undefined);
         }
       }),
@@ -93,11 +104,44 @@ const usePreloadSurfaces = (): void => {
   );
 };
 
-/** Mounts a lazily loaded surface the first time it opens, and keeps it for its close animation. */
+const NoSurface = () => null;
+
+/** Says that a surface's code didn't load, with a way to reload the page and get it. */
+const reportUnloaded = () => {
+  toast.error("Couldn't load this part of [music]. Reload the page to try again.", {
+    action: { label: "Reload", onClick: () => window.location.reload() },
+  });
+};
+
+/**
+ * A lazily loaded surface. A chunk that fails to load (offline, or the server was upgraded and the
+ * old chunk is gone) reports itself and renders nothing, rather than reaching the route's error
+ * screen, which would replace the shell and stop the music. A new `attempt` tries again.
+ */
+function Loaded({ attempt, children }: { readonly attempt: number; readonly children: ReactNode }) {
+  return (
+    <CatchBoundary getResetKey={() => attempt} errorComponent={NoSurface} onCatch={reportUnloaded}>
+      <Suspense fallback={null}>{children}</Suspense>
+    </CatchBoundary>
+  );
+}
+
+/**
+ * Mounts a lazily loaded surface the first time it opens, and keeps it for its close animation.
+ * Each opening is a new attempt, so a surface that failed to load tries again.
+ */
 function OnDemand({ open, children }: { readonly open: boolean; readonly children: ReactNode }) {
   const opened = useOpenedOnce(open);
+  const [attempt, setAttempt] = useState(0);
+  const [wasOpen, setWasOpen] = useState(open);
 
-  return opened ? <Suspense fallback={null}>{children}</Suspense> : null;
+  if (open !== wasOpen) {
+    setWasOpen(open);
+
+    if (open) setAttempt((count) => count + 1);
+  }
+
+  return opened ? <Loaded attempt={attempt}>{children}</Loaded> : null;
 }
 
 /**
@@ -172,9 +216,9 @@ function Frame({ children }: { readonly children: ReactNode }) {
           </main>
         </div>
         {queueOpen && hasTrack ? (
-          <Suspense fallback={null}>
+          <Loaded attempt={0}>
             <QueuePanel />
-          </Suspense>
+          </Loaded>
         ) : null}
       </div>
       <PlayerBar />

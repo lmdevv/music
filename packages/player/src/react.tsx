@@ -11,6 +11,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -378,8 +379,9 @@ export function PlayerProvider({
 
   const latest = useRef(player);
 
-  // Handlers run after the commit that rendered them, so the latest committed player is current.
-  useEffect(() => {
+  // Updated right after the commit, before the browser can dispatch another event, so a handler
+  // never reads the player from the render before.
+  useLayoutEffect(() => {
     latest.current = player;
   }, [player]);
 
