@@ -97,7 +97,7 @@ a tag such as `v0.3.0` in the repository; its images drop the `v`:
 | Tag           | What it is                                             |
 | ------------- | ------------------------------------------------------ |
 | `0.3.0`       | A release. Never changes.                              |
-| `0.2`         | The newest release in that minor series.               |
+| `0.3`         | The newest release in that minor series.               |
 | `latest`      | The newest release.                                    |
 | `main`        | The newest commit on `main`. Moves often; for testing. |
 | `sha-<short>` | One commit from `main` or a release.                   |
