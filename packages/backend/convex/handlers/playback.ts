@@ -423,18 +423,23 @@ const presentQueue = async (
     return track === undefined ? [] : [{ item, track }];
   });
 
+  // Presented together, so a long queue looks the viewer's likes up in one read (see `tracks`).
+  const presented = await present.tracks(entries.map(({ track }) => track));
+
   return {
     queue: await Promise.all(
-      entries.map(async ({ item, track }) =>
-        jamHost !== null && !jamShareableEntry(jamHost, item, track)
+      entries.map(async ({ item, track }, position) => {
+        const shown = presented[position];
+
+        return (jamHost !== null && !jamShareableEntry(jamHost, item, track)) || shown === undefined
           ? withheldEntry(item, track)
           : // The presented track is a new object made for this entry.
-            Object.assign(await present.track(track), {
+            Object.assign(shown, {
               itemId: item.id,
               addedBy: item.addedBy === undefined ? null : await contributor(item.addedBy),
               autoplay: item.autoplay,
-            }),
-      ),
+            });
+      }),
     ),
     index: queue.index,
     shuffle: queue.shuffle,
