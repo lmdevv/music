@@ -10,11 +10,11 @@ const WINDOW_MARGIN = "150% 0px";
 export interface Windowed {
   /** Attach to the block's wrapper. */
   readonly ref: (node: HTMLElement | null) => void;
-  /** True while the block is within about a screen and a half of the visible part of the list. */
-  readonly near: boolean;
+  /** True while the block renders its rows: near the visible part of the list, or pinned. */
+  readonly shown: boolean;
   /**
-   * The height in pixels an empty block keeps: its last rendered height, or the estimate until it
-   * has rendered.
+   * The height in pixels an empty block keeps: its last rendered height, or the estimate when it
+   * hasn't rendered at this size and layout. Null until there is an estimate.
    */
   readonly height: number | null;
 }
@@ -26,11 +26,13 @@ export interface WindowedOptions {
    * do, so the list shows at once; blocks further down wait until they are near.
    */
   readonly initiallyNear?: boolean;
-  /** The block's height before it has rendered, such as its row count times a row's height. */
-  readonly estimate?: number | null;
+  /** Renders the block wherever it is, such as the one holding a dragged row. */
+  readonly pinned?: boolean;
+  /** The block's height before it has rendered: its row count times a row's height. */
+  readonly estimate: number | null;
   /**
    * How many items the block holds. A measured height belongs to the count it was measured at; a
-   * block whose rows change while it is empty falls back to the estimate, or renders to measure.
+   * block whose rows changed while it was empty falls back to the estimate.
    */
   readonly size: number;
 }
@@ -46,20 +48,22 @@ interface Measured {
 }
 
 /**
- * Windowing for a long list rendered in blocks (pages of songs, or a long playlist cut into
- * blocks): a block far from the visible part of the list renders an empty box of its height
- * instead of its rows, so the page holds a few hundred rows however long the list is, and the
- * scrollbar stays put.
+ * Windowing for a long list rendered in blocks of rows: a block far from the visible part of the
+ * list renders an empty box of its height instead of its rows, so the page holds a few hundred
+ * rows however long the list is, and the scrollbar stays put. A block is measured whenever its rows
+ * are on the page, and an empty block never renders its rows just to measure them.
  */
 export const useWindowed = ({
   initiallyNear = true,
-  estimate = null,
+  pinned = false,
+  estimate,
   size,
 }: WindowedOptions): Windowed => {
   const [node, setNode] = useState<HTMLElement | null>(null);
   const [near, setNear] = useState(initiallyNear);
   const [measured, setMeasured] = useState<Measured | null>(null);
   const desktop = useIsDesktop();
+  const shown = near || pinned;
 
   useEffect(() => {
     if (node === null) return undefined;
@@ -80,7 +84,7 @@ export const useWindowed = ({
 
   // Measured only while the rows are there; an empty box keeps the last rendered height.
   useEffect(() => {
-    if (node === null || !near) return undefined;
+    if (node === null || !shown) return undefined;
 
     const observer = new ResizeObserver((entries) => {
       const blockSize = entries.at(-1)?.borderBoxSize[0]?.blockSize;
@@ -93,11 +97,9 @@ export const useWindowed = ({
     observer.observe(node);
 
     return () => observer.disconnect();
-  }, [node, near, size, desktop]);
+  }, [node, shown, size, desktop]);
 
   const current = measured !== null && measured.size === size && measured.desktop === desktop;
-  const height = current ? measured.height : estimate;
 
-  // A block with no height to keep renders its rows, so it can't collapse to nothing.
-  return { ref: setNode, near: near || height === null, height };
+  return { ref: setNode, shown, height: current ? measured.height : estimate };
 };

@@ -14,7 +14,6 @@ import { formatTotal, plural } from "@/lib/format";
 import { readPages } from "@/lib/read-pages";
 import { useHeld } from "@/lib/use-held";
 import { scrollRootOf } from "@/lib/scroll-root";
-import { useWindowed } from "@/lib/use-windowed";
 
 export const Route = createFileRoute("/_app/songs")({ component: SongsPage });
 
@@ -131,7 +130,7 @@ function AllSongs() {
 
 /**
  * One live page of the Songs list. Memoized, so loading the next page doesn't re-render the pages
- * above it, and windowed, so pages far from view keep only their height.
+ * above it; its list is windowed, so pages far from view keep only their height.
  */
 const SongPage = memo(function SongPage({
   cursor,
@@ -153,7 +152,6 @@ const SongPage = memo(function SongPage({
   const page = useHeld(useRead("tracks.list", { cursor, end, limit: PAGE_SIZE }));
   useReportPage(cursor, page, onReport);
   const sentinel = useRef<HTMLDivElement>(null);
-  const windowed = useWindowed({ size: page?.items.length ?? 0 });
   const more = page !== undefined && !page.done && last ? page.cursor : null;
 
   useEffect(() => {
@@ -179,14 +177,14 @@ const SongPage = memo(function SongPage({
   return (
     <>
       {page.items.length === 0 ? null : (
-        <div
-          ref={windowed.ref}
-          style={windowed.near ? undefined : { height: windowed.height ?? undefined }}
-        >
-          {windowed.near ? (
-            <TrackList tracks={page.items} variant="list" label="Songs" header={header} />
-          ) : null}
-        </div>
+        // The list windows this page's rows itself, even though they fit one block.
+        <TrackList
+          tracks={page.items}
+          variant="list"
+          label="Songs"
+          header={header}
+          windowing="always"
+        />
       )}
       {more === null ? null : <div ref={sentinel} aria-hidden className="h-px" />}
     </>

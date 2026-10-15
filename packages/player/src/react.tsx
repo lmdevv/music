@@ -127,6 +127,8 @@ export interface CurrentTrack {
 
 const CurrentTrackContext = createContext<CurrentTrack>({ trackId: null, status: "idle" });
 
+const HasTrackContext = createContext(false);
+
 /** Reads the player when it is needed (in an event handler) without re-rendering on its changes. */
 interface PlayerReaders {
   readonly player: () => Player;
@@ -164,6 +166,13 @@ export const usePlayerPosition = (): number => useContext(PositionContext);
  * row without re-rendering every row on each player change.
  */
 export const useCurrentTrack = (): CurrentTrack => useContext(CurrentTrackContext);
+
+/**
+ * Whether a song is loaded. Changes only when the queue goes from empty to not, for chrome (the
+ * player bar's frame, the shell's surfaces) that shows or hides with it but ignores play, pause,
+ * and buffering.
+ */
+export const useHasTrack = (): boolean => useContext(HasTrackContext);
 
 /**
  * A stable function that returns the player as it is now. For event handlers and callbacks that
@@ -247,8 +256,9 @@ function PositionTicker({
 }
 
 /**
- * Provides `usePlayer`, `usePlayerPosition`, `useCurrentTrack`, `useLatestPlayer`, and
- * `usePositionReader`. Place it inside the Convex provider of a signed-in user. It registers this browser as a device, plays audio while this browser is the session's
+ * Provides `usePlayer`, `usePlayerPosition`, `useCurrentTrack`, `useHasTrack`,
+ * `useLatestPlayer`, and `usePositionReader`. Place it inside the Convex provider of a signed-in
+ * user. It registers this browser as a device, plays audio while this browser is the session's
  * active device, and stops the moment another device takes over.
  */
 export function PlayerProvider({
@@ -401,7 +411,9 @@ export function PlayerProvider({
     <ReadersContext.Provider value={readers}>
       <PlayerContext.Provider value={player}>
         <CurrentTrackContext.Provider value={current}>
-          <PositionTicker controller={controller}>{children}</PositionTicker>
+          <HasTrackContext.Provider value={trackId !== null}>
+            <PositionTicker controller={controller}>{children}</PositionTicker>
+          </HasTrackContext.Provider>
         </CurrentTrackContext.Provider>
       </PlayerContext.Provider>
     </ReadersContext.Provider>

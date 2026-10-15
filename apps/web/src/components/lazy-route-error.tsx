@@ -1,18 +1,23 @@
-import { CatchBoundary, lazyRouteComponent } from "@tanstack/react-router";
+import { CatchBoundary } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { Suspense } from "react";
+import type { ReactNode } from "react";
 
-const loadRouteError = () => import("./route-error");
+import { ChunkLoadError, lazyChunk } from "@/lib/lazy-chunk";
 
-const RouteError = lazyRouteComponent(loadRouteError, "RouteError");
+// Not TanStack's `lazyRouteComponent`: on a missing module it reloads the page, which stops the
+// music and, offline, lands on the browser's error page instead of this app's.
+const RouteError = lazyChunk(async () => (await import("./route-error")).RouteError).Component;
 
-const PageNotFound = lazyRouteComponent(loadRouteError, "PageNotFound");
+const PageNotFound = lazyChunk(async () => (await import("./route-error")).PageNotFound).Component;
 
 /**
  * Shown when the error screen's own code can't load: offline, or the server was upgraded under an
- * open tab. Plain markup, so it needs nothing beyond the entry chunk.
+ * open tab. Plain markup, so it needs nothing beyond the entry chunk. Any other error goes on up.
  */
-function Unloaded() {
+function Unloaded({ error }: ErrorComponentProps): ReactNode {
+  if (!(error instanceof ChunkLoadError)) throw error;
+
   return (
     <div className="flex min-h-dvh-message flex-col items-start justify-center gap-3 px-6 lg:px-12">
       <h1 className="font-sans text-xl/xl font-heavy tracking-tight text-text">
@@ -34,7 +39,7 @@ function Unloaded() {
 
 /**
  * The error screen, loaded on demand so it stays out of the entry chunk. If its chunk can't load
- * either, a plain message takes its place instead of a blank page.
+ * either, a plain message takes its place instead of a blank page; the next error tries again.
  */
 export function LazyRouteError(props: ErrorComponentProps) {
   return (

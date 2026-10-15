@@ -1,14 +1,15 @@
-import { useCurrentTrack } from "@music/player/react";
+import { useHasTrack } from "@music/player/react";
 import { TooltipProvider } from "@music/ui/components/tooltip";
 import { CatchBoundary, useLocation } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
-import { Suspense, lazy, useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 
 import { JamBand } from "@/components/jam/jam-band";
 import { DeviceSheet } from "@/components/player/device-sheet";
 import { PlayerBar } from "@/components/player/player-bar";
+import { ChunkLoadError, lazyChunk } from "@/lib/lazy-chunk";
 import { useOpenedOnce } from "@/lib/use-opened-once";
 import { whenSettled } from "@/lib/when-settled";
 
@@ -18,66 +19,17 @@ import { PhoneChrome } from "./phone-chrome";
 import { Sidebar } from "./sidebar";
 import { UiStateProvider, useUi } from "./ui-state";
 
-/** A surface's code didn't load: offline, or the server was upgraded and the old chunk is gone. */
-class SurfaceLoadError extends Error {
-  override readonly name = "SurfaceLoadError";
-}
-
-/** A surface the shell loads on demand, and the function that loads its chunk ahead of time. */
-interface Surface {
-  readonly Component: () => ReactNode;
-  readonly preload: () => Promise<void>;
-}
-
-/**
- * A lazily loaded surface that renders straight away once its chunk is in. `React.lazy` alone
- * suspends on its first render even when the chunk has loaded, and React holds a revealed boundary
- * back for up to 300 ms, so a preloaded command menu still took a third of a second to open.
- */
-const surface = (load: () => Promise<() => ReactNode>): Surface => {
-  // The loaded component, kept for the page's life like the module it comes from.
-  let ready: (() => ReactNode) | null = null;
-
-  const pending = () => lazy(async () => ({ default: await loadReady() }));
-
-  // `React.lazy` keeps a failure for good, so a failed load swaps in a fresh one for the next try.
-  let Pending = pending();
-
-  const loadReady = async () => {
-    try {
-      ready = await load();
-
-      return ready;
-    } catch (cause) {
-      Pending = pending();
-
-      throw new SurfaceLoadError("A surface's code didn't load", { cause });
-    }
-  };
-
-  return {
-    Component: () => {
-      // Chosen once per mount: switching from `Pending` to the loaded component later would be a
-      // different element type, and React would remount an open surface and lose its state.
-      const [Shown] = useState(() => ready ?? Pending);
-
-      return <Shown />;
-    },
-    preload: async () => {
-      await loadReady();
-    },
-  };
-};
-
 // The surfaces the shell opens on demand load as their own chunks: the command menu with its
 // catalog and forms, Now Playing, the queue, the Jam panel with its QR encoder, and the New
 // playlist dialog. None of them is on screen when a page first loads.
 const surfaces = {
-  commandMenu: surface(async () => (await import("@/components/command/command-menu")).CommandMenu),
-  nowPlaying: surface(async () => (await import("@/components/player/now-playing")).NowPlaying),
-  queue: surface(async () => (await import("@/components/player/queue")).QueuePanel),
-  jamPanel: surface(async () => (await import("@/components/jam/jam-panel")).JamPanel),
-  newPlaylist: surface(
+  commandMenu: lazyChunk(
+    async () => (await import("@/components/command/command-menu")).CommandMenu,
+  ),
+  nowPlaying: lazyChunk(async () => (await import("@/components/player/now-playing")).NowPlaying),
+  queue: lazyChunk(async () => (await import("@/components/player/queue")).QueuePanel),
+  jamPanel: lazyChunk(async () => (await import("@/components/jam/jam-panel")).JamPanel),
+  newPlaylist: lazyChunk(
     async () => (await import("@/components/playlists/new-playlist-dialog")).NewPlaylistDialog,
   ),
 };
@@ -112,7 +64,7 @@ const usePreloadSurfaces = (): void => {
 
 /** Renders nothing in place of a surface whose code didn't load; any other error goes on up. */
 function NoSurface({ error }: ErrorComponentProps): ReactNode {
-  if (!(error instanceof SurfaceLoadError)) throw error;
+  if (!(error instanceof ChunkLoadError)) throw error;
 
   return null;
 }
@@ -137,7 +89,7 @@ function Loaded({
       getResetKey={() => attempt}
       errorComponent={NoSurface}
       onCatch={(error) => {
-        if (!(error instanceof SurfaceLoadError)) return;
+        if (!(error instanceof ChunkLoadError)) return;
 
         onFailed();
         toast.error("Couldn't load this part of [music]. Reload the page to try again.", {
@@ -204,8 +156,8 @@ function Surfaces() {
   const ui = useUi();
   const { commandOpen, setCommandOpen, newPlaylist, closeNewPlaylist } = ui;
   const { nowPlaying, setNowPlaying, jamOpen, setJamOpen } = ui;
-  // Only whether a song is loaded: a position report or queue change doesn't reach the surfaces.
-  const hasTrack = useCurrentTrack().trackId !== null;
+  // Only whether a song is loaded: play, pause, buffering, and position reports don't reach them.
+  const hasTrack = useHasTrack();
   const { pathname } = useLocation();
 
   usePreloadSurfaces();
@@ -237,7 +189,7 @@ function Surfaces() {
 
 function Frame({ children }: { readonly children: ReactNode }) {
   const { queueOpen, setQueueOpen } = useUi();
-  const hasTrack = useCurrentTrack().trackId !== null;
+  const hasTrack = useHasTrack();
 
   return (
     <div className="flex h-dvh flex-col bg-bg dark:bg-dark-canvas">

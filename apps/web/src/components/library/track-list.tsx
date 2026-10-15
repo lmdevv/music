@@ -5,7 +5,17 @@ import { Skeleton } from "@music/ui/components/skeleton";
 import { cn } from "@music/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { MoreHorizontalIcon, PlayIcon } from "lucide-react";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
 
 import { TrackMenu } from "@/components/playlists/track-menu";
@@ -15,7 +25,7 @@ import { Artwork, PlayingBars } from "./artwork";
 import { usePlayTracks } from "./cards";
 import { LikeButton } from "./like-button";
 import { dropLine } from "@/lib/reorder";
-import { useIsDesktop } from "@/lib/use-media";
+import type { DropSide } from "@/lib/reorder";
 import { useWindowed } from "@/lib/use-windowed";
 
 import { MoveButtons, ReorderHandle } from "./reorder";
@@ -35,14 +45,32 @@ export type TrackListVariant = "album" | "list";
 
 const headerCell = "font-mono text-xs/xs tracking-mono text-text-muted";
 
+/**
+ * A row's height. The rows and the probe that measures a row's height for windowing share it, so
+ * the estimate for rows not yet on the page follows the stylesheet.
+ */
+const rowHeightClassName = (variant: TrackListVariant): string =>
+  variant === "album" ? "h-12 lg:h-row" : "h-12 lg:h-13";
+
 /** The row box both playable and unavailable songs use, so the two stay the same size. */
 const rowClassName = (variant: TrackListVariant): string =>
   cn(
     "group/row relative flex shrink-0 items-center rounded-sm select-none",
-    "h-12 border-t-hairline border-border pr-1 lg:gap-3 lg:border-t-0 lg:px-2",
-    variant === "album" ? "lg:h-row" : "gap-3 lg:h-13",
+    rowHeightClassName(variant),
+    "border-t-hairline border-border pr-1 lg:gap-3 lg:border-t-0 lg:px-2",
+    variant === "album" ? undefined : "gap-3",
     "hover:bg-surface has-[[data-popup-open]]:bg-surface",
   );
+
+/** The rows' reorder controls: the same object while the list's mode is, so rows stay memoized. */
+interface RowReorder {
+  readonly mode: ListReorder["mode"];
+  readonly rowProps: Reorder["rowProps"];
+  readonly moveBy: Reorder["moveBy"];
+}
+
+/** How many songs the list holds, for the reorder controls' "Position 3 of 40". */
+const ListLengthContext = createContext(0);
 
 /** The track number column of the album variant. */
 const numberCell = "w-7.5 shrink-0 lg:w-7";
@@ -96,6 +124,7 @@ export function TrackList({
   byline,
   highlight,
   reorder,
+  windowing = "long",
 }: {
   readonly tracks: ReadonlyArray<Track>;
   readonly variant: TrackListVariant;
@@ -119,6 +148,11 @@ export function TrackList({
   readonly highlight?: TrackId | null;
   /** Lets rows be moved; the list's order then comes back from the server. */
   readonly reorder?: ListReorder | undefined;
+  /**
+   * `long` windows lists longer than one block of rows; `always` also windows a single block, for
+   * callers that list one page of a longer list per `TrackList` (Songs).
+   */
+  readonly windowing?: "long" | "always";
 }) {
   // Only the current song and status: a position report or queue change re-renders no rows.
   const { trackId: currentId, status } = useCurrentTrack();
@@ -129,6 +163,23 @@ export function TrackList({
     highlight === undefined || highlight === null
       ? -1
       : tracks.findIndex((track) => track.id === highlight);
+
+  const mode = reorder?.mode;
+  const rowProps = reorder?.reorder.rowProps;
+  const moveBy = reorder?.reorder.moveBy;
+
+  const controls = useMemo(
+    (): RowReorder | undefined =>
+      mode === undefined || rowProps === undefined || moveBy === undefined
+        ? undefined
+        : { mode, rowProps, moveBy },
+    [mode, rowProps, moveBy],
+  );
+
+  // The row a drag started from stays on the page, so its drag can end.
+  const dragging = reorder?.reorder.dragging ?? null;
+  const [probe, setProbe] = useState<HTMLElement | null>(null);
+  const rowHeight = useRowHeight(probe);
 
   const renderRow = (track: Track, index: number) => (
     <TrackRow
@@ -142,16 +193,20 @@ export function TrackList({
       withheld={withheld?.(index) ?? false}
       byline={byline?.(index) ?? null}
       highlighted={highlight === track.id}
-      // Only the reorder controls use it; without them a song added or removed re-renders no rows.
-      count={reorder === undefined ? 0 : tracks.length}
-      reorder={reorder}
+      reorder={controls}
+      dropSide={reorder?.mode === "drag" ? reorder.reorder.dropSide(index) : null}
       onPlay={play}
       menuExtra={menuExtra}
     />
   );
 
   return (
-    <div role="table" aria-label={label} className="flex flex-col">
+    <div role="table" aria-label={label} className="relative flex flex-col">
+      <div
+        ref={setProbe}
+        aria-hidden
+        className={cn(rowHeightClassName(variant), "pointer-events-none invisible absolute")}
+      />
       <div
         role="row"
         className={cn(
@@ -188,7 +243,15 @@ export function TrackList({
         </span>
         <span aria-hidden className="w-9 shrink-0" />
       </div>
-      <WindowedRows tracks={tracks} renderRow={renderRow} pinned={highlightIndex} />
+      <ListLengthContext value={tracks.length}>
+        <WindowedRows
+          tracks={tracks}
+          renderRow={renderRow}
+          pinned={[highlightIndex, dragging ?? -1]}
+          pinOneBlock={windowing === "long"}
+          rowHeight={rowHeight}
+        />
+      </ListLengthContext>
     </div>
   );
 }
@@ -197,32 +260,27 @@ export function TrackList({
 const BLOCK_ROWS = 100;
 
 /**
- * A row's height in pixels until the first block has rendered and measured one (the desktop list
- * row). Only empty blocks far below use it, so a wrong guess moves nothing on screen.
- */
-const ESTIMATED_ROW_PX = 52;
-
-/**
  * The rows of a list in blocks of {@link BLOCK_ROWS}, rendered only near the visible part of the
  * list, so a 1,000-song playlist mounts a few hundred rows instead of all of them. The first block
- * (and the one holding `pinned`, a row to scroll to) renders at once, and a list of one block
- * always renders. Short lists use the same blocks, so a list growing past one block keeps its
- * rows (and their open menus, focus, and drags) mounted.
+ * renders at once, and so do the blocks holding a `pinned` row (a row to scroll to, or the row being
+ * dragged). A list of one block always renders unless `pinOneBlock` is off. Short lists use the
+ * same blocks, so a list growing past one block keeps its rows (and their menus and focus).
  */
 function WindowedRows({
   tracks,
   renderRow,
   pinned,
+  pinOneBlock,
+  rowHeight,
 }: {
   readonly tracks: ReadonlyArray<Track>;
   readonly renderRow: (track: Track, index: number) => ReactNode;
-  /** A row index whose block always renders, or -1. */
-  readonly pinned: number;
+  /** Row indexes whose blocks always render; -1 for none. */
+  readonly pinned: ReadonlyArray<number>;
+  readonly pinOneBlock: boolean;
+  /** One row's height, from the probe; null before it has been read. */
+  readonly rowHeight: number | null;
 }) {
-  // The first block's rows are measured here and size the empty blocks below.
-  const [firstBlock, setFirstBlock] = useState<HTMLElement | null>(null);
-  const rowHeight = useRowHeight(firstBlock, Math.min(BLOCK_ROWS, tracks.length));
-
   const starts = Array.from(
     { length: Math.ceil(tracks.length / BLOCK_ROWS) },
     (_, block) => block * BLOCK_ROWS,
@@ -235,40 +293,44 @@ function WindowedRows({
       start={start}
       renderRow={renderRow}
       first={start === 0}
-      pinned={tracks.length <= BLOCK_ROWS || (pinned >= start && pinned < start + BLOCK_ROWS)}
+      pinned={
+        (pinOneBlock && tracks.length <= BLOCK_ROWS) ||
+        pinned.some((index) => index >= start && index < start + BLOCK_ROWS)
+      }
       rowHeight={rowHeight}
-      blockRef={start === 0 ? setFirstBlock : undefined}
     />
   ));
 }
 
 /**
- * The height of one row of `block`, which holds `count` rows; null until it has a size, or after the
- * layout crossed the desktop breakpoint, where row heights change.
+ * The height of `probe`, an empty element with a row's height classes: read before the first paint
+ * and again whenever it changes (the layout crossing the desktop breakpoint), so it is always a real
+ * row's height and never a measurement of an empty block.
  */
-const useRowHeight = (block: HTMLElement | null, count: number): number | null => {
-  const desktop = useIsDesktop();
+const useRowHeight = (probe: HTMLElement | null): number | null => {
+  const [height, setHeight] = useState<number | null>(null);
 
-  const [measured, setMeasured] = useState<{
-    readonly height: number;
-    readonly desktop: boolean;
-  } | null>(null);
+  useLayoutEffect(() => {
+    if (probe === null) return undefined;
 
-  useEffect(() => {
-    if (block === null || count === 0) return undefined;
+    const read = (size: number) => {
+      if (size > 0) setHeight(size);
+    };
+
+    read(probe.getBoundingClientRect().height);
 
     const observer = new ResizeObserver((entries) => {
       const size = entries.at(-1)?.borderBoxSize[0]?.blockSize;
 
-      if (size !== undefined && size > 0) setMeasured({ height: size / count, desktop });
+      if (size !== undefined) read(size);
     });
 
-    observer.observe(block);
+    observer.observe(probe);
 
     return () => observer.disconnect();
-  }, [block, count, desktop]);
+  }, [probe]);
 
-  return measured !== null && measured.desktop === desktop ? measured.height : null;
+  return height;
 };
 
 function RowBlock({
@@ -278,7 +340,6 @@ function RowBlock({
   first,
   pinned,
   rowHeight,
-  blockRef,
 }: {
   readonly tracks: ReadonlyArray<Track>;
   readonly start: number;
@@ -286,35 +347,24 @@ function RowBlock({
   readonly first: boolean;
   readonly pinned: boolean;
   readonly rowHeight: number | null;
-  /** Receives the block's element, for the list to measure its rows. */
-  readonly blockRef: ((node: HTMLElement | null) => void) | undefined;
 }) {
   const count = Math.min(BLOCK_ROWS, tracks.length - start);
 
   const windowed = useWindowed({
-    initiallyNear: first || pinned,
-    estimate: (rowHeight ?? ESTIMATED_ROW_PX) * count,
+    initiallyNear: first,
+    pinned,
+    estimate: rowHeight === null ? null : rowHeight * count,
     size: count,
   });
 
-  const shown = windowed.near || pinned;
-  const windowRef = windowed.ref;
-
-  const ref = useCallback(
-    (node: HTMLElement | null) => {
-      windowRef(node);
-      blockRef?.(node);
-    },
-    [windowRef, blockRef],
-  );
-
   return (
     <div
-      ref={ref}
+      ref={windowed.ref}
       role="rowgroup"
-      style={shown ? undefined : { height: windowed.height ?? undefined }}
+      // Before the row height is read (the same frame, before paint) an empty block is flat.
+      style={windowed.shown ? undefined : { height: windowed.height ?? 0 }}
     >
-      {shown
+      {windowed.shown
         ? tracks
             .slice(start, start + count)
             .map((track, offset) => renderRow(track, start + offset))
@@ -328,16 +378,17 @@ function RowMover({
   reorder,
   label,
   index,
-  count,
   place,
 }: {
-  readonly reorder: ListReorder | undefined;
+  readonly reorder: RowReorder | undefined;
   readonly label: string;
   readonly index: number;
-  readonly count: number;
   /** The handle sits before the row; the buttons go before the row's menu. */
   readonly place: "start" | "end";
 }) {
+  // Read here, not passed to the rows, so a song added or removed re-renders only the movers.
+  const count = useContext(ListLengthContext);
+
   if (reorder === undefined) return null;
 
   if (reorder.mode === "drag" && place === "start") {
@@ -347,7 +398,7 @@ function RowMover({
           label={label}
           index={index}
           count={count}
-          reorder={reorder.reorder}
+          reorder={reorder}
           className="-mx-1 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100"
         />
       </span>
@@ -357,7 +408,7 @@ function RowMover({
   if (reorder.mode === "buttons" && place === "end") {
     return (
       <span role="cell" className="relative flex shrink-0">
-        <MoveButtons label={label} index={index} count={count} reorder={reorder.reorder} />
+        <MoveButtons label={label} index={index} count={count} reorder={reorder} />
       </span>
     );
   }
@@ -366,12 +417,9 @@ function RowMover({
 }
 
 /** Drag props and the drop line for a movable row. */
-const movable = (reorder: ListReorder | undefined, index: number) =>
+const movable = (reorder: RowReorder | undefined, index: number, dropSide: DropSide | null) =>
   reorder?.mode === "drag"
-    ? {
-        props: reorder.reorder.rowProps(index),
-        line: dropLine(reorder.reorder.dropSide(index)),
-      }
+    ? { props: reorder.rowProps(index), line: dropLine(dropSide) }
     : { props: {}, line: null };
 
 /**
@@ -388,8 +436,8 @@ const TrackRow = memo(function TrackRow({
   withheld,
   byline,
   highlighted,
-  count,
   reorder,
+  dropSide,
   onPlay,
   menuExtra,
 }: {
@@ -402,8 +450,9 @@ const TrackRow = memo(function TrackRow({
   readonly withheld: boolean;
   readonly byline: string | null;
   readonly highlighted: boolean;
-  readonly count: number;
-  readonly reorder: ListReorder | undefined;
+  readonly reorder: RowReorder | undefined;
+  /** Where a dragged row would land relative to this one, for its drop line. */
+  readonly dropSide: DropSide | null;
   /** Plays the list from the row at `index`. */
   readonly onPlay: (index: number) => void;
   /** Builds the row menu's extra items; called here so a stable function keeps the row memoized. */
@@ -413,7 +462,7 @@ const TrackRow = memo(function TrackRow({
   const extra = menuExtra?.(track, index);
   const playRow = () => onPlay(index);
   const row = useRef<HTMLDivElement>(null);
-  const move = movable(reorder, index);
+  const move = movable(reorder, index, dropSide);
 
   // A shared song link opens the album scrolled to the song.
   useEffect(() => {
@@ -430,7 +479,7 @@ const TrackRow = memo(function TrackRow({
         withheld={withheld}
         byline={byline}
         menuExtra={extra}
-        mover={{ reorder, index, count }}
+        mover={{ reorder, index, dropSide }}
       />
     );
   }
@@ -465,7 +514,7 @@ const TrackRow = memo(function TrackRow({
         move.line,
       )}
     >
-      <RowMover reorder={reorder} label={track.title} index={index} count={count} place="start" />
+      <RowMover reorder={reorder} label={track.title} index={index} place="start" />
       {variant === "album" ? (
         <span
           role="cell"
@@ -563,7 +612,7 @@ const TrackRow = memo(function TrackRow({
       >
         {formatDuration(track.durationMs)}
       </span>
-      <RowMover reorder={reorder} label={track.title} index={index} count={count} place="end" />
+      <RowMover reorder={reorder} label={track.title} index={index} place="end" />
       <span role="cell" className="relative flex w-12 shrink-0 justify-center lg:w-9">
         <TrackMenu
           track={track}
@@ -599,16 +648,16 @@ function UnavailableRow({
   readonly byline: string | null;
   readonly menuExtra: ReactNode;
   readonly mover: {
-    readonly reorder: ListReorder | undefined;
+    readonly reorder: RowReorder | undefined;
     readonly index: number;
-    readonly count: number;
+    readonly dropSide: DropSide | null;
   };
 }) {
-  const move = movable(mover.reorder, mover.index);
+  const move = movable(mover.reorder, mover.index, mover.dropSide);
 
   return (
     <div role="row" {...move.props} className={cn(rowClassName(variant), "gap-3", move.line)}>
-      <RowMover {...mover} label={track.title} place="start" />
+      <RowMover reorder={mover.reorder} index={mover.index} label={track.title} place="start" />
       <span role="cell" className="flex min-w-0 grow items-center gap-3 opacity-(--opacity-muted)">
         {variant === "album" ? (
           <span
@@ -648,7 +697,7 @@ function UnavailableRow({
           {formatDuration(track.durationMs)}
         </span>
       </span>
-      <RowMover {...mover} label={track.title} place="end" />
+      <RowMover reorder={mover.reorder} index={mover.index} label={track.title} place="end" />
       <span role="cell" className="relative flex w-12 shrink-0 justify-center lg:w-9">
         <TrackMenu
           track={track}
