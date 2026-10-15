@@ -12,7 +12,15 @@ import { api, internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { GUESTS_PER_HOUR, GUESTS_PER_JAM_PER_HOUR, MAX_GUESTS_PER_JAM } from "../convex/lib/jams";
 import { enableAuth, passwordFlow } from "./auth";
-import { allTracks, drainScheduled, makeBackend, seedLibrary, signUp, trackIds } from "./backend";
+import {
+  allTracks,
+  drainScheduled,
+  makeBackend,
+  seedLibrary,
+  signUp,
+  trackIds,
+  upsertFiles,
+} from "./backend";
 import type { Backend, User } from "./backend";
 import { failureCode } from "./harness";
 
@@ -459,6 +467,94 @@ describe("volume", () => {
 
     expect((await member.music.read("playback.position", {})).volume).toBeCloseTo(0.3);
     expect((await host.music.read("playback.position", {})).volume).toBe(1);
+  });
+});
+
+/** A song by the artist both libraries share, on an album of its own. */
+const song = (path: string, title: string) => ({
+  path,
+  title,
+  artist: "Shared Artist",
+  album: title,
+  genre: "Rock",
+  year: 1999,
+});
+
+describe("autoplay in a Jam", () => {
+  it("never picks songs from a library granted only to the host", async () => {
+    const backend = makeBackend();
+    const owner = await signUp(backend, "owner");
+    const admin = await signUp(backend, "admin");
+    const member = await signUp(backend, "member");
+    const alpha = await seedLibrary(backend, owner, { name: "Alpha", count: 0 });
+    const beta = await seedLibrary(backend, admin, { name: "Beta", count: 0 });
+
+    await upsertFiles(backend, alpha.libraryId, [song("Alpha/a.flac", "Alpha song")]);
+    await upsertFiles(backend, beta.libraryId, [
+      song("Beta/b1.flac", "Beta song 1"),
+      song("Beta/b2.flac", "Beta song 2"),
+    ]);
+
+    // The second admin keeps Beta to themselves and the owner.
+    await admin.music.run("libraries.update", {
+      libraryId: beta.libraryId,
+      visibility: "restricted",
+    });
+    await admin.music.run("libraries.grant", {
+      libraryId: beta.libraryId,
+      userId: UserId.make(owner.id),
+    });
+
+    const tracks = await allTracks(owner);
+
+    const idOf = (title: string) =>
+      pick(
+        tracks.filter((track) => track.title === title),
+        0,
+      ).id;
+
+    await owner.music.run("devices.heartbeat", {
+      deviceId: HOST_DEVICE,
+      name: "Laptop",
+      kind: "web",
+    });
+    await owner.music.run("playback.play", {
+      trackIds: [idOf("Alpha song")],
+      deviceId: HOST_DEVICE,
+    });
+
+    // Alone, the owner's autoplay may pick from Beta.
+    expect(await queueTitles(owner)).toContain("Beta song 1");
+
+    // Hosting a Jam, it may not: the songs it picked go, and no new ones come from Beta.
+    const { code } = await owner.music.run("jam.start", {});
+
+    await member.music.run("jam.join", { code });
+    expect((await queueTitles(member)).some((title) => title.startsWith("Beta"))).toBe(false);
+
+    const stream = (trackId: TrackId) =>
+      failureCode(member.music.read("stream.url", { trackId, profile: "original" }));
+
+    // An autoplay entry from Beta left from before this rule doesn't stream to the member.
+    await backend.run(async (ctx) => {
+      const row = await ctx.db
+        .query("playbackQueues")
+        .withIndex("by_user", (q) => q.eq("userId", owner.id))
+        .unique();
+
+      const trackId = ctx.db.normalizeId("tracks", idOf("Beta song 2"));
+
+      if (row === null || trackId === null) throw new Error("No queue or song");
+
+      await ctx.db.patch(row._id, {
+        items: [...(row.items ?? []), { id: "old", trackId, autoplay: true }],
+      });
+    });
+    expect(await stream(idOf("Beta song 2"))).toBe("not_found");
+
+    // The host's own choice of a Beta song plays for everyone.
+    await owner.music.run("queue.add", { trackIds: [idOf("Beta song 1")] });
+    expect(await stream(idOf("Beta song 1"))).toBe(ok);
   });
 });
 
@@ -910,13 +1006,26 @@ describe("guest accounts from Jam links", () => {
     });
   });
 
+  it("go, and the link asks, when the host removes one who already left", async () => {
+    const { backend, host, code } = await guestsAllowed(await setup({}, false));
+    const guest = await joinAsGuest(backend, code);
+
+    await guest.music.run("jam.leave", {});
+    await host.music.run("jam.remove", { userId: UserId.make(guest.id) });
+    await drainScheduled(backend);
+
+    expect(await accountsLeft(backend, [guest.id])).toEqual([]);
+    expect((await host.music.read("jam.get", {}))?.approvalAfterRemoval).toBe(true);
+  });
+
   it("can't start a Jam of their own, whose link would make more guests", async () => {
     const { backend, code } = await guestsAllowed(await setup());
     const guest = await joinAsGuest(backend, code);
     const invitedGuest = await signUp(backend, "guest");
 
+    // Nor can a guest an admin invited: only members and admins hand out links that make accounts.
     expect(await failureCode(guest.music.run("jam.start", {}))).toBe("forbidden");
-    expect(await failureCode(invitedGuest.music.run("jam.start", {}))).toBe(ok);
+    expect(await failureCode(invitedGuest.music.run("jam.start", {}))).toBe("forbidden");
   });
 
   it("see only playlists shared with them by name, not ones shared with everyone", async () => {
@@ -947,12 +1056,10 @@ describe("guest accounts from Jam links", () => {
     const { backend, host, code } = await setup();
     const preview = await backend.query(api.setup.jam, { code });
 
-    expect(preview).toMatchObject({
-      state: "open",
-      memberCount: 1,
-      guestAccounts: false,
-      nowPlaying: { title: "Rock 0001" },
-    });
+    // Whose Jam and how to get in; nothing of what plays or who listens.
+    const { name: hostName } = await host.music.read("account.me", {});
+
+    expect(preview).toEqual({ state: "open", hostName, guestAccounts: false });
 
     await host.music.run("jam.end", {});
     expect(await backend.query(api.setup.jam, { code })).toEqual({ state: "ended" });

@@ -7,7 +7,7 @@ import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { mediaBaseUrl, requireEnv } from "../lib/env";
 import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
-import { resolvePlayback } from "../lib/jams";
+import { jamShareable, resolvePlayback } from "../lib/jams";
 import { isClaimed } from "../lib/paths";
 import {
   findShare,
@@ -251,11 +251,19 @@ const inJamQueue = async (
     ctx.db.get(trackId),
   ]);
 
-  return (
-    track !== null &&
-    canRead(playback.owner, track.libraryId) &&
-    queue.items.some((item) => item.trackId === trackId)
-  );
+  const entries = queue.items.filter((item) => item.trackId === trackId);
+
+  if (track === null || !canRead(playback.owner, track.libraryId) || entries.length === 0) {
+    return false;
+  }
+
+  // Someone in the Jam chose it (the host, or a person who can read it): it plays for all.
+  if (entries.some((item) => !item.autoplay)) return true;
+
+  // Autoplay chose it: only from a library the Jam may share, for entries from before that rule.
+  const library = await ctx.db.get(track.libraryId);
+
+  return library !== null && jamShareable(library, playback.owner.id);
 };
 
 const touch = (ctx: MutationCtx, playlist: Doc<"playlists">) =>

@@ -75,8 +75,6 @@ export type JamPreview =
       /** Who may join: anyone signed in, people the host approves, or nobody new. */
       readonly state: "open" | "approval" | "locked";
       readonly hostName: string;
-      readonly nowPlaying: { readonly title: string; readonly artist: string } | null;
-      readonly memberCount: number;
       /** Whether a visitor without an account may make a guest account to join. */
       readonly guestAccounts: boolean;
     };

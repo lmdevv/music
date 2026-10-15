@@ -87,6 +87,26 @@ export const approvalAfterRemoval = (jam: Doc<"jams">): boolean =>
 export const joinPolicy = (jam: Doc<"jams">): JamJoinPolicy =>
   approvalAfterRemoval(jam) ? "approval" : jam.settings.join;
 
+/**
+ * Whether a Jam may share a library's songs that autoplay chose rather than the host: ones the
+ * host owns, or ones shared with everyone on the server. A library granted to the host alone
+ * stays theirs; only their own choice of a song from it reaches the Jam.
+ */
+export const jamShareable = (library: Doc<"libraries">, hostId: Id<"users">): boolean =>
+  library.ownerId === hostId || library.visibility === "shared";
+
+/** The host as autoplay sees them while they host a Jam: only the libraries a Jam may share. */
+export const jamAutoplayViewer = (host: Viewer): Viewer => {
+  const libraries = host.libraries.filter((library) => jamShareable(library, host.id));
+
+  return {
+    ...host,
+    libraries,
+    libraryIds: new Set(libraries.map((library) => library._id)),
+    readsEveryLibrary: false,
+  };
+};
+
 /** The active Jam `userId` hosts, if any. A host has at most one. */
 export const hostedJam = (ctx: ReadCtx, userId: Id<"users">): Promise<Doc<"jams"> | null> =>
   ctx.db

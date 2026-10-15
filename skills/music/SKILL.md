@@ -152,8 +152,10 @@ marks them `joinedViaJam`. Once the host removes or turns someone away, an open 
 about everyone new until `music jam relink`. A guest account goes when the host removes or turns it
 away and when its Jam ends, unless an admin promotes it first (`music people role --user-id <id>
 --role member`). One Jam's link makes at most 25 guests, and 10 an hour (30 an hour across the
-server). Such guests can't start a Jam, and don't see playlists shared with everyone, only ones
-shared with them by name. Songs heard only through a Jam get stream URLs that last five minutes.
+server). No guest can start a Jam, and Jam guests don't see playlists shared with everyone, only
+ones shared with them by name. Songs heard only through a Jam get stream URLs that last five
+minutes, and while a Jam runs, autoplay picks only from libraries the host owns or that are shared
+with everyone. A Jam link's page shows only the host's name and whether the host lets people in.
 
 Get a link to send: the path goes after the web address (the server URL without `/convex`). A
 song opens its album with the song highlighted; someone who can't open it sees a no-access page:

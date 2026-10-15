@@ -13,7 +13,6 @@ import {
   approvalAfterRemoval,
   endJam,
   hostedJam,
-  isJamGuest,
   jamCodeOf,
   joinPolicy,
   currentMembership,
@@ -22,6 +21,7 @@ import {
   newJamCode,
 } from "../lib/jams";
 import { removeJamGuest } from "../lib/people";
+import { refreshJamAutoplay } from "./playback";
 import { contributorOf, makeContributors } from "../lib/present";
 import { readServerSettings } from "../lib/serverSettings";
 import type { ReadCtx, Viewer } from "../lib/viewer";
@@ -170,9 +170,8 @@ export const jamQueries = {
 
 export const jamMutations = {
   "jam.start": async (ctx, viewer) => {
-    if (isJamGuest(viewer)) {
-      return fail("forbidden", "A guest account from a Jam link can't start a Jam of its own");
-    }
+    // A Jam link can make guest accounts, so only members and admins hand one out.
+    if (viewer.role === "guest") return fail("forbidden", "Guests can't start a Jam");
 
     const hosted = await hostedJam(ctx, viewer.id);
 
@@ -187,6 +186,9 @@ export const jamMutations = {
       status: "active",
       settings: DEFAULT_JAM_SETTINGS,
     });
+
+    // Autoplay's songs so far may come from libraries granted to the host alone.
+    await refreshJamAutoplay(ctx, viewer);
 
     return { jamId, code };
   },
@@ -347,9 +349,9 @@ export const jamMutations = {
     const jam = await ownJam(ctx, viewer);
     const member = await membershipOf(ctx, jam, args.userId);
 
-    if (member.status !== "joined" && member.status !== "pending") {
-      return fail("conflict", "They aren't in this Jam");
-    }
+    // Someone who left can be removed too: the link stops letting them back, and a guest
+    // account it made goes.
+    if (member.status === "removed") return fail("conflict", "They aren't in this Jam");
 
     await ctx.db.patch(member._id, {
       status: "removed",

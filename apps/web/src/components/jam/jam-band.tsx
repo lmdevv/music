@@ -1,5 +1,6 @@
 import type { Contributor, Jam } from "@music/commands/models";
 import { usePlayer } from "@music/player/react";
+import { useRead } from "@music/sdk/react";
 import { Button } from "@music/ui/components/button";
 import { cn } from "@music/ui/lib/utils";
 import { UsersRoundIcon } from "lucide-react";
@@ -82,6 +83,11 @@ export function JamButton({
 }) {
   const { jam } = usePlayer();
   const { setJamOpen } = useUi();
+  const me = useRead("account.me", {});
+  const idle = jam === null || jam.status === "ended";
+
+  // Guests can't start a Jam (its link could make accounts); in one, they still open it.
+  if (idle && (me === undefined || me.role === "guest")) return null;
 
   return (
     <button
@@ -96,7 +102,7 @@ export function JamButton({
       )}
     >
       <UsersRoundIcon aria-hidden className="size-4" />
-      {jam === null || jam.status === "ended" ? "Start a Jam" : "Jam"}
+      {idle ? "Start a Jam" : "Jam"}
     </button>
   );
 }

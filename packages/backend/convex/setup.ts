@@ -1,13 +1,9 @@
 import { v } from "convex/values";
 
-import type { Doc } from "./_generated/dataModel";
-import type { QueryCtx } from "./_generated/server";
 import { query } from "./_generated/server";
 import { sha256Hex } from "./lib/crypto";
 import { inviterStillAllows } from "./lib/invites";
 import { jamCodeOf, joinPolicy } from "./lib/jams";
-import { storedQueue } from "./lib/queue";
-import { canRead, viewerOf } from "./lib/viewer";
 import { readServerSettings } from "./lib/serverSettings";
 import { resetByHash, resetStillAllowed } from "./lib/resets";
 
@@ -73,16 +69,9 @@ export const jam = query({
 
     if (found.status !== "active") return { state: "ended" as const };
 
-    const host = await ctx.db.get(found.hostId);
-
-    const [nowPlaying, members, settings] = await Promise.all([
-      host === null ? null : hostNowPlaying(ctx, host),
-      ctx.db
-        .query("jamMembers")
-        .withIndex("by_jam", (q) => q.eq("jamId", found._id).eq("status", "joined"))
-        .take(JAM_PREVIEW_MEMBERS),
-      readServerSettings(ctx),
-    ]);
+    // Anyone holding the link sees this, signed in or not: whose Jam it is and how to get in,
+    // nothing of what plays or who listens.
+    const [host, settings] = await Promise.all([ctx.db.get(found.hostId), readServerSettings(ctx)]);
 
     // The policy in effect, so the page offers what will happen: after a removal an open Jam
     // asks the host, which anyone with the link can then tell.
@@ -91,34 +80,10 @@ export const jam = query({
     return {
       state: policy,
       hostName: host?.name ?? "Someone",
-      nowPlaying,
-      memberCount: members.length,
       guestAccounts: settings.jamGuestAccounts && policy !== "locked",
     };
   },
 });
-
-/**
- * The song a Jam's host is on, if they can still read it. Reads only that entry of the queue:
- * anyone holding the link runs this, signed in or not.
- */
-const hostNowPlaying = async (
-  ctx: QueryCtx,
-  host: Doc<"users">,
-): Promise<{ readonly title: string; readonly artist: string } | null> => {
-  const queue = await storedQueue(ctx, host._id);
-  const item = queue.items[queue.index];
-  const track = item === undefined ? null : await ctx.db.get(item.trackId);
-
-  if (track === null || track.missing || !canRead(await viewerOf(ctx, host), track.libraryId)) {
-    return null;
-  }
-
-  return { title: track.title, artist: track.artistName };
-};
-
-/** Members a Jam preview counts at most. */
-const JAM_PREVIEW_MEMBERS = 200;
 
 /**
  * What the reset-password screen shows for a token. Public like `invite`: only someone holding

@@ -20,6 +20,8 @@ import {
 } from "../lib/queue";
 import type { Queue, QueueItem, StoredQueue } from "../lib/queue";
 import {
+  hostedJam,
+  jamAutoplayViewer,
   listenAlong,
   requireAdds,
   requireControl,
@@ -207,13 +209,15 @@ const toppedUp = async (
     return queue;
   }
 
-  const seed = await ctx.db.get(current.trackId);
+  const [seed, jam] = await Promise.all([ctx.db.get(current.trackId), hostedJam(ctx, viewer.id)]);
 
   if (seed === null) return queue;
 
   const songs = await autoplaySongs(
     ctx,
-    viewer,
+    // In a Jam, autoplay's songs go to everyone in it: never from a library granted only to the
+    // host (`jamShareable`). The host's own adds are their choice.
+    jam === null ? viewer : jamAutoplayViewer(viewer),
     seed,
     queue.items.map((item) => item.trackId),
   );
@@ -233,6 +237,18 @@ const toppedUp = async (
         ? undefined
         : keptOrder([...queue.unshuffled, ...added.items.map((item) => item.id)], items),
   };
+};
+
+/**
+ * Picks autoplay's upcoming songs again for a host who just started a Jam: ones chosen before
+ * may come from libraries granted to the host alone, which the Jam must not share.
+ */
+export const refreshJamAutoplay = async (ctx: MutationCtx, host: Viewer): Promise<void> => {
+  const queue = await loadQueue(ctx, host);
+
+  if (!queue.items.some((item, position) => position > queue.index && item.autoplay)) return;
+
+  await saveTopped(ctx, host, withoutAutoplay(queue));
 };
 
 /**

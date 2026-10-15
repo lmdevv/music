@@ -12,7 +12,6 @@ import type { FormEvent } from "react";
 
 import { AuthHeading, AuthLayout, Field } from "@/components/auth/auth-layout";
 import { describeFailure, useAction } from "@/lib/action";
-import { plural } from "@/lib/format";
 
 export const Route = createFileRoute("/jam/$code")({ component: JamPage });
 
@@ -51,14 +50,9 @@ function JamPage() {
       <AuthHeading
         title={`Join ${preview.hostName}'s Jam`}
         lead={
-          <>
-            {preview.nowPlaying === null
-              ? "Nothing is playing yet."
-              : `Now playing: ${preview.nowPlaying.title} by ${preview.nowPlaying.artist}.`}{" "}
-            {preview.memberCount === 0
-              ? "Be the first to join."
-              : `${plural(preview.memberCount, "person")} listening along.`}
-          </>
+          preview.state === "approval"
+            ? `Listen along to what ${preview.hostName} plays. They let each person in.`
+            : `Listen along to what ${preview.hostName} plays, and add songs to the queue.`
         }
       />
       {preview.state === "locked" ? (
