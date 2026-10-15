@@ -7,6 +7,7 @@ import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { mediaBaseUrl, requireEnv } from "../lib/env";
 import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
+import { resolvePlayback } from "../lib/jams";
 import { isClaimed } from "../lib/paths";
 import {
   findShare,
@@ -17,6 +18,7 @@ import {
   POSITION_STEP,
 } from "../lib/playlists";
 import type { OpenedPlaylist } from "../lib/playlists";
+import { storedQueue } from "../lib/queue";
 import { contributorOf, makeContributors, makePresenter, presentPlaylist } from "../lib/present";
 import type { Presenter } from "../lib/present";
 import { canRead, loadPerson } from "../lib/viewer";
@@ -24,7 +26,15 @@ import type { ReadCtx, Viewer } from "../lib/viewer";
 import type { MutationHandlers, QueryHandlers } from "./types";
 import { ok } from "./types";
 
+/** How long a stream URL works for someone who can read the song's library. */
 const STREAM_TTL_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * How long a stream URL works for someone who hears the song only through a Jam. A URL can't be
+ * taken back once signed, so leaving or being removed from the Jam ends their access this soon;
+ * the player signs a new one as it needs to.
+ */
+const JAM_STREAM_TTL_MS = 5 * 60 * 1000;
 
 /** Most likes `likes.list` returns; `likes.page` reads any number. */
 const MAX_LIKES = 1000;
@@ -222,6 +232,32 @@ const LINKS = {
   },
 } satisfies LinkBuilders;
 
+/**
+ * Whether `trackId` is in the queue of the Jam the viewer has joined. People in a Jam may stream
+ * the songs the host plays even from libraries they can't read, but only those, and only while
+ * they are in it. The host must still be able to read the song.
+ */
+const inJamQueue = async (
+  ctx: QueryCtx,
+  viewer: Viewer,
+  trackId: Id<"tracks">,
+): Promise<boolean> => {
+  const playback = await resolvePlayback(ctx, viewer);
+
+  if (playback.kind !== "member") return false;
+
+  const [queue, track] = await Promise.all([
+    storedQueue(ctx, playback.owner.id),
+    ctx.db.get(trackId),
+  ]);
+
+  return (
+    track !== null &&
+    canRead(playback.owner, track.libraryId) &&
+    queue.items.some((item) => item.trackId === trackId)
+  );
+};
+
 const touch = (ctx: MutationCtx, playlist: Doc<"playlists">) =>
   ctx.db.patch(playlist._id, { updatedAt: Date.now() });
 
@@ -395,7 +431,11 @@ export const collectionQueries = {
   "stream.url": async (ctx, viewer, args) => {
     const track = await ctx.db.get(tableId(ctx, "tracks", args.trackId));
 
-    if (track === null || track.missing || !canRead(viewer, track.libraryId)) {
+    if (track === null || track.missing) return fail("not_found", "Track not found");
+
+    const readable = canRead(viewer, track.libraryId);
+
+    if (!readable && !(await inJamQueue(ctx, viewer, track._id))) {
       return fail("not_found", "Track not found");
     }
 
@@ -405,7 +445,7 @@ export const collectionQueries = {
       return fail("not_found", "Track not found");
     }
 
-    const expiresAt = Date.now() + STREAM_TTL_MS;
+    const expiresAt = Date.now() + (readable ? STREAM_TTL_MS : JAM_STREAM_TTL_MS);
 
     const signature = await signResource(
       requireEnv("STREAM_SIGNING_KEY"),

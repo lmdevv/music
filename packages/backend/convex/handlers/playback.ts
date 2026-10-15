@@ -19,6 +19,15 @@ import {
   storedQueue,
 } from "../lib/queue";
 import type { Queue, QueueItem, StoredQueue } from "../lib/queue";
+import {
+  listenAlong,
+  requireAdds,
+  requireControl,
+  requireEdit,
+  requireHost,
+  resolvePlayback,
+} from "../lib/jams";
+import type { Playback } from "../lib/jams";
 import { canRead } from "../lib/viewer";
 import type { ReadCtx, Viewer } from "../lib/viewer";
 import type { MutationHandlers, QueryHandlers } from "./types";
@@ -136,6 +145,20 @@ const locateReport = async (
   return found === null || track === undefined ? null : { queue, index: found, track };
 };
 
+/** Fails unless the host (`owner`) can play every one of `songs`. */
+const requireHostCanPlay = async (
+  ctx: MutationCtx,
+  owner: Viewer,
+  songs: ReadonlyArray<Id<"tracks">>,
+): Promise<void> => {
+  const docs = await Promise.all(songs.map((id) => ctx.db.get(id)));
+  const unplayable = docs.find((doc) => doc !== null && !canRead(owner, doc.libraryId));
+
+  if (unplayable !== undefined && unplayable !== null) {
+    fail("forbidden", `${unplayable.title} is in a library the host can't play`);
+  }
+};
+
 /** Picks the device that should play when the caller did not name one. */
 const defaultDevice = async (
   ctx: MutationCtx,
@@ -246,28 +269,58 @@ const withoutAutoplay = (queue: StoredQueue): StoredQueue => {
   };
 };
 
-/** The session's device, position, and volume. Reads only the session and its device. */
-const positionOf = async (
+/** The device someone in a Jam listens along on, when they do and the host allows it. */
+const followingDevice = (playback: Playback): string | null =>
+  playback.kind === "member" &&
+  playback.jam.settings.listenAlong &&
+  playback.member.listening &&
+  playback.member.deviceId !== undefined
+    ? playback.member.deviceId
+    : null;
+
+/**
+ * The session's device, position, and volume; the host's in someone else's Jam. A person in
+ * someone else's Jam keeps their own volume, which `playback.volume` changes; listening along,
+ * they also get their own device and `following`. Reads only the sessions and the device.
+ */
+const positionFor = async (
   ctx: ReadCtx,
-  viewer: Viewer,
+  actor: Viewer,
+  playback: Playback,
 ): Promise<(typeof PlaybackPosition)["Encoded"]> => {
-  const session = await findSession(ctx, viewer.id);
+  const owner = playback.owner;
+  const session = await findSession(ctx, owner.id);
+  const following = followingDevice(playback);
 
   if (session === null) {
-    return { activeDevice: null, positionMs: 0, playing: false, updatedAt: 0, volume: 1 };
+    return {
+      activeDevice: null,
+      positionMs: 0,
+      playing: false,
+      updatedAt: 0,
+      volume: 1,
+      following: false,
+    };
   }
 
-  const device =
-    session.activeDeviceId === undefined
-      ? null
-      : await findDevice(ctx, viewer.id, session.activeDeviceId);
+  const [device, own] = await Promise.all([
+    following !== null
+      ? findDevice(ctx, actor.id, following)
+      : session.activeDeviceId === undefined
+        ? null
+        : findDevice(ctx, owner.id, session.activeDeviceId),
+    playback.kind === "member" ? findSession(ctx, actor.id) : null,
+  ]);
 
   return {
     activeDevice: device === null ? null : presentDevice(device, Date.now()),
     positionMs: session.positionMs,
     playing: session.playing,
     updatedAt: session.updatedAt,
-    volume: session.volume,
+    volume: playback.kind === "member" ? (own?.volume ?? 1) : session.volume,
+    // A device not registered yet (a first visit from a Jam link) follows once its first
+    // heartbeat lands; until then nothing here plays.
+    following: following !== null && device !== null,
   };
 };
 
@@ -304,9 +357,16 @@ const presentQueue = async (
   };
 };
 
-/** The queue the viewer may play. Reads neither the session nor its device. */
-const queueOf = async (ctx: ReadCtx, viewer: Viewer): Promise<(typeof PlaybackQueue)["Encoded"]> =>
-  presentQueue(ctx, viewer, await loadQueue(ctx, viewer));
+/**
+ * The queue the viewer plays: their own, or the host's in someone else's Jam (with the host's
+ * songs, readable or not: the host chose to play them). Reads neither session nor device.
+ */
+const queueFor = async (
+  ctx: ReadCtx,
+  actor: Viewer,
+  playback: Playback,
+): Promise<(typeof PlaybackQueue)["Encoded"]> =>
+  presentQueue(ctx, actor, await loadQueue(ctx, playback.owner));
 
 /** Marks that a command moved playback to another song, from its start. */
 const restartSession = async (
@@ -321,14 +381,21 @@ const restartSession = async (
 
 export const playbackQueries = {
   "playback.state": async (ctx, viewer) => {
-    const [position, queue] = await Promise.all([positionOf(ctx, viewer), queueOf(ctx, viewer)]);
+    // Resolved once for both halves: for someone in a Jam it reads the host and their libraries.
+    const playback = await resolvePlayback(ctx, viewer);
+
+    const [position, queue] = await Promise.all([
+      positionFor(ctx, viewer, playback),
+      queueFor(ctx, viewer, playback),
+    ]);
 
     return { ...position, ...queue };
   },
 
-  "playback.position": positionOf,
+  "playback.position": async (ctx, viewer) =>
+    positionFor(ctx, viewer, await resolvePlayback(ctx, viewer)),
 
-  "queue.list": queueOf,
+  "queue.list": async (ctx, viewer) => queueFor(ctx, viewer, await resolvePlayback(ctx, viewer)),
 
   "devices.list": async (ctx, viewer, args) => {
     const session = await findSession(ctx, viewer.id);
@@ -368,7 +435,12 @@ export const playbackQueries = {
 } satisfies Partial<QueryHandlers>;
 
 export const playbackMutations = {
-  "playback.play": async (ctx, viewer, args) => {
+  "playback.play": async (ctx, actor, args) => {
+    const playback = await resolvePlayback(ctx, actor);
+    requireHost(playback, "In a Jam, add songs to the queue instead of replacing it");
+    // The session and queue acted on: the host's in someone else's Jam.
+    const viewer = playback.owner;
+
     if (args.deviceId !== undefined && (await findDevice(ctx, viewer.id, args.deviceId)) === null) {
       return fail("not_found", "That device is not registered");
     }
@@ -417,7 +489,12 @@ export const playbackMutations = {
     return ok;
   },
 
-  "playback.pause": async (ctx, viewer) => {
+  "playback.pause": async (ctx, actor) => {
+    const playback = await resolvePlayback(ctx, actor);
+    requireControl(playback);
+    // The session and queue acted on: the host's in someone else's Jam.
+    const viewer = playback.owner;
+
     const session = await ensureSession(ctx, viewer.id);
     const now = Date.now();
     await ctx.db.patch(session._id, {
@@ -429,7 +506,12 @@ export const playbackMutations = {
     return ok;
   },
 
-  "playback.resume": async (ctx, viewer) => {
+  "playback.resume": async (ctx, actor) => {
+    const playback = await resolvePlayback(ctx, actor);
+    requireControl(playback);
+    // The session and queue acted on: the host's in someone else's Jam.
+    const viewer = playback.owner;
+
     const session = await ensureSession(ctx, viewer.id);
     const queue = await loadQueue(ctx, viewer);
 
@@ -441,7 +523,12 @@ export const playbackMutations = {
     return ok;
   },
 
-  "playback.next": async (ctx, viewer) => {
+  "playback.next": async (ctx, actor) => {
+    const playback = await resolvePlayback(ctx, actor);
+    requireControl(playback);
+    // The session and queue acted on: the host's in someone else's Jam.
+    const viewer = playback.owner;
+
     const session = await ensureSession(ctx, viewer.id);
     // Whatever comes next starts from the top, so it counts as a new play.
     const queue = { ...(await loadQueue(ctx, viewer)), reportedTrackId: undefined };
@@ -481,7 +568,12 @@ export const playbackMutations = {
     return ok;
   },
 
-  "playback.previous": async (ctx, viewer) => {
+  "playback.previous": async (ctx, actor) => {
+    const playback = await resolvePlayback(ctx, actor);
+    requireControl(playback);
+    // The session and queue acted on: the host's in someone else's Jam.
+    const viewer = playback.owner;
+
     const session = await ensureSession(ctx, viewer.id);
     const queue = await loadQueue(ctx, viewer);
     const position = livePosition(session, Date.now());
@@ -501,14 +593,24 @@ export const playbackMutations = {
     return ok;
   },
 
-  "playback.seek": async (ctx, viewer, args) => {
+  "playback.seek": async (ctx, actor, args) => {
+    const playback = await resolvePlayback(ctx, actor);
+    requireControl(playback);
+    // The session and queue acted on: the host's in someone else's Jam.
+    const viewer = playback.owner;
+
     const session = await ensureSession(ctx, viewer.id);
     await ctx.db.patch(session._id, { positionMs: args.positionMs, updatedAt: Date.now() });
 
     return ok;
   },
 
-  "playback.jump": async (ctx, viewer, args) => {
+  "playback.jump": async (ctx, actor, args) => {
+    const playback = await resolvePlayback(ctx, actor);
+    requireControl(playback);
+    // The session and queue acted on: the host's in someone else's Jam.
+    const viewer = playback.owner;
+
     const session = await ensureSession(ctx, viewer.id);
     const queue = await loadQueue(ctx, viewer);
     const index = itemPosition(queue, args.itemId);
@@ -529,7 +631,12 @@ export const playbackMutations = {
     return ok;
   },
 
-  "playback.shuffle": async (ctx, viewer, args) => {
+  "playback.shuffle": async (ctx, actor, args) => {
+    const playback = await resolvePlayback(ctx, actor);
+    requireControl(playback);
+    // The session and queue acted on: the host's in someone else's Jam.
+    const viewer = playback.owner;
+
     const queue = await loadQueue(ctx, viewer);
 
     if (args.on === queue.shuffle) {
@@ -587,7 +694,12 @@ export const playbackMutations = {
     return ok;
   },
 
-  "playback.repeat": async (ctx, viewer, args) => {
+  "playback.repeat": async (ctx, actor, args) => {
+    const playback = await resolvePlayback(ctx, actor);
+    requireControl(playback);
+    // The session and queue acted on: the host's in someone else's Jam.
+    const viewer = playback.owner;
+
     const queue = await loadQueue(ctx, viewer);
     await saveQueue(ctx, viewer.id, { ...queue, repeat: args.mode });
 
@@ -605,6 +717,15 @@ export const playbackMutations = {
     const device = await findDevice(ctx, viewer.id, args.deviceId);
 
     if (device === null) return fail("not_found", "That device is not registered");
+    const playback = await resolvePlayback(ctx, viewer);
+
+    // In someone else's Jam, "play on" picks the device that listens along.
+    if (playback.kind === "member") {
+      await listenAlong(ctx, playback.jam, playback.member, device.deviceId);
+
+      return ok;
+    }
+
     const session = await ensureSession(ctx, viewer.id);
     const now = Date.now();
     await ctx.db.patch(session._id, {
@@ -617,6 +738,8 @@ export const playbackMutations = {
   },
 
   "playback.report": async (ctx, viewer, args) => {
+    // A device listening along to someone else's Jam follows the host's device, which reports.
+    if ((await resolvePlayback(ctx, viewer)).kind === "member") return ok;
     const session = await ensureSession(ctx, viewer.id);
 
     if (session.activeDeviceId !== args.deviceId) return ok;
@@ -681,11 +804,20 @@ export const playbackMutations = {
     return ok;
   },
 
-  "queue.add": async (ctx, viewer, args) => {
+  "queue.add": async (ctx, actor, args) => {
+    const playback = await resolvePlayback(ctx, actor);
+    // The session and queue acted on: the host's in someone else's Jam.
+    const viewer = playback.owner;
+
     const session = await ensureSession(ctx, viewer.id);
     const queue = await loadQueue(ctx, viewer);
-    const songs = (await playableTracks(ctx, viewer, args.trackIds)).ids;
-    const created = newItems(queue, songs, { kind: "person", userId: viewer.id });
+    requireAdds(playback, queue, args.trackIds.length);
+    // People add songs they can read themselves, also to a Jam; there, the host must be able to
+    // play them too, or the entry would sit hidden in the host's queue.
+    const songs = (await playableTracks(ctx, actor, args.trackIds)).ids;
+
+    if (playback.kind === "member") await requireHostCanPlay(ctx, viewer, songs);
+    const created = newItems(queue, songs, { kind: "person", userId: actor.id });
 
     if (queue.items.length === 0) {
       const items = created.items.slice(0, MAX_QUEUE);
@@ -744,12 +876,17 @@ export const playbackMutations = {
     return { ok: true, itemIds: addedIds.filter((id) => kept.has(id)) } as const;
   },
 
-  "queue.remove": async (ctx, viewer, args) => {
+  "queue.remove": async (ctx, actor, args) => {
+    const playback = await resolvePlayback(ctx, actor);
+    // The session and queue acted on: the host's in someone else's Jam.
+    const viewer = playback.owner;
+
     const session = await ensureSession(ctx, viewer.id);
     const queue = await loadQueue(ctx, viewer);
     const position = itemPosition(queue, args.itemId);
 
     if (position === null) return fail("not_found", GONE_MESSAGE);
+    requireEdit(playback, queue.items[position]);
     const items = queue.items.filter((item) => item.id !== args.itemId);
 
     const remaining = {
@@ -775,12 +912,17 @@ export const playbackMutations = {
     return ok;
   },
 
-  "queue.move": async (ctx, viewer, args) => {
+  "queue.move": async (ctx, actor, args) => {
+    const playback = await resolvePlayback(ctx, actor);
+    // The session and queue acted on: the host's in someone else's Jam.
+    const viewer = playback.owner;
+
     const queue = await loadQueue(ctx, viewer);
     const from = itemPosition(queue, args.itemId);
     const moving = from === null ? undefined : queue.items[from];
 
     if (moving === undefined) return fail("not_found", GONE_MESSAGE);
+    requireEdit(playback, moving);
 
     if (args.afterItemId === args.itemId) {
       return fail("invalid_args", "An entry can't move after itself");
@@ -798,6 +940,11 @@ export const playbackMutations = {
     const current = queue.items[queue.index];
     const index = current === undefined ? 0 : items.findIndex((item) => item.id === current.id);
 
+    // A played song moved back to come up again counts as adding it, within the host's limit.
+    if (from !== null && from < queue.index && items.indexOf(moving) > index) {
+      requireAdds(playback, queue, 1);
+    }
+
     // The playing entry stays the same, so the session is untouched.
     await saveTopped(ctx, viewer, {
       ...queue,
@@ -812,7 +959,12 @@ export const playbackMutations = {
     return ok;
   },
 
-  "queue.clear": async (ctx, viewer) => {
+  "queue.clear": async (ctx, actor) => {
+    const playback = await resolvePlayback(ctx, actor);
+    requireHost(playback, "Only the host clears the queue in a Jam");
+    // The session and queue acted on: the host's in someone else's Jam.
+    const viewer = playback.owner;
+
     const queue = await loadQueue(ctx, viewer);
     const items = queue.items.slice(0, queue.index + 1);
 
@@ -825,7 +977,12 @@ export const playbackMutations = {
     return ok;
   },
 
-  "queue.autoplay": async (ctx, viewer, args) => {
+  "queue.autoplay": async (ctx, actor, args) => {
+    const playback = await resolvePlayback(ctx, actor);
+    requireHost(playback, "Only the host turns autoplay on or off in a Jam");
+    // The session and queue acted on: the host's in someone else's Jam.
+    const viewer = playback.owner;
+
     const queue = { ...(await loadQueue(ctx, viewer)), autoplay: args.on };
 
     await saveQueue(
