@@ -105,7 +105,6 @@ const RootClaim = Schema.Union([
 /** Whether Convex accepted a library's real folder, and why not. */
 export type RootClaim = Schema.Schema.Type<typeof RootClaim>;
 
-
 /**
  * The artwork a batch stopped using somewhere. Convex versions before it was reported send none,
  * so their art is left to the full collection at startup.
