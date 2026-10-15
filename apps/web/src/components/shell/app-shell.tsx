@@ -16,28 +16,63 @@ import { PhoneChrome } from "./phone-chrome";
 import { Sidebar } from "./sidebar";
 import { UiStateProvider, useUi } from "./ui-state";
 
+/** A surface the shell loads on demand, and the function that loads its chunk ahead of time. */
+interface Surface {
+  readonly Component: () => ReactNode;
+  readonly preload: () => Promise<void>;
+}
+
+/**
+ * A lazily loaded surface that renders straight away once its chunk is in. `React.lazy` alone
+ * suspends on its first render even when the chunk has loaded, and React holds a revealed boundary
+ * back for up to 300 ms, so a preloaded command menu still took a third of a second to open.
+ */
+const surface = (load: () => Promise<() => ReactNode>): Surface => {
+  // The loaded component, kept for the page's life like the module it comes from.
+  let ready: (() => ReactNode) | null = null;
+
+  const loadReady = async () => {
+    ready = await load();
+
+    return ready;
+  };
+
+  const Pending = lazy(async () => ({ default: await loadReady() }));
+
+  return {
+    Component: () => {
+      const Ready = ready ?? Pending;
+
+      return <Ready />;
+    },
+    preload: async () => {
+      await loadReady();
+    },
+  };
+};
+
 // The surfaces the shell opens on demand load as their own chunks: the command menu with its
 // catalog and forms, Now Playing, the queue, the Jam panel with its QR encoder, and the New
 // playlist dialog. None of them is on screen when a page first loads.
 const surfaces = {
-  commandMenu: () => import("@/components/command/command-menu"),
-  nowPlaying: () => import("@/components/player/now-playing"),
-  queue: () => import("@/components/player/queue"),
-  jamPanel: () => import("@/components/jam/jam-panel"),
-  newPlaylist: () => import("@/components/playlists/new-playlist-dialog"),
+  commandMenu: surface(async () => (await import("@/components/command/command-menu")).CommandMenu),
+  nowPlaying: surface(async () => (await import("@/components/player/now-playing")).NowPlaying),
+  queue: surface(async () => (await import("@/components/player/queue")).QueuePanel),
+  jamPanel: surface(async () => (await import("@/components/jam/jam-panel")).JamPanel),
+  newPlaylist: surface(
+    async () => (await import("@/components/playlists/new-playlist-dialog")).NewPlaylistDialog,
+  ),
 };
 
-const CommandMenu = lazy(async () => ({ default: (await surfaces.commandMenu()).CommandMenu }));
+const CommandMenu = surfaces.commandMenu.Component;
 
-const NowPlaying = lazy(async () => ({ default: (await surfaces.nowPlaying()).NowPlaying }));
+const NowPlaying = surfaces.nowPlaying.Component;
 
-const QueuePanel = lazy(async () => ({ default: (await surfaces.queue()).QueuePanel }));
+const QueuePanel = surfaces.queue.Component;
 
-const JamPanel = lazy(async () => ({ default: (await surfaces.jamPanel()).JamPanel }));
+const JamPanel = surfaces.jamPanel.Component;
 
-const NewPlaylistDialog = lazy(async () => ({
-  default: (await surfaces.newPlaylist()).NewPlaylistDialog,
-}));
+const NewPlaylistDialog = surfaces.newPlaylist.Component;
 
 /**
  * Loads the surfaces' chunks once the first screen has settled, so the first ⌘K or tap on the mini
@@ -47,9 +82,9 @@ const usePreloadSurfaces = (): void => {
   useEffect(
     () =>
       whenSettled(() => {
-        for (const load of Object.values(surfaces)) {
+        for (const { preload } of Object.values(surfaces)) {
           // A chunk that fails here loads again, and reports its error, when it is opened.
-          load().catch(() => undefined);
+          preload().catch(() => undefined);
         }
       }),
     [],
