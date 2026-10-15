@@ -18,7 +18,13 @@ import {
 } from "react";
 import type { ReactNode } from "react";
 
-import { describeDevice, loadDeviceId, readItem, writeItem } from "./device-identity";
+import {
+  browserStorage,
+  describeDevice,
+  loadDeviceId,
+  readItem,
+  writeItem,
+} from "./device-identity";
 import type { EngineKind, PlayerEngine } from "./engine";
 import { HtmlAudioEngine } from "./html-audio-engine";
 import { MseEngine } from "./mse-engine";
@@ -32,8 +38,10 @@ const POSITION_INTERVAL_MS = 250;
 
 const QUALITY_KEY = "music.streamQuality";
 
+/** What the player is doing: nothing queued, loading a song, playing, paused, waiting, or failed. */
 export type PlayerStatus = "idle" | "loading" | "playing" | "paused" | "buffering" | "error";
 
+/** The player as the UI shows it: the session from Convex merged with this browser's audio. */
 export interface PlayerState {
   readonly status: PlayerStatus;
   readonly track: QueueEntry | null;
@@ -77,6 +85,7 @@ export interface PlayerState {
   readonly following: boolean;
 }
 
+/** What the UI can ask the player to do. Actions never reject: failures become `error`. */
 export interface PlayerActions {
   /** Replaces the queue and plays it on this browser. */
   readonly playTracks: (trackIds: ReadonlyArray<TrackId>, index?: number) => Promise<void>;
@@ -89,17 +98,20 @@ export interface PlayerActions {
   readonly setShuffle: (on: boolean) => Promise<void>;
   readonly setRepeat: (mode: RepeatMode) => Promise<void>;
   readonly setVolume: (volume: number) => Promise<void>;
-  readonly addToQueue: (trackIds: ReadonlyArray<TrackId>, next?: boolean) => Promise<void>;
+  /** Adds songs to the queue; resolves whether they landed (a failure sets `error`). */
+  readonly addToQueue: (trackIds: ReadonlyArray<TrackId>, next?: boolean) => Promise<boolean>;
   /** Removes the entry `itemId`; resolves whether the removal landed (a failure sets `error`). */
   readonly removeFromQueue: (itemId: QueueItemId) => Promise<boolean>;
   readonly setAutoplay: (on: boolean) => Promise<void>;
-  /** Moves playback to this browser. */
-  readonly playHere: () => Promise<void>;
-  readonly transferTo: (deviceId: DeviceId) => Promise<void>;
+  /** Moves playback to this browser; resolves whether the move landed (a failure sets `error`). */
+  readonly playHere: () => Promise<boolean>;
+  /** Moves playback to another device; resolves whether the move landed. */
+  readonly transferTo: (deviceId: DeviceId) => Promise<boolean>;
   /** Changes the streaming quality. It applies from the next song. */
   readonly setQuality: (quality: StreamQuality) => void;
 }
 
+/** The player state and actions that `usePlayer` returns. */
 export type Player = PlayerState & PlayerActions;
 
 const PlayerContext = createContext<Player | null>(null);
@@ -188,14 +200,14 @@ const engineFactory = (
  * a Jam link's page joining to listen along here).
  */
 export const thisBrowserDeviceId = (): DeviceId =>
-  loadDeviceId("localStorage" in globalThis ? localStorage : null, () => crypto.randomUUID());
+  loadDeviceId(browserStorage(), () => crypto.randomUUID());
 
 /** Builds the controller from browser globals. Runs once per provider mount. */
 const createController = (
   convex: ReturnType<typeof useConvex>,
   engines: EngineFactory,
 ): PlaybackController => {
-  const storage = "localStorage" in globalThis ? localStorage : null;
+  const storage = browserStorage();
   const probe = document.createElement("audio");
 
   return new PlaybackController(makeMusicClient(convex), engines, {
@@ -348,7 +360,7 @@ export function PlayerProvider({
       setRepeat: (mode) => controller.capture(client.run("playback.repeat", { mode })),
       setVolume: (volume) => controller.setVolume(volume),
       addToQueue: (ids, toFront) =>
-        controller.capture(
+        controller.attempt(
           client.run(
             "queue.add",
             toFront === undefined ? { trackIds: ids } : { trackIds: ids, next: toFront },

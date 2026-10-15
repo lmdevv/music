@@ -18,22 +18,40 @@ interface PageReport {
 /** The key a page is stored and rendered under. */
 export const keyOf = (cursor: string | null): string => cursor ?? "first";
 
+/** What a chain of pages shows as a whole. */
+interface ChainSummary {
+  /** Every page loaded so far is empty and the last one is done. */
+  readonly empty: boolean;
+  /** The index of the first page with items, which carries the list header; -1 if none yet. */
+  readonly firstFilled: number;
+}
+
 /**
  * What a chain of pages shows, from each page's report in order (undefined while it loads): the
  * list is empty when every page is empty and the last is done, and the first page with items
  * carries a list header.
  */
-export const summarizeChain = (reported: ReadonlyArray<PageReport | undefined>) => ({
+export const summarizeChain = (reported: ReadonlyArray<PageReport | undefined>): ChainSummary => ({
   empty: reported.every((page) => page?.items === 0) && reported.at(-1)?.done === true,
   firstFilled: reported.findIndex((page) => (page?.items ?? 0) > 0),
 });
+
+/** A chain of pages: where each starts, and how pages ask for more and report what they show. */
+interface PageChain extends ChainSummary {
+  /** Where each page starts, in order; the first is null. */
+  readonly cursors: ReadonlyArray<string | null>;
+  /** Adds the page that starts at `next`, when the end of the list comes into view. */
+  readonly more: (next: string) => void;
+  /** Records what the page at `cursor` shows and where the page after it starts. */
+  readonly report: (cursor: string | null, page: PageResult<unknown>) => void;
+}
 
 /**
  * The cursors of a list loaded page by page, and what each page reported. A page can be empty
  * while more follow (its rows were in libraries you can't read), so emptiness is a property of the
  * whole chain: every page loaded so far is empty and the last one is done.
  */
-export const usePageChain = () => {
+export const usePageChain = (): PageChain => {
   const [cursors, setCursors] = useState<ReadonlyArray<string | null>>([null]);
   const [reports, setReports] = useState<ReadonlyMap<string, PageReport>>(new Map());
 

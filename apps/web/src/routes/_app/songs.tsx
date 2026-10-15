@@ -84,11 +84,9 @@ function SongsPage() {
 
 function FilteredSongs({ query }: { readonly query: string }) {
   const results = useRead("search", { query, limit: 50 });
-  const [shown, setShown] = useState(results);
-
-  useEffect(() => {
-    if (results !== undefined) setShown(results);
-  }, [results]);
+  // The previous results stay while a new query loads, held during render (an effect cost an
+  // extra render and commit per result).
+  const shown = useHeldPage(results);
 
   if (shown === undefined) return <TrackListSkeleton />;
 

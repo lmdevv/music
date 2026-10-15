@@ -49,7 +49,6 @@ const useDebounced = (value: string, delayMs: number): string => {
   return settled;
 };
 
-/** Results for the settled query, keeping the previous results visible while new ones load. */
 /** Search results as shown: the last results while new ones load, and the query they match. */
 interface ShownSearch {
   readonly results: SearchResults | null;
@@ -57,6 +56,7 @@ interface ShownSearch {
   readonly forQuery: string;
 }
 
+/** Results for the settled query, keeping the previous results visible while new ones load. */
 const useSearch = (query: string): ShownSearch => {
   const settled = useDebounced(query.trim(), DEBOUNCE_MS);
   const live = useRead("search", settled.length === 0 ? "skip" : { query: settled, limit: LIMIT });
@@ -66,9 +66,9 @@ const useSearch = (query: string): ShownSearch => {
     readonly query: string;
   } | null>(null);
 
-  useEffect(() => {
-    if (live !== undefined) setShown({ results: live, query: settled });
-  }, [live, settled]);
+  // Held while rendering, as React documents for state that follows a value: an effect showed one
+  // frame of the old results and cost another render per result.
+  if (live !== undefined && shown?.results !== live) setShown({ results: live, query: settled });
 
   if (query.trim().length === 0) return { results: null, updating: false, forQuery: "" };
 

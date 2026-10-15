@@ -45,22 +45,22 @@ export const useQueueActions = (): QueueActions => {
   const latestPlayer = useLatestPlayer();
 
   return useMemo((): QueueActions => {
-    const add = (tracks: ReadonlyArray<Pick<Track, "id" | "title">>, next: boolean) => {
+    const add = async (tracks: ReadonlyArray<Pick<Track, "id" | "title">>, next: boolean) => {
       const label =
         tracks.length === 1 ? (tracks[0]?.title ?? "") : `${formatCount(tracks.length)} songs`;
 
-      latestPlayer()
-        .addToQueue(
-          tracks.map((track) => track.id),
-          next,
-        )
-        .then(() => toast.success(next ? `${label} plays next` : `Added ${label} to the queue`))
-        .catch(toastFailure);
+      const landed = await latestPlayer().addToQueue(
+        tracks.map((track) => track.id),
+        next,
+      );
+
+      if (landed) toast.success(next ? `${label} plays next` : `Added ${label} to the queue`);
+      else toast.error(`Couldn't add ${label} to the queue. Try again.`);
     };
 
     return {
-      playNext: (tracks) => add(tracks, true),
-      addToQueue: (tracks) => add(tracks, false),
+      playNext: (tracks) => void add(tracks, true),
+      addToQueue: (tracks) => void add(tracks, false),
     };
   }, [latestPlayer]);
 };

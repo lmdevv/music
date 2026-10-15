@@ -5,7 +5,7 @@ import { Button } from "@music/ui/components/button";
 import { FieldHint, FieldLabel, Input } from "@music/ui/components/input";
 import { Skeleton } from "@music/ui/components/skeleton";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { FormEvent } from "react";
 
 import { SettingsHeader } from "@/components/settings/settings-ui";
@@ -19,11 +19,10 @@ function AccountSettings() {
   const rename = useRun("account.rename");
   const { signOut } = useAuthActions();
   const navigate = useNavigate();
-  const [name, setName] = useState("");
-
-  useEffect(() => {
-    if (me !== undefined) setName(me.name ?? "");
-  }, [me]);
+  // What the person typed, or null to show the saved name. Copying the saved name into state in
+  // an effect overwrote the field whenever the account updated while they typed.
+  const [draft, setDraft] = useState<string | null>(null);
+  const name = draft ?? me?.name ?? "";
 
   const [save, saving] = useAction(() => rename({ name: name.trim() }), {
     success: () => "Saved your name",
@@ -58,7 +57,7 @@ function AccountSettings() {
               maxLength={120}
               autoComplete="name"
               value={name}
-              onChange={(event) => setName(event.target.value)}
+              onChange={(event) => setDraft(event.target.value)}
               fieldClassName="max-w-90 min-w-0 shrink"
             />
             <Button type="submit" variant="solid" disabled={!changed} pending={saving}>

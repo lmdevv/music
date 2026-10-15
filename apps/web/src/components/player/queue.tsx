@@ -1,5 +1,6 @@
 import type { QueueItemId } from "@music/commands/ids";
 import type { QueueEntry } from "@music/commands/models";
+import type { CommandResult } from "@music/commands/registry";
 import { usePlayer } from "@music/player/react";
 import { useRead, useRun } from "@music/sdk/react";
 import { Switch } from "@music/ui/components/switch";
@@ -51,7 +52,10 @@ export const useUpNext = (): UpNext => {
 };
 
 /** Clears everything after the current song. */
-export const useClearQueue = () => {
+export const useClearQueue = (): readonly [
+  clear: () => Promise<CommandResult<"queue.clear"> | undefined>,
+  clearing: boolean,
+] => {
   const clear = useRun("queue.clear");
 
   return useAction(() => clear({}), { success: () => "Cleared the queue" });
