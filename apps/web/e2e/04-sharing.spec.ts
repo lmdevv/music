@@ -142,11 +142,20 @@ test("share a playlist: a collaborator adds a song, the owner reorders, then sto
   );
   const before = await playlistOrder(page, name);
 
-  await table.getByRole("button", { name: "Move Sexy Boy", exact: true }).focus();
-  await Array.from({ length: before.length - 1 }).reduce<Promise<void>>(async (previous) => {
-    await previous;
-    await page.keyboard.press("ArrowUp");
-  }, Promise.resolve());
+  const handle = table.getByRole("button", { name: "Move Sexy Boy", exact: true });
+
+  // One step at a time, each landing before the next, as someone pressing the key would see it.
+  // The press goes to the handle each time: the row re-renders as the list moves.
+  await Array.from({ length: before.length - 1 }, (_, step) => step).reduce<Promise<void>>(
+    async (previous, step) => {
+      await previous;
+      await handle.press("ArrowUp");
+      await expect
+        .poll(async () => (await playlistOrder(page, name)).indexOf("Sexy Boy"))
+        .toBe(before.length - 2 - step);
+    },
+    Promise.resolve(),
+  );
   await expect
     .poll(() => playlistOrder(page, name))
     .toEqual(["Sexy Boy", ...before.filter((title) => title !== "Sexy Boy")]);

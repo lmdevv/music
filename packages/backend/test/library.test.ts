@@ -82,7 +82,7 @@ describe("playlists", () => {
 
     expect(full.playlist.trackCount).toBe(3);
     expect(full.playlist.durationMs).toBe(3 * 180_000);
-    expect(full.items.map((item) => item.track.id)).toEqual(rock);
+    expect(full.items.map((item) => item.track?.id)).toEqual(rock);
 
     const [first] = full.items;
 
@@ -108,7 +108,7 @@ describe("playlists", () => {
     await markMissing(backend, libraryId, ["Rock/0001.flac"]);
     const detail = await admin.music.read("playlists.get", { playlistId });
 
-    expect(detail.items.map((item) => [item.track.id, item.available])).toEqual([
+    expect(detail.items.map((item) => [item.track?.id, item.available])).toEqual([
       [rock[0], false],
       [rock[1], true],
     ]);
@@ -119,7 +119,7 @@ describe("playlists", () => {
     await admin.music.run("playlists.remove", { playlistId, itemId: gone.itemId });
     const after = await admin.music.read("playlists.get", { playlistId });
 
-    expect(after.items.map((item) => item.track.id)).toEqual([rock[1]]);
+    expect(after.items.map((item) => item.track?.id)).toEqual([rock[1]]);
     expect(after.playlist.trackCount).toBe(1);
   });
 
@@ -156,7 +156,7 @@ describe("playlists", () => {
       (await member.music.read("playlists.get", { playlistId })).items.map((item) => [
         item.available,
         item.reason,
-        item.track.artUrl,
+        item.track,
       ]),
     ).toEqual([[false, "no_access", null]]);
   });
@@ -202,7 +202,7 @@ describe("deleting a library", () => {
 
     const playlist = await member.music.read("playlists.get", { playlistId });
 
-    expect(playlist.items.map((item) => item.track.id)).toEqual(jazz);
+    expect(playlist.items.map((item) => item.track?.id)).toEqual(jazz);
     expect(playlist.playlist.trackCount).toBe(2);
     expect(playlist.playlist.durationMs).toBe(2 * 180_000);
 

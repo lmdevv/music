@@ -84,10 +84,13 @@ const formatScalar = (key: string, value: Json): string => {
   return escapeControlCharacters(JSON.stringify(value));
 };
 
+/** The value at `path` in a row; null once a step is null (a withheld song shows `-`). */
 const at = (row: Schema.JsonObject, path: ReadonlyArray<string>): Json | undefined => {
   let current: Json | undefined = row;
 
   for (const key of path) {
+    if (current === null) return null;
+
     if (current === undefined || !isJsonObject(current)) return undefined;
     current = current[key];
   }
@@ -200,7 +203,7 @@ const presets = new Map<SchemaAST.AST, ReadonlyArray<Column>>([
       field("TRACK", "track", "id"),
       field("TITLE", "track", "title"),
       field("ARTIST", "track", "artist"),
-      field("TIME", "track", "durationMs"),
+      field("TIME", "durationMs"),
       field("ADDED BY", "addedBy", "name"),
       unavailable,
     ],

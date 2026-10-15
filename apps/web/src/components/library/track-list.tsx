@@ -87,6 +87,7 @@ export function TrackList({
   label,
   header = true,
   unavailable,
+  withheld,
   byline,
   highlight,
   reorder,
@@ -102,6 +103,11 @@ export function TrackList({
    * played, and keep their menu so they can be removed.
    */
   readonly unavailable?: (index: number) => string | null;
+  /**
+   * Whether the row at an index stands in for a song you may not know anything about: its menu
+   * keeps only `menuExtra`.
+   */
+  readonly withheld?: (index: number) => boolean;
   /** More to say under a row's artist, such as who added it to a shared playlist. */
   readonly byline?: ((index: number) => string | null) | undefined;
   /** A song to highlight and scroll to, from a shared song link. */
@@ -161,6 +167,7 @@ export function TrackList({
           current={track.id === currentId}
           playing={track.id === currentId && playing}
           unavailable={unavailable?.(index) ?? null}
+          withheld={withheld?.(index) ?? false}
           byline={byline?.(index) ?? null}
           highlighted={highlight === track.id}
           count={tracks.length}
@@ -231,6 +238,7 @@ function TrackRow({
   current,
   playing,
   unavailable,
+  withheld,
   byline,
   highlighted,
   count,
@@ -244,6 +252,7 @@ function TrackRow({
   readonly current: boolean;
   readonly playing: boolean;
   readonly unavailable: string | null;
+  readonly withheld: boolean;
   readonly byline: string | null;
   readonly highlighted: boolean;
   readonly count: number;
@@ -267,6 +276,7 @@ function TrackRow({
         number={number}
         variant={variant}
         reason={unavailable}
+        withheld={withheld}
         byline={byline}
         menuExtra={menuExtra}
         mover={{ reorder, index, count }}
@@ -425,6 +435,7 @@ function UnavailableRow({
   number,
   variant,
   reason,
+  withheld,
   byline,
   menuExtra,
   mover,
@@ -433,6 +444,7 @@ function UnavailableRow({
   readonly number: number;
   readonly variant: TrackListVariant;
   readonly reason: string;
+  readonly withheld: boolean;
   readonly byline: string | null;
   readonly menuExtra: ReactNode;
   readonly mover: {
@@ -490,6 +502,7 @@ function UnavailableRow({
         <TrackMenu
           track={track}
           playable={false}
+          withheld={withheld}
           extra={menuExtra}
           className="lg:opacity-0 lg:group-hover/row:opacity-100 lg:focus-visible:opacity-100 lg:data-popup-open:opacity-100"
           trigger={<MoreHorizontalIcon className="size-5" />}

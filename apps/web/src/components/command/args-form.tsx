@@ -9,6 +9,7 @@ import { cn } from "@music/ui/lib/utils";
 import type { ReactNode } from "react";
 
 import { formatDuration } from "@/lib/format";
+import { WITHHELD_ARTIST, WITHHELD_TITLE, playableTracks } from "@/lib/playlist-entries";
 
 import type { Entity, FieldSpec, FormValues } from "./fields";
 
@@ -87,9 +88,7 @@ const useEntityOptions = (
       }
 
       // Songs whose file is gone can't play, so the option leaves them out.
-      const playable = (playlist?.items ?? []).flatMap((item) =>
-        item.available ? [item.track.id] : [],
-      );
+      const playable = playableTracks(playlist?.items ?? []).map((track) => track.id);
 
       if (many && playlist !== undefined && playable.length > 0) {
         options.push({
@@ -175,8 +174,8 @@ const useEntityOptions = (
       return (playlist?.items ?? []).map((item) => ({
         key: item.itemId,
         value: item.itemId,
-        label: item.track.title,
-        detail: item.track.artist,
+        label: item.track?.title ?? WITHHELD_TITLE,
+        detail: item.track?.artist ?? WITHHELD_ARTIST,
       }));
 
     case "queueItem":

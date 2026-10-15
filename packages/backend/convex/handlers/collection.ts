@@ -132,35 +132,6 @@ const summary = async (ctx: ReadCtx, viewer: Viewer, present: Presenter, opened:
     sharedWithPeople: await isSharedWithPeople(ctx, opened.playlist._id),
   });
 
-/** What a playlist shows in place of a song in a library the viewer can't read. */
-const WITHHELD_TITLE = "A song you can't play";
-
-const WITHHELD_ARTIST = "In a library that isn't shared with you";
-
-/**
- * A song in a library the viewer can't read, as a playlist shows it: a row that holds its place
- * and its length, and nothing about the song. No name, cover, or file detail is given, so neither
- * sharing a playlist nor a library's access narrowing later shows what the library holds.
- */
-const withheldTrack = (track: Doc<"tracks">): (typeof PlaylistEntry)["Encoded"]["track"] => ({
-  id: track._id,
-  title: WITHHELD_TITLE,
-  artist: WITHHELD_ARTIST,
-  artistId: track.artistId,
-  album: "",
-  albumId: track.albumId,
-  trackNumber: null,
-  discNumber: null,
-  durationMs: track.durationMs,
-  codec: "",
-  lossless: false,
-  bitrate: null,
-  sampleRate: null,
-  bitDepth: null,
-  artUrl: null,
-  liked: false,
-});
-
 /**
  * One playlist entry as the viewer sees it. A song in a library they can't read still shows, so
  * everyone sees the same playlist, but greyed out and without its cover or file details.
@@ -179,7 +150,11 @@ const presentEntry = async (
   return {
     itemId: item._id,
     addedAt: item._creationTime,
-    track: readable ? await present.track(track) : withheldTrack(track),
+    // A song in a library the viewer can't read is withheld whole: no name, cover, file detail,
+    // or ID, so neither sharing a playlist nor a library's access narrowing later shows what the
+    // library holds. The entry keeps its place and length.
+    track: readable ? await present.track(track) : null,
+    durationMs: track.durationMs,
     available: reason === null,
     reason,
     addedBy: await contributor(item.addedBy ?? playlist.ownerId),

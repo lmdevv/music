@@ -1,21 +1,21 @@
 /**
  * Text that people type and others read: names and descriptions of playlists, Jams, libraries,
- * devices, keys, and people. Decoding drops control characters (C0, DEL, and C1), so none can be
- * stored on any path. A terminal acts on them when the CLI prints the text, which would let one
+ * devices, keys, and people. Decoding drops control and invisible format characters
+ * (`CONTROL_CHARACTER`), so none can be stored on any path. A terminal acts on them when the CLI prints the text, which would let one
  * person rewrite what another sees. Line breaks and tabs become spaces, since every field is one
  * line, and the result is trimmed.
  */
 import { Schema, SchemaGetter } from "effect";
 
-const WHITESPACE_CONTROLS = new Set(["\t", "\n", "\v", "\f", "\r", "\u0085"]);
+const WHITESPACE_CONTROLS = new Set(["\t", "\n", "\v", "\f", "\r", "\u0085", "\u2028", "\u2029"]);
 
 /**
- * A control character: C0 (U+0000 to U+001F), DEL (U+007F), and C1 (U+0080 to U+009F), which is
- * Unicode's `Cc`, and the bidi embedding, override, and isolate controls (U+202A to U+202E,
- * U+2066 to U+2069), which can make a name read differently from what it holds. The CLI escapes
- * the same set when it prints.
+ * A control character: C0, DEL, and C1 (Unicode's `Cc`), the line and paragraph separators (`Zl`,
+ * `Zp`), and the format characters (`Cf`: bidi marks and overrides, zero-width spaces, the Arabic
+ * letter mark, invisible tags), which can make text read differently from what it holds. The zero
+ * width joiner (U+200D) stays: emoji sequences need it. The CLI escapes the same set when it prints.
  */
-export const CONTROL_CHARACTER = /[\p{Cc}\u202A-\u202E\u2066-\u2069]/u;
+export const CONTROL_CHARACTER = /(?!\u200D)[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 
 export const isControlCharacter = (character: string): boolean => CONTROL_CHARACTER.test(character);
 

@@ -243,20 +243,15 @@ describe("guests", () => {
     // A guest hears no library until added to it: every song is an unavailable row.
     const { items } = await guest.music.read("playlists.get", { playlistId });
 
-    expect(items.map((item) => [item.available, item.reason, item.track.artUrl])).toEqual([
-      [false, "no_access", null],
-      [false, "no_access", null],
-      [false, "no_access", null],
-    ]);
-    // Nothing about the song shows: not its name, album, or file details.
-    const titles = new Set((await allTracks(owner)).map((track) => track.title));
+    // Nothing about the song shows, not even its IDs: only its place and length.
+    const lengths = new Set((await allTracks(owner)).map((track) => track.durationMs));
 
-    expect(items.some((item) => titles.has(item.track.title))).toBe(false);
-    expect(items.map((item) => [item.track.album, item.track.codec, item.track.bitrate])).toEqual([
-      ["", "", null],
-      ["", "", null],
-      ["", "", null],
+    expect(items.map((item) => [item.available, item.reason, item.track])).toEqual([
+      [false, "no_access", null],
+      [false, "no_access", null],
+      [false, "no_access", null],
     ]);
+    expect(items.every((item) => lengths.has(item.durationMs))).toBe(true);
   });
 
   it("can't share or look people up, but can keep their own playlists", async () => {
@@ -302,12 +297,12 @@ describe("collaborating", () => {
     await owner.music.run("playlists.add", { playlistId, trackIds: [secret] });
     const { items } = await member.music.read("playlists.get", { playlistId });
 
-    expect(items.map((item) => [item.track.id, item.addedBy?.id, item.reason])).toEqual([
+    expect(items.map((item) => [item.track?.id ?? null, item.addedBy?.id, item.reason])).toEqual([
       [pick(rock, 0), owner.id, null],
       [pick(rock, 1), owner.id, null],
       [pick(rock, 2), owner.id, null],
       [pick(rock, 3), member.id, null],
-      [secret, owner.id, "no_access"],
+      [null, owner.id, "no_access"],
     ]);
   });
 
@@ -410,7 +405,7 @@ describe("lists and links", () => {
       .read("playlists.get", { playlistId })
       .then((detail) => detail.items.map((item) => item.track));
 
-    if (song === undefined) throw new Error("Seed missing");
+    if (song === undefined || song === null) throw new Error("Seed missing");
 
     expect(await member.music.read("links.get", { kind: "track", id: song.id })).toEqual({
       path: `/albums/${song.albumId}?track=${song.id}`,
@@ -463,6 +458,22 @@ describe("lists and links", () => {
     expect(await failureCode(member.music.read("playlists.get", { playlistId }))).toBe("succeeded");
 
     await owner.music.run("people.role", { userId: userId(member), role: "member" });
+    expect(await failureCode(friend.music.read("playlists.get", { playlistId }))).toBe("succeeded");
+  });
+
+  it("closes a suspended person's playlists to others until they're unsuspended", async () => {
+    const { backend, owner, member } = await setup();
+    const friend = await signUp(backend, "member");
+    const { playlistId } = await member.music.run("playlists.create", { name: "Mine" });
+
+    await member.music.run("playlists.share", { playlistId, userId: userId(friend) });
+    await member.music.run("playlists.visibility", { playlistId, visibility: "shared" });
+    await owner.music.run("people.suspend", { userId: userId(member) });
+
+    expect(await failureCode(friend.music.read("playlists.get", { playlistId }))).toBe("not_found");
+    expect(await friend.music.read("playlists.shared", {})).toEqual([]);
+
+    await owner.music.run("people.unsuspend", { userId: userId(member) });
     expect(await failureCode(friend.music.read("playlists.get", { playlistId }))).toBe("succeeded");
   });
 

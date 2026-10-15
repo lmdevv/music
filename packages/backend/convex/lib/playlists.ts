@@ -39,11 +39,12 @@ export const isSharedWithPeople = async (
 
 /**
  * Whether a playlist's owner may still have it open to others: they exist (a removed person's
- * playlists go in batches after, unreachable meanwhile) and may share (a person made a guest
- * keeps their playlists to themselves, though their shares and visibility stay for a promotion).
+ * playlists go in batches after, unreachable meanwhile), aren't suspended, and may share (a person
+ * made a guest keeps their playlists to themselves). Shares and visibility stay, so the playlist
+ * opens again on unsuspension or promotion.
  */
 export const ownerShares = (owner: Doc<"users"> | null): boolean =>
-  owner !== null && can(roleOf(owner), "share");
+  owner !== null && owner.suspendedAt === undefined && can(roleOf(owner), "share");
 
 /** What the viewer may do with a playlist, or null when they can't open it. */
 export const playlistAccess = async (

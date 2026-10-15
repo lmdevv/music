@@ -12,8 +12,11 @@ describe("typed text", () => {
     expect(cleanText("a\u0000b\u007fc\u0080d\u009be")).toBe("abcde");
     expect(cleanText("one\ntwo\r\nthree\tfour\u0085five")).toBe("one two  three four five");
     expect(cleanText("  Café ☕ 東京  ")).toBe("Café ☕ 東京");
-    // Bidi overrides and isolates go; joiners inside emoji stay.
+    // Bidi overrides, isolates, and marks, zero-width spaces, the Arabic letter mark, and
+    // invisible tags go; line and paragraph separators become spaces; joiners inside emoji stay.
     expect(cleanText("Admin\u202Egnp.exe\u2066x\u2069")).toBe("Admingnp.exex");
+    expect(cleanText("a\u200Bb\u200Cc\u200Ed\u200Fe\u061Cf\u{E0041}g")).toBe("abcdefg");
+    expect(cleanText("one\u2028two\u2029three")).toBe("one two three");
     expect(cleanText("👩\u200D💻")).toBe("👩\u200D💻");
   });
 

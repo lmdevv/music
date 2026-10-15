@@ -73,6 +73,7 @@ describe("renderResult", () => {
           itemId: "i1",
           addedAt: Date.UTC(2026, 9, 10, 12, 0),
           track,
+          durationMs: track.durationMs,
           available: true,
           reason: null,
           addedBy: { id: "u1", name: "Lucía" },
@@ -80,7 +81,8 @@ describe("renderResult", () => {
         {
           itemId: "i2",
           addedAt: Date.UTC(2026, 9, 10, 12, 0),
-          track: { ...track, id: "t2", title: "Gone" },
+          track: null,
+          durationMs: 251_000,
           available: false,
           reason: "no_access",
           addedBy: null,
@@ -106,7 +108,7 @@ describe("renderResult", () => {
       "items:",
       "  ITEM  TRACK  TITLE                             ARTIST     TIME  ADDED BY  STATUS",
       "  i1    t1     Harder, Better, Faster, Stronger  Daft Punk  3:44  Lucía",
-      "  i2    t2     Gone                              Daft Punk  3:44            no access",
+      "  i2    -      -                                 -          4:11  -         no access",
     ]);
   });
 

@@ -807,7 +807,9 @@ describe.skipIf(server === "" || mediaSecret === "")("backend authorization", ()
       before.id,
     );
     expect(
-      (await adminA.music.read("playlists.get", { playlistId })).items.map((item) => item.track.id),
+      (await adminA.music.read("playlists.get", { playlistId })).items.map(
+        (item) => item.track?.id,
+      ),
     ).toEqual([before.id]);
 
     const known = await media.query(fingerprintsRef, {

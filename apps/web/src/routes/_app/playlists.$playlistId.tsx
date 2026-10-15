@@ -27,6 +27,7 @@ import { TrackList, TrackListSkeleton } from "@/components/library/track-list";
 import { ShareDialog } from "@/components/playlists/share-dialog";
 import { useAddToPlaylist } from "@/components/playlists/track-menu";
 import { toastFailure, useAction } from "@/lib/action";
+import { entryTrack, playableTracks } from "@/lib/playlist-entries";
 import { formatAgo, formatDuration, formatTotal, plural } from "@/lib/format";
 
 const decodePlaylistId = Schema.decodeUnknownSync(PlaylistId);
@@ -143,7 +144,7 @@ function PlaylistView({
 }) {
   const [dialog, setDialog] = useState<PlaylistDialog | null>(null);
   const canShare = useCanShare(playlist);
-  const playable = items.flatMap((item) => (item.available ? [item.track] : []));
+  const playable = playableTracks(items);
   const owner = playlist.owner?.name ?? "Someone who left";
   const badge = sharingLabel(playlist);
 
@@ -321,7 +322,8 @@ function PlaylistSongs({
         </div>
       ) : null}
       <TrackList
-        tracks={items.map((item) => item.track)}
+        tracks={items.map(entryTrack)}
+        withheld={(index) => items[index]?.track === null}
         variant="list"
         unavailable={(index) => {
           const reason = items[index]?.reason ?? null;

@@ -253,7 +253,10 @@ export type UnavailableReason = typeof UnavailableReason.Type;
 export const PlaylistEntry = Schema.Struct({
   itemId: PlaylistItemId,
   addedAt: Timestamp,
-  track: Track,
+  /** The song; null when it is in a library you can't read (`reason: "no_access"`). */
+  track: Schema.NullOr(Track),
+  /** The song's length, which every entry shows, the withheld ones too. */
+  durationMs: Millis,
   /**
    * False when the song can't play here (see `reason`). The entry stays, greyed out, so you can
    * see what the playlist holds and remove it.
