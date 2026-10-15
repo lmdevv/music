@@ -310,6 +310,12 @@ function PlaylistSongs({
 
   const withheld = useCallback((index: number) => items[index]?.track === null, [items]);
 
+  // Rows keyed by entry, so a move doesn't remount the rows between its old and new places.
+  const rowKey = useCallback(
+    (index: number) => items[index]?.itemId ?? `missing-${String(index)}`,
+    [items],
+  );
+
   const unavailable = useCallback(
     (index: number) => {
       const reason = items[index]?.reason ?? null;
@@ -369,6 +375,7 @@ function PlaylistSongs({
         reorder={canEdit ? { reorder, mode: reordering ? "buttons" : "drag" } : undefined}
         label={`Songs in ${playlist.name}`}
         menuExtra={menuExtra}
+        rowKey={rowKey}
       />
     </>
   );

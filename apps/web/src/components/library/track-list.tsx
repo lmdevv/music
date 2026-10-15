@@ -135,6 +135,7 @@ export function TrackList({
   highlight,
   reorder,
   windowing = "long",
+  rowKey,
 }: {
   readonly tracks: ReadonlyArray<Track>;
   readonly variant: TrackListVariant;
@@ -163,8 +164,14 @@ export function TrackList({
    * callers that list one page of a longer list per `TrackList` (Songs).
    */
   readonly windowing?: "long" | "always";
+  /**
+   * A stable key for the row at an index, such as a playlist entry's ID, so moving or adding an
+   * entry doesn't remount the rows around it. Without it rows are keyed by place and song.
+   */
+  readonly rowKey?: ((index: number) => string) | undefined;
 }) {
   const play = useRowPlay(tracks, unavailable);
+  const table = useRef<HTMLDivElement>(null);
 
   const highlightIndex =
     highlight === undefined || highlight === null
@@ -187,10 +194,29 @@ export function TrackList({
   const dragging = reorder?.reorder.dragging ?? null;
   const [probe, setProbe] = useState<HTMLElement | null>(null);
   const rowHeight = useRowHeight(probe);
+  const scrolledTo = useRef<TrackId | null>(null);
+
+  // A shared song link opens the list scrolled to the song: once per song, after the row height is
+  // read and a frame later, so the empty blocks above have their heights.
+  useEffect(() => {
+    if (highlight === undefined || highlight === null || rowHeight === null) return undefined;
+
+    if (scrolledTo.current === highlight) return undefined;
+
+    const frame = requestAnimationFrame(() => {
+      const row = table.current?.querySelector("[data-highlighted]");
+
+      if (row === null || row === undefined) return;
+      row.scrollIntoView({ block: "center" });
+      scrolledTo.current = highlight;
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [highlight, rowHeight]);
 
   const renderRow = (track: Track, index: number, now: NowPlaying) => (
     <TrackRow
-      key={`${index}-${track.id}`}
+      key={rowKey?.(index) ?? `${index}-${track.id}`}
       track={track}
       index={index}
       variant={variant}
@@ -208,7 +234,7 @@ export function TrackList({
   );
 
   return (
-    <div role="table" aria-label={label} className="relative flex flex-col">
+    <div ref={table} role="table" aria-label={label} className="relative flex flex-col">
       <div
         ref={setProbe}
         aria-hidden
@@ -455,8 +481,8 @@ const movable = (reorder: RowReorder | undefined, index: number, dropSide: DropS
     : { props: {}, line: null };
 
 /**
- * One song row. Memoized: a list re-renders when the current song changes, and only the rows whose
- * props changed (the old and new current song) render again.
+ * One song row. Memoized: a block's shown rows re-render when the current song changes, and only
+ * the rows whose props changed (the old and new current song) render again.
  */
 const TrackRow = memo(function TrackRow({
   track,
@@ -493,18 +519,7 @@ const TrackRow = memo(function TrackRow({
   const number = track.trackNumber ?? index + 1;
   const extra = menuExtra?.(track, index);
   const playRow = () => onPlay(index);
-  const row = useRef<HTMLDivElement>(null);
   const move = movable(reorder, index, dropSide);
-
-  // A shared song link opens the album scrolled to the song. A frame later, once the blocks above
-  // have their heights (they are flat until the row height is read, before the first paint).
-  useEffect(() => {
-    if (!highlighted) return undefined;
-
-    const frame = requestAnimationFrame(() => row.current?.scrollIntoView({ block: "center" }));
-
-    return () => cancelAnimationFrame(frame);
-  }, [highlighted]);
 
   if (unavailable !== null) {
     return (
@@ -539,7 +554,6 @@ const TrackRow = memo(function TrackRow({
 
   return (
     <div
-      ref={row}
       role="row"
       aria-current={current ? "true" : undefined}
       data-highlighted={highlighted ? "" : undefined}

@@ -3,8 +3,18 @@ import { ChevronDownIcon, ChevronUpIcon, GripVerticalIcon } from "lucide-react";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent, KeyboardEvent } from "react";
 
-import { afterIdFor, dropIndex, moveItem, orderToMoveFrom, sameOrder } from "@/lib/reorder";
-import type { DropSide } from "@/lib/reorder";
+import {
+  afterIdFor,
+  dragPositions,
+  dropIndex,
+  moveItem,
+  orderToMoveFrom,
+  sameOrder,
+} from "@/lib/reorder";
+import type { DragState, DropSide } from "@/lib/reorder";
+
+/** No drag in progress. */
+const NO_DRAG = { id: null, over: null } as const;
 
 /** Props that make a row a drag source and drop target. */
 interface DragRowProps {
@@ -30,31 +40,24 @@ export interface Reorder {
   readonly dragging: number | null;
 }
 
-/** The drag in progress: the row picked up (its index and entry) and the row it is over. */
-interface Drag {
-  readonly dragging: number | null;
-  readonly id: string | null;
-  readonly over: { readonly index: number; readonly side: DropSide } | null;
-}
-
-const NO_DRAG: Drag = { dragging: null, id: null, over: null };
-
 /**
  * Reorders the entries `ids`, calling `onMove` with the entry and the one it should now follow
- * (`anchor` at the top). The list itself comes back from the server's live query. `rowProps` and
- * `moveBy` stay the same functions, so rows memoized on them only re-render for their drop line.
+ * (`anchor` at the top). The list itself comes back from the server's live query. A drag follows
+ * its entries, not their indexes, so it survives the list changing under it; it ends only if the
+ * dragged entry leaves. `rowProps` and `moveBy` stay the same functions, so rows memoized on them
+ * only re-render for their drop line.
  */
 export const useReorder = <Id extends string>(
   ids: ReadonlyArray<Id>,
   anchor: Id | null,
   onMove: (id: Id, afterId: Id | null) => Promise<void>,
 ): Reorder => {
-  const [drag, setDrag] = useState<Drag>(NO_DRAG);
+  const [drag, setDrag] = useState<DragState<Id>>(NO_DRAG);
+  const positions = dragPositions(ids, drag);
 
-  // The list changed under a drag (a move from another device): the picked-up row may have
-  // remounted, and its dragend would never arrive, so the drag ends here instead. Set while
-  // rendering, as React documents for state that follows a prop.
-  if (drag.dragging !== null && ids[drag.dragging] !== drag.id) setDrag(NO_DRAG);
+  // The dragged entry left the list (removed elsewhere): the drag ends, so its block unpins and a
+  // later drop can't move anything. Set while rendering, as React documents for derived state.
+  if (drag.id !== null && positions === null) setDrag(NO_DRAG);
 
   // Orders the list should pass through while moves are in flight; see `orderToMoveFrom`.
   const expected = useRef<ReadonlyArray<ReadonlyArray<Id>>>([]);
@@ -90,25 +93,22 @@ export const useReorder = <Id extends string>(
       });
     };
 
-    const moveAt = (index: number, to: (from: number) => number) => {
-      const id = latest.current.ids[index];
-
-      if (id !== undefined) move(id, to);
-    };
-
     const reset = () => setDrag(NO_DRAG);
 
     const rowProps = (index: number): DragRowProps => ({
       draggable: true,
       onDragStart: (event) => {
-        event.dataTransfer.effectAllowed = "move";
-        const id = latest.current.ids[index] ?? null;
+        const id = latest.current.ids[index];
 
-        event.dataTransfer.setData("text/plain", id ?? "");
-        setDrag({ dragging: index, id, over: null });
+        if (id === undefined) return;
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", id);
+        setDrag({ id, over: null });
       },
       onDragOver: (event) => {
-        if (latest.current.drag.dragging === null) return;
+        const id = latest.current.ids[index];
+
+        if (latest.current.drag.id === null || id === undefined) return;
         event.preventDefault();
         const box = event.currentTarget.getBoundingClientRect();
         const side = event.clientY < box.top + box.height / 2 ? "before" : "after";
@@ -116,19 +116,21 @@ export const useReorder = <Id extends string>(
         // From the latest state, not the last commit: several dragovers can arrive before React
         // renders, and an unchanged drop line must not schedule another render.
         setDrag((current) =>
-          current.dragging === null || (current.over?.index === index && current.over.side === side)
+          current.id === null || (current.over?.id === id && current.over.side === side)
             ? current
-            : { ...current, over: { index, side } },
+            : { ...current, over: { id, side } },
         );
       },
       onDrop: (event) => {
         event.preventDefault();
-        const { dragging, over } = latest.current.drag;
+        const { ids: current, drag: now } = latest.current;
+        const at = dragPositions(current, now);
 
-        if (dragging !== null && over !== null) {
-          const target = dropIndex(dragging, over.index, over.side);
+        // Where the person saw the drop line, in the list as it is now.
+        if (now.id !== null && at?.over != null) {
+          const target = dropIndex(at.from, at.over.index, at.over.side);
 
-          moveAt(dragging, () => target);
+          move(now.id, () => target);
         }
 
         reset();
@@ -137,21 +139,24 @@ export const useReorder = <Id extends string>(
     });
 
     const moveBy = (index: number, delta: number) => {
-      moveAt(index, (from) => from + delta);
+      const id = latest.current.ids[index];
+
+      if (id !== undefined) move(id, (from) => from + delta);
     };
 
     return { rowProps, moveBy };
   }, []);
 
-  const { dragging, over } = drag;
-
   return {
     ...handlers,
     dropSide: (index) =>
-      over !== null && over.index === index && dragging !== null && dragging !== index
-        ? over.side
+      positions?.over !== null &&
+      positions?.over !== undefined &&
+      positions.over.index === index &&
+      positions.from !== index
+        ? positions.over.side
         : null,
-    dragging,
+    dragging: positions?.from ?? null,
   };
 };
 

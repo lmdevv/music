@@ -2,7 +2,7 @@ import { CatchBoundary, HeadContent, Outlet, createRootRoute } from "@tanstack/r
 import { ThemeProvider } from "next-themes";
 import { Suspense, lazy } from "react";
 
-import { LazyRouteError } from "@/components/lazy-route-error";
+import { LazyRootError } from "@/components/lazy-route-error";
 
 import "../index.css";
 
@@ -15,7 +15,7 @@ const Toaster = lazy(async () => ({
 
 export const Route = createRootRoute({
   component: RootComponent,
-  errorComponent: LazyRouteError,
+  errorComponent: LazyRootError,
   head: () => ({
     meta: [
       { title: "[music]" },
