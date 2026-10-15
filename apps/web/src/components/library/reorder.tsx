@@ -30,11 +30,14 @@ export interface Reorder {
   readonly dragging: number | null;
 }
 
-/** The drag in progress: the row picked up and the row it is over. */
+/** The drag in progress: the row picked up (its index and entry) and the row it is over. */
 interface Drag {
   readonly dragging: number | null;
+  readonly id: string | null;
   readonly over: { readonly index: number; readonly side: DropSide } | null;
 }
+
+const NO_DRAG: Drag = { dragging: null, id: null, over: null };
 
 /**
  * Reorders the entries `ids`, calling `onMove` with the entry and the one it should now follow
@@ -46,7 +49,12 @@ export const useReorder = <Id extends string>(
   anchor: Id | null,
   onMove: (id: Id, afterId: Id | null) => Promise<void>,
 ): Reorder => {
-  const [drag, setDrag] = useState<Drag>({ dragging: null, over: null });
+  const [drag, setDrag] = useState<Drag>(NO_DRAG);
+
+  // The list changed under a drag (a move from another device): the picked-up row may have
+  // remounted, and its dragend would never arrive, so the drag ends here instead. Set while
+  // rendering, as React documents for state that follows a prop.
+  if (drag.dragging !== null && ids[drag.dragging] !== drag.id) setDrag(NO_DRAG);
 
   // Orders the list should pass through while moves are in flight; see `orderToMoveFrom`.
   const expected = useRef<ReadonlyArray<ReadonlyArray<Id>>>([]);
@@ -88,25 +96,30 @@ export const useReorder = <Id extends string>(
       if (id !== undefined) move(id, to);
     };
 
-    const reset = () => setDrag({ dragging: null, over: null });
+    const reset = () => setDrag(NO_DRAG);
 
     const rowProps = (index: number): DragRowProps => ({
       draggable: true,
       onDragStart: (event) => {
         event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("text/plain", latest.current.ids[index] ?? "");
-        setDrag({ dragging: index, over: null });
+        const id = latest.current.ids[index] ?? null;
+
+        event.dataTransfer.setData("text/plain", id ?? "");
+        setDrag({ dragging: index, id, over: null });
       },
       onDragOver: (event) => {
-        const { dragging, over } = latest.current.drag;
-
-        if (dragging === null) return;
+        if (latest.current.drag.dragging === null) return;
         event.preventDefault();
         const box = event.currentTarget.getBoundingClientRect();
         const side = event.clientY < box.top + box.height / 2 ? "before" : "after";
 
-        if (over?.index !== index || over.side !== side)
-          setDrag({ dragging, over: { index, side } });
+        // From the latest state, not the last commit: several dragovers can arrive before React
+        // renders, and an unchanged drop line must not schedule another render.
+        setDrag((current) =>
+          current.dragging === null || (current.over?.index === index && current.over.side === side)
+            ? current
+            : { ...current, over: { index, side } },
+        );
       },
       onDrop: (event) => {
         event.preventDefault();

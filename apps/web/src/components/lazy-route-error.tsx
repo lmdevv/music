@@ -12,11 +12,13 @@ const RouteError = lazyChunk(async () => (await import("./route-error")).RouteEr
 const PageNotFound = lazyChunk(async () => (await import("./route-error")).PageNotFound).Component;
 
 /**
- * Shown when the error screen's own code can't load: offline, or the server was upgraded under an
- * open tab. Plain markup, so it needs nothing beyond the entry chunk. Any other error goes on up.
+ * Shown when the error screen itself fails: its code can't load (offline, or the server was upgraded
+ * under an open tab), or it threw. Plain markup, so it needs nothing beyond the entry chunk. It says
+ * which happened, and it never rethrows: above the root route's error screen nothing would catch it,
+ * and the whole app (and the music) would go.
  */
 function Unloaded({ error }: ErrorComponentProps): ReactNode {
-  if (!(error instanceof ChunkLoadError)) throw error;
+  const unreachable = error instanceof ChunkLoadError;
 
   return (
     <div className="flex min-h-dvh-message flex-col items-start justify-center gap-3 px-6 lg:px-12">
@@ -24,7 +26,9 @@ function Unloaded({ error }: ErrorComponentProps): ReactNode {
         This screen didn't load
       </h1>
       <p className="max-w-dialog font-sans text-md/md text-text-muted">
-        [music] can't reach the server. Check the connection, then reload the page.
+        {unreachable
+          ? "[music] can't reach the server. Check the connection, then reload the page."
+          : "Something went wrong showing what happened. Reload the page to try again."}
       </p>
       <button
         type="button"
@@ -38,12 +42,12 @@ function Unloaded({ error }: ErrorComponentProps): ReactNode {
 }
 
 /**
- * The error screen, loaded on demand so it stays out of the entry chunk. If its chunk can't load
- * either, a plain message takes its place instead of a blank page; the next error tries again.
+ * The error screen, loaded on demand so it stays out of the entry chunk. If it fails too, a plain
+ * message takes its place instead of a blank page; a new error tries the chunk again.
  */
 export function LazyRouteError(props: ErrorComponentProps) {
   return (
-    <CatchBoundary getResetKey={() => 0} errorComponent={Unloaded}>
+    <CatchBoundary getResetKey={() => props.error} errorComponent={Unloaded}>
       <Suspense fallback={null}>
         <RouteError {...props} />
       </Suspense>
@@ -51,7 +55,10 @@ export function LazyRouteError(props: ErrorComponentProps) {
   );
 }
 
-/** The not-found screen, loaded on demand like {@link LazyRouteError}. */
+/**
+ * The not-found screen, loaded on demand like {@link LazyRouteError}. Showing it again after
+ * another screen tries the chunk again.
+ */
 export function LazyPageNotFound() {
   return (
     <CatchBoundary getResetKey={() => 0} errorComponent={Unloaded}>

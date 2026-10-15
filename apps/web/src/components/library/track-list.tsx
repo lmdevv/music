@@ -26,6 +26,7 @@ import { usePlayTracks } from "./cards";
 import { LikeButton } from "./like-button";
 import { dropLine } from "@/lib/reorder";
 import type { DropSide } from "@/lib/reorder";
+import { useIsDesktop } from "@/lib/use-media";
 import { useWindowed } from "@/lib/use-windowed";
 
 import { MoveButtons, ReorderHandle } from "./reorder";
@@ -68,6 +69,15 @@ interface RowReorder {
   readonly rowProps: Reorder["rowProps"];
   readonly moveBy: Reorder["moveBy"];
 }
+
+/** The playing song, and whether it plays, as a block's rows see it. */
+interface NowPlaying {
+  readonly trackId: TrackId | null;
+  readonly playing: boolean;
+}
+
+/** Renders the row for the song at `index`. */
+type RenderRow = (track: Track, index: number, now: NowPlaying) => ReactNode;
 
 /** How many songs the list holds, for the reorder controls' "Position 3 of 40". */
 const ListLengthContext = createContext(0);
@@ -154,10 +164,7 @@ export function TrackList({
    */
   readonly windowing?: "long" | "always";
 }) {
-  // Only the current song and status: a position report or queue change re-renders no rows.
-  const { trackId: currentId, status } = useCurrentTrack();
   const play = useRowPlay(tracks, unavailable);
-  const playing = status === "playing" || status === "buffering";
 
   const highlightIndex =
     highlight === undefined || highlight === null
@@ -181,14 +188,14 @@ export function TrackList({
   const [probe, setProbe] = useState<HTMLElement | null>(null);
   const rowHeight = useRowHeight(probe);
 
-  const renderRow = (track: Track, index: number) => (
+  const renderRow = (track: Track, index: number, now: NowPlaying) => (
     <TrackRow
       key={`${index}-${track.id}`}
       track={track}
       index={index}
       variant={variant}
-      current={track.id === currentId}
-      playing={track.id === currentId && playing}
+      current={track.id === now.trackId}
+      playing={track.id === now.trackId && now.playing}
       unavailable={unavailable?.(index) ?? null}
       withheld={withheld?.(index) ?? false}
       byline={byline?.(index) ?? null}
@@ -274,7 +281,7 @@ function WindowedRows({
   rowHeight,
 }: {
   readonly tracks: ReadonlyArray<Track>;
-  readonly renderRow: (track: Track, index: number) => ReactNode;
+  readonly renderRow: RenderRow;
   /** Row indexes whose blocks always render; -1 for none. */
   readonly pinned: ReadonlyArray<number>;
   readonly pinOneBlock: boolean;
@@ -309,6 +316,9 @@ function WindowedRows({
  */
 const useRowHeight = (probe: HTMLElement | null): number | null => {
   const [height, setHeight] = useState<number | null>(null);
+  // Read again in the same commit that crosses the breakpoint, before paint: the probe's resize
+  // observer reports a frame later, when blocks would already have used the old height.
+  const desktop = useIsDesktop();
 
   useLayoutEffect(() => {
     if (probe === null) return undefined;
@@ -328,7 +338,7 @@ const useRowHeight = (probe: HTMLElement | null): number | null => {
     observer.observe(probe);
 
     return () => observer.disconnect();
-  }, [probe]);
+  }, [probe, desktop]);
 
   return height;
 };
@@ -343,7 +353,7 @@ function RowBlock({
 }: {
   readonly tracks: ReadonlyArray<Track>;
   readonly start: number;
-  readonly renderRow: (track: Track, index: number) => ReactNode;
+  readonly renderRow: RenderRow;
   readonly first: boolean;
   readonly pinned: boolean;
   readonly rowHeight: number | null;
@@ -364,13 +374,35 @@ function RowBlock({
       // Before the row height is read (the same frame, before paint) an empty block is flat.
       style={windowed.shown ? undefined : { height: windowed.height ?? 0 }}
     >
-      {windowed.shown
-        ? tracks
-            .slice(start, start + count)
-            .map((track, offset) => renderRow(track, start + offset))
-        : null}
+      {windowed.shown ? (
+        <ShownRows tracks={tracks} start={start} count={count} renderRow={renderRow} />
+      ) : null}
     </div>
   );
+}
+
+/**
+ * The rows of a block on the page. Only these follow the playing song, so a list's empty blocks (and
+ * a Songs page far from view) don't re-render on play, pause, or a new song.
+ */
+function ShownRows({
+  tracks,
+  start,
+  count,
+  renderRow,
+}: {
+  readonly tracks: ReadonlyArray<Track>;
+  readonly start: number;
+  readonly count: number;
+  readonly renderRow: RenderRow;
+}) {
+  // Only the current song and status: a position report or queue change re-renders no rows.
+  const { trackId, status } = useCurrentTrack();
+  const now = { trackId, playing: status === "playing" || status === "buffering" };
+
+  return tracks
+    .slice(start, start + count)
+    .map((track, offset) => renderRow(track, start + offset, now));
 }
 
 /** The drag handle (desktop) or up/down buttons (phone reorder mode) of a movable row. */
@@ -464,9 +496,14 @@ const TrackRow = memo(function TrackRow({
   const row = useRef<HTMLDivElement>(null);
   const move = movable(reorder, index, dropSide);
 
-  // A shared song link opens the album scrolled to the song.
+  // A shared song link opens the album scrolled to the song. A frame later, once the blocks above
+  // have their heights (they are flat until the row height is read, before the first paint).
   useEffect(() => {
-    if (highlighted) row.current?.scrollIntoView({ block: "center" });
+    if (!highlighted) return undefined;
+
+    const frame = requestAnimationFrame(() => row.current?.scrollIntoView({ block: "center" }));
+
+    return () => cancelAnimationFrame(frame);
   }, [highlighted]);
 
   if (unavailable !== null) {
