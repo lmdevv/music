@@ -118,6 +118,40 @@
                   }
                 ];
               };
+              # A machine with only the CLI, pointed at a server elsewhere.
+              cliOnly = nixpkgs.lib.nixosSystem {
+                inherit system;
+                modules = [
+                  self.nixosModules.default
+                  {
+                    boot.isContainer = true;
+                    system.stateVersion = "25.11";
+                    programs.music = {
+                      enable = true;
+                      server = "https://music.example.com/convex";
+                    };
+                  }
+                ];
+              };
+              # A server host that leaves the CLI out.
+              withoutCli = nixpkgs.lib.nixosSystem {
+                inherit system;
+                modules = [
+                  self.nixosModules.default
+                  {
+                    boot.isContainer = true;
+                    system.stateVersion = "25.11";
+                    services.music.enable = true;
+                    programs.music.enable = false;
+                  }
+                ];
+              };
+              hasCli =
+                evaluated:
+                builtins.any (
+                  package: package.pname or "" == "music-cli"
+                ) evaluated.config.environment.systemPackages;
+              musicServer = evaluated: evaluated.config.environment.sessionVariables.MUSIC_SERVER or null;
               inherit (nixpkgs.lib.importJSON ./package.json) version;
               # Every workspace package (apps/* and packages/*, the CLI included) and its version.
               workspaceVersions =
@@ -180,6 +214,16 @@
                 }).config.systemd.services.music-update.script
               )
             ) "an existing Docker host does not keep its backend: ${toString (failed inherited)}";
+            assert expect (hasCli listed && musicServer listed == "http://localhost:8080/convex")
+              "the server host does not get the CLI pointed at it: MUSIC_SERVER is ${toString (musicServer listed)}";
+            assert expect (
+              hasCli cliOnly
+              && musicServer cliOnly == "https://music.example.com/convex"
+              && cliOnly.config.virtualisation.oci-containers.containers == { }
+            ) "programs.music alone does not install just the CLI";
+            assert expect (
+              !(hasCli withoutCli) && musicServer withoutCli == null
+            ) "programs.music.enable = false does not leave the CLI out";
             assert expect (failed listed == [ ]) "the list form fails: ${toString (failed listed)}";
             assert expect (
               (container listed).volumes == [
