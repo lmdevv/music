@@ -128,8 +128,11 @@ The flake's module runs the same image with Podman (or Docker):
 - The image defaults to the release that matches the flake revision, so `nix flake update music`
   followed by `nixos-rebuild switch` is an upgrade. `imageFile` loads an image from the Nix store
   instead of pulling, for example one from `dockerTools.pullImage` pinned by digest.
-- The CLI: `nix run github:lmdevv/music#cli -- login --server https://music.example.com/convex`,
-  or add `music.packages.${system}.cli` to `environment.systemPackages`.
+- The CLI comes with the service (`programs.music`), with `MUSIC_SERVER` set to this server, so
+  `music login` needs no `--server`; `programs.music.enable = false` leaves it out. Another NixOS
+  machine imports the same module and sets only `programs.music.enable = true` and
+  `programs.music.server = "https://music.example.com/convex"`. Anywhere else:
+  `nix run github:lmdevv/music -- login --server https://music.example.com/convex`.
 
 ## Upgrading
 

@@ -11,7 +11,8 @@
 # Each folder in musicDirs is mounted read-only at /music/<folder name>; add that path as a
 # library in the web app. Two folders with the same name need the attrset form, which names each
 # mount: musicDirs = { rock = "/a/music"; jazz = "/b/music"; } mounts /music/rock and /music/jazz.
-# A native build with systemd units per service is planned.
+# A native build with systemd units per service is planned. The host also gets the `music` CLI,
+# pointed at this server (programs.music, in cli-module.nix).
 {
   config,
   lib,
@@ -72,6 +73,8 @@ let
   ) mounts;
 in
 {
+  imports = [ ./cli-module.nix ];
+
   options.services.music = {
     enable = lib.mkEnableOption "[music], a self-hosted music server";
 
