@@ -40,8 +40,9 @@ export function DesktopNowPlaying({ track, view, onView }: DesktopNowPlayingProp
     <div
       className={cn(
         "flex flex-col px-12 pt-7 pb-row",
-        // Only the queue list scrolls, so the player column stays put beside it (05 · 01c).
-        queue ? "h-full" : "min-h-full",
+        // Only the queue list scrolls, so the player column stays put beside it (05 · 01c). Below
+        // 688px the whole view scrolls instead, with the column at its smallest art.
+        queue ? "h-full min-h-172" : "min-h-full",
       )}
       style={background}
     >
@@ -104,11 +105,12 @@ export function DesktopNowPlaying({ track, view, onView }: DesktopNowPlayingProp
             </h2>
             <span className="font-sans text-md/base text-text-muted">{track.artist}</span>
           </div>
-          <div className="flex w-now-playing-cover max-w-full items-center gap-4">
+          {/* A fixed width, not the cover's, so a short window doesn't squeeze the slider away. */}
+          <div className="flex w-140 max-w-full items-center gap-4">
             <Progress
               remaining
               className="min-w-0 grow gap-4"
-              timeClassName="font-mono text-xs/xs text-text-muted"
+              timeClassName="w-11 font-mono text-xs/xs text-text-muted"
               fillClassName="bg-text"
               trackClassName="bg-text/16"
               thumbClassName="bg-text"
