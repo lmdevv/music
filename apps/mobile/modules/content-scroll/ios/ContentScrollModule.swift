@@ -44,7 +44,11 @@ final class ContentScrollView: ExpoView {
   }
 
   private func register() {
-    guard let scrollView = firstScrollView(in: self) else { return }
+    // A scroll view that went away leaves nothing for UIKit to watch.
+    guard let scrollView = firstScrollView(in: self) else {
+      unregister()
+      return
+    }
 
     unregister()
     registered = scrollView

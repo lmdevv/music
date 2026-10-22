@@ -28,6 +28,13 @@ import { librarySummary } from "@/lib/format";
 /** Libraries by who hears them: shared with everyone, some people, or only the owner. */
 const VISIBILITY_ICONS = { shared: Folder, restricted: Users, private: Lock } as const;
 
+/** What VoiceOver says of who hears a library, which the row shows only as its icon. */
+const VISIBILITY_LABELS = {
+  shared: "Shared",
+  restricted: "Some people",
+  private: "Only you",
+} as const;
+
 /** One way into the collection. */
 interface Category {
   readonly title: string;
@@ -85,6 +92,7 @@ export default function Library() {
             <Row
               key={library.id}
               title={library.name}
+              accessibilityLabel={`${library.name}, ${VISIBILITY_LABELS[library.visibility]}`}
               leading={{ kind: "icon", icon: VISIBILITY_ICONS[library.visibility] }}
               trailing={library.manageable ? <RowChevron /> : undefined}
               onPress={

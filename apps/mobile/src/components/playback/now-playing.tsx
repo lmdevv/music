@@ -424,6 +424,7 @@ function Stage({
       <Animated.View
         style={title}
         pointerEvents={queueOpen ? "none" : "box-none"}
+        accessibilityElementsHidden={queueOpen}
         className="absolute inset-x-0 bottom-0"
         onLayout={(event) => {
           setTitleHeight(event.nativeEvent.layout.height);

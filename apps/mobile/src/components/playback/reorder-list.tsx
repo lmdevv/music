@@ -168,6 +168,16 @@ function QueueRow({
   const start = useSharedValue(0);
   const speed = useSharedValue(0);
 
+  // A recycled cell starts closed when it shows another song.
+  useEffect(() => {
+    offset.value = 0;
+  }, [offset, item.itemId]);
+
+  const remove = () => {
+    offset.value = 0;
+    actions.onRemove(item);
+  };
+
   const swipe = usePanGesture({
     enabled: drag !== null,
     activeOffsetX: [-10, 10],
@@ -209,9 +219,7 @@ function QueueRow({
       <Animated.View style={uncovered} className="absolute inset-y-0 right-0">
         <Pressable
           accessible={false}
-          onPress={() => {
-            actions.onRemove(item);
-          }}
+          onPress={remove}
           className="h-full w-ios-104 items-center justify-center bg-danger active:opacity-80"
         >
           <Text variant="label" tone="onAccent">
@@ -226,9 +234,7 @@ function QueueRow({
             accessibilityLabel={`${item.title}, ${item.artist}`}
             accessibilityHint="Plays this song"
             accessibilityActions={[{ name: "remove", label: "Remove" }]}
-            onAccessibilityAction={() => {
-              actions.onRemove(item);
-            }}
+            onAccessibilityAction={remove}
             onPress={() => {
               // A tap on an open row closes it rather than playing the song.
               if (offset.value < 0) {
