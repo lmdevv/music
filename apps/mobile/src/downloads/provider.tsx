@@ -383,16 +383,17 @@ export const useLocalCopies = (): DownloadedCopies => useDownloads("useLocalCopi
 
 /**
  * Whether a song can play now: always while the server answers, else only when this phone holds
- * it. Rows of songs it can't play dim, and say "Not downloaded" (D13). Reads only this song's
- * copy, so a row redraws when its own song arrives or goes, not on every download.
+ * it; never offline for a row that isn't a real track. Rows of songs it can't play dim, and say
+ * "Not downloaded" (D13). Reads only this song's copy, so a row redraws when its own song arrives
+ * or goes, not on every download.
  */
-export const useTrackReachable = (trackId: TrackId): boolean => {
+export const useTrackReachable = (trackId: TrackId | null): boolean => {
   const { sync } = useDownloads("useTrackReachable");
   const online = useServerReach() === "online";
 
   const held = useSyncExternalStore(
     sync?.subscribe ?? subscribeToNothing,
-    () => sync !== null && sync.getSnapshot().copies.has(trackId),
+    () => sync !== null && trackId !== null && sync.getSnapshot().copies.has(trackId),
   );
 
   return online || held;
