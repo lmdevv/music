@@ -10,7 +10,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Page } from "@/components/ui/page";
 import { displayHost } from "@/lib/server";
 import { useConnection, useConnectionControls } from "@/session/connection";
-import { useSilentServer } from "@/session/session-phase";
+import { useSilentServer } from "@/session/server-reach";
 
 export default function Unreachable() {
   const { origin, reconnect, disconnect } = useConnection();

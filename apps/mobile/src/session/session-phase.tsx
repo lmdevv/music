@@ -7,13 +7,15 @@ import { sessionEnd } from "@music/sdk/errors";
 import type { SessionEnd } from "@music/sdk/errors";
 import { useReadSettled } from "@music/sdk/react";
 import type { Role } from "@music/commands/models";
-import { useConvexAuth, useConvexConnectionState, useQuery } from "convex/react";
+import { useConvexAuth, useQuery } from "convex/react";
 import { createContext, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
+import { useHasDownloads } from "@/downloads";
 import { sessionPhase, settle } from "@/lib/session-phase";
 import type { SessionPhase, SettledPhase, SetupProgress } from "@/lib/session-phase";
 import { useConnectionControls } from "@/session/connection";
+import { OFFLINE_AFTER_MS, SILENT_AFTER_MS, useSilentServer } from "@/session/server-reach";
 import { useSignOut } from "@/session/sign-out";
 
 /** This install's setup progress on the connected server, and the way setup screens move it. */
@@ -95,27 +97,6 @@ export const useEndedSession = (): EndedSessionControls => {
   return { ended: ending.ended, forget: () => ending.setEnded(null) };
 };
 
-/** How long a remembered server may stay silent at launch before G05 offers a way out. */
-const SILENT_AFTER_MS = 8000;
-
-/** Whether the WebSocket has been down for `SILENT_AFTER_MS` while the app waits on it. */
-export const useSilentServer = (): boolean => {
-  const { isWebSocketConnected } = useConvexConnectionState();
-  const [silent, setSilent] = useState(false);
-
-  useEffect(() => {
-    setSilent(false);
-
-    if (isWebSocketConnected) return undefined;
-
-    const timer = setTimeout(() => setSilent(true), SILENT_AFTER_MS);
-
-    return () => clearTimeout(timer);
-  }, [isWebSocketConnected]);
-
-  return silent;
-};
-
 /**
  * Why the server refused a settled read's session, given the read's failure if it failed. A
  * failure for any other reason is thrown.
@@ -167,7 +148,8 @@ const useSessionEnding = (refusal: SessionEnd | null, role: Role | undefined): v
 /** The phase of the connected app, from what the server has said so far. */
 const useLivePhase = (): SessionPhase => {
   const { isLoading, isAuthenticated } = useConvexAuth();
-  const silent = useSilentServer();
+  const hasDownloads = useHasDownloads();
+  const silent = useSilentServer(hasDownloads ? OFFLINE_AFTER_MS : SILENT_AFTER_MS);
   const token = isLoading ? "loading" : isAuthenticated ? "signedIn" : "signedOut";
   const setup = useQuery(setupStatus, {});
   // Settled reads: a session the server refused must not throw past every error boundary and
@@ -188,6 +170,7 @@ const useLivePhase = (): SessionPhase => {
   return sessionPhase({
     connected: true,
     silent,
+    hasDownloads,
     auth: refusal === null ? token : "signedOut",
     ended: ended?.reason ?? refusal,
     setup,

@@ -4,7 +4,7 @@
  * manifest, and whether the server answers. Screens use the hooks below and never see pins,
  * manifests, revisions, or files.
  */
-import type { DeviceId, DownloadPinId, TrackId } from "@music/commands/ids";
+import type { DeviceId, DownloadPinId, TrackId, UserId } from "@music/commands/ids";
 import type { DownloadTarget } from "@music/commands/models";
 import {
   canToggleDownload,
@@ -26,7 +26,7 @@ import type {
 import { makeMusicClient } from "@music/sdk/client";
 import { useReadSettled } from "@music/sdk/react";
 import { chooseStreamProfile } from "@music/player/stream-quality";
-import { useConvex, useConvexConnectionState } from "convex/react";
+import { useConvex, useConvexAuth, useConvexConnectionState } from "convex/react";
 import {
   createContext,
   use,
@@ -45,9 +45,11 @@ import type { ExpoVault } from "./expo-vault";
 import { loadDownloadQuality, loadPhoneId, saveDownloadQuality } from "../player/native-host";
 import type { DownloadQuality } from "../player/native-host";
 import { playsOnIos } from "../player/player-state";
+import { loadAccount, saveAccount } from "../lib/account-memory";
 import { mediaUrl } from "../lib/media-url";
 import type { ServerOrigin } from "../lib/server";
 import { useConnection } from "../session/connection";
+import { useServerReach } from "../session/server-reach";
 
 /** What a song, album, or playlist row offers for its download. */
 interface DownloadView {
@@ -163,14 +165,35 @@ function ServerFeed({
 }
 
 /**
- * Keeps the signed-in account's downloads on this phone while the app runs. Mount it inside the
- * signed-in Convex provider, above the player, which plays downloaded songs from their files.
+ * The account whose downloads this phone opens: the one signed in, else the one last signed in to
+ * this server, so a launch with no connection still opens its downloads. Signing out forgets it.
+ */
+const useDownloadsAccount = (origin: ServerOrigin): UserId | null => {
+  const { isLoading, isAuthenticated } = useConvexAuth();
+  const account = useReadSettled("account.me", isAuthenticated ? {} : "skip");
+  const signedIn = account === undefined || account instanceof Error ? null : account.id;
+  const [known, setKnown] = useState(() => loadAccount(origin));
+
+  if (signedIn !== null && signedIn !== known) setKnown(signedIn);
+
+  useEffect(() => {
+    if (signedIn !== null) saveAccount(origin, signedIn);
+  }, [origin, signedIn]);
+
+  return !isLoading && !isAuthenticated ? null : known;
+};
+
+/**
+ * Keeps the account's downloads on this phone while the app runs, and fetches new ones while the
+ * server answers. Mount it inside the Convex provider, above the session phase, which opens the
+ * app on the downloads when the server is out of reach, and above the player, which plays
+ * downloaded songs from their files.
  */
 export function DownloadsProvider({ children }: { readonly children: ReactNode }) {
   const convex = useConvex();
   const { origin } = useConnection();
-  const account = useReadSettled("account.me", {});
-  const userId = account === undefined || account instanceof Error ? null : account.id;
+  const { isAuthenticated } = useConvexAuth();
+  const userId = useDownloadsAccount(origin);
   const deviceId = useMemo(() => loadPhoneId(), []);
   const [sync, setSync] = useState<DownloadSync | null>(null);
   const [quality, setStoredQuality] = useState(loadDownloadQuality);
@@ -264,7 +287,7 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
 
   return (
     <DownloadsContext value={value}>
-      {sync === null ? null : <ServerFeed sync={sync} deviceId={deviceId} />}
+      {sync === null || !isAuthenticated ? null : <ServerFeed sync={sync} deviceId={deviceId} />}
       {children}
     </DownloadsContext>
   );
@@ -357,3 +380,33 @@ export const useDownloadSettings = (): DownloadSettings => {
  * too. Stable, and reads the vault when called.
  */
 export const useLocalCopies = (): DownloadedCopies => useDownloads("useLocalCopies").copies;
+
+/**
+ * Whether a song can play now: always while the server answers, else only when this phone holds
+ * it. Rows of songs it can't play dim, and say "Not downloaded" (D13). Reads only this song's
+ * copy, so a row redraws when its own song arrives or goes, not on every download.
+ */
+export const useTrackReachable = (trackId: TrackId): boolean => {
+  const { sync } = useDownloads("useTrackReachable");
+  const online = useServerReach() === "online";
+
+  const held = useSyncExternalStore(
+    sync?.subscribe ?? subscribeToNothing,
+    () => sync !== null && sync.getSnapshot().copies.has(trackId),
+  );
+
+  return online || held;
+};
+
+/**
+ * Whether this phone holds a downloaded song of the account it opened: what a launch with no
+ * connection can play. False until the vault opens.
+ */
+export const useHasDownloads = (): boolean => {
+  const { sync } = useDownloads("useHasDownloads");
+
+  return useSyncExternalStore(
+    sync?.subscribe ?? subscribeToNothing,
+    () => sync !== null && sync.getSnapshot().copies.size > 0,
+  );
+};
