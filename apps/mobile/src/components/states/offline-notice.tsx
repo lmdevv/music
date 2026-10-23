@@ -62,7 +62,7 @@ const useOfflineNotice = (): OfflineNoticeView => {
       host: displayHost(origin),
       playingHere: role.kind === "local" && SOUNDING.has(status),
     }),
-    retry: reconnect,
+    retry: () => reconnect("offline"),
   };
 };
 

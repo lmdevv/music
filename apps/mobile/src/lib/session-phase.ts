@@ -126,5 +126,8 @@ export const settle = (next: SessionPhase, shown: SettledPhase | null): SettledP
 
   const answered = shown !== null && shown.kind !== "disconnected" && !isSilent(shown);
 
-  return isSilent(next) && answered ? shown : next;
+  // The downloads stay on show once they are, even when the last one goes: G05 would close them.
+  const offline = shown?.kind === "offline" && next.kind === "unreachable";
+
+  return (isSilent(next) && answered) || offline ? shown : next;
 };

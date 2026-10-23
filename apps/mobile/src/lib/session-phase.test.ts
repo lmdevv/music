@@ -135,6 +135,10 @@ describe("settle", () => {
     expect(settle({ kind: "offline" }, { kind: "signedOut" })).toEqual({ kind: "signedOut" });
   });
 
+  it("keeps the downloads on show when the last one goes, rather than closing them for G05", () => {
+    expect(settle({ kind: "unreachable" }, { kind: "offline" })).toEqual({ kind: "offline" });
+  });
+
   it("keeps the downloads on show while the server is heard from, then leaves for its phase", () => {
     expect(settle({ kind: "connecting" }, { kind: "offline" })).toEqual({ kind: "offline" });
     expect(settle({ kind: "ready" }, { kind: "offline" })).toEqual({ kind: "ready" });

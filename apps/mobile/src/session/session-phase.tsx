@@ -186,11 +186,12 @@ const useLivePhase = (): SessionPhase => {
  */
 export const useSettledPhase = (): SettledPhase | null => {
   const live = useLivePhase();
-  const { attempt } = useConnectionControls();
+  const { attempt, retriedFrom } = useConnectionControls();
 
-  // Try again on G05 opens a new session; G05 stays on show while it waits, not a blank page.
+  // Try again opens a new session; the screens it was pressed on stay on show while it waits,
+  // not a blank page.
   const [shown, setShown] = useState<SettledPhase | null>(
-    attempt > 0 ? { kind: "unreachable" } : null,
+    attempt > 0 ? { kind: retriedFrom } : null,
   );
 
   const next = settle(live, shown);

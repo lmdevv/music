@@ -27,7 +27,12 @@ export default function Unreachable() {
         title={"Your server\nis out of reach."}
         body={`Check your connection and make sure\n${displayHost(origin)} is running.`}
         primary={
-          <Button label="Try again" pendingLabel="Trying…" pending={trying} onPress={reconnect} />
+          <Button
+            label="Try again"
+            pendingLabel="Trying…"
+            pending={trying}
+            onPress={() => reconnect("unreachable")}
+          />
         }
         secondary={<Button label="Server address" variant="secondary" onPress={disconnect} />}
       />
