@@ -51,7 +51,9 @@ import {
 import type { NowPlaying, PlayerRole, PlayerStatus, PlayerView } from "./player-state";
 import { idleTransfer, nextTransfer, TRANSFER_TIMEOUT_MS } from "./transfer";
 import type { Transfer } from "./transfer";
-import { mediaUrl } from "../lib/media-url";
+import { useLocalCopies } from "../downloads";
+import type { LocalCopy } from "../downloads";
+import { mediaUrl, resolveMediaUrl } from "../lib/media-url";
 import type { ServerOrigin } from "../lib/server";
 
 /** How often `usePlaybackPosition` updates. */
@@ -179,7 +181,11 @@ interface Phone {
   readonly name: string;
 }
 
-const createPhone = (client: MusicClient, origin: ServerOrigin): Phone => {
+const createPhone = (
+  client: MusicClient,
+  origin: ServerOrigin,
+  localCopy: (trackId: TrackId) => LocalCopy | null,
+): Phone => {
   const engine = new NativeEngine(openExpoOutput);
   const id = loadPhoneId();
   const name = phoneName();
@@ -195,7 +201,10 @@ const createPhone = (client: MusicClient, origin: ServerOrigin): Phone => {
       now: Date.now,
       quality: loadQuality(),
       saveQuality,
-      nowPlaying: lockScreenControls(engine, origin),
+      nowPlaying: lockScreenControls(
+        engine,
+        (track) => localCopy(track.id)?.artUri ?? resolveMediaUrl(origin, track.artUrl),
+      ),
       onForeground,
     },
   );
@@ -318,7 +327,13 @@ export function PlayerProvider({
   readonly children: ReactNode;
 }) {
   const convex = useConvex();
-  const phone = useMemo(() => createPhone(makeMusicClient(convex), origin), [convex, origin]);
+  const localCopy = useLocalCopies();
+
+  const phone = useMemo(
+    () => createPhone(makeMusicClient(convex), origin, localCopy),
+    [convex, origin, localCopy],
+  );
+
   const { controller } = phone;
 
   // Separate subscriptions, so a position report re-runs only the small one. Convex delivers a

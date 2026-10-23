@@ -17,8 +17,6 @@ import { AppState } from "react-native";
 
 import type { NativeEngine } from "./native-engine";
 import { parseQuality } from "./player-state";
-import { resolveMediaUrl } from "../lib/media-url";
-import type { ServerOrigin } from "../lib/server";
 
 const QUALITY_KEY = "music.streamQuality";
 
@@ -96,11 +94,12 @@ const listenForTrackCommands = (handlers: {
  * The lock screen, Control Center, headphones, and CarPlay. expo-audio routes play, pause, and
  * scrubbing to the playing AVPlayer itself, which the engine sees as status changes. Next and
  * previous come from the `RemoteCommands` module and go to the controller's handlers, which ask
- * the server to move the queue.
+ * the server to move the queue. `artwork` names the cover to show for a song: its downloaded
+ * file when this phone holds one, so the cover shows without the server.
  */
 export const lockScreenControls = (
   engine: NativeEngine,
-  origin: ServerOrigin,
+  artwork: (track: Track) => string | null,
 ): NowPlayingControls => {
   let shown: Track | null = null;
   let stopListening = nothingToStop;
@@ -121,7 +120,7 @@ export const lockScreenControls = (
               title: track.title,
               artist: track.artist,
               album: track.album,
-              artworkUrl: resolveMediaUrl(origin, track.artUrl),
+              artworkUrl: artwork(track),
             },
       );
     },
