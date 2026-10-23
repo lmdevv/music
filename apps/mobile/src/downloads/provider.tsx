@@ -33,6 +33,7 @@ import {
   use,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -178,15 +179,18 @@ const useDownloadsAccount = (origin: ServerOrigin): UserId | null => {
   const { isLoading, isAuthenticated } = useConvexAuth();
   const account = useReadSettled("account.me", isAuthenticated ? {} : "skip");
   const signedIn = account === undefined || account instanceof Error ? null : account.id;
+  const signedOut = !isLoading && !isAuthenticated;
   const [known, setKnown] = useState(() => loadAccount(origin));
+  // Signed out, the account is gone: whoever signs in next waits for the server to say who.
+  const next = signedOut ? null : (signedIn ?? known);
 
-  if (signedIn !== null && signedIn !== known) setKnown(signedIn);
+  if (next !== known) setKnown(next);
 
   useEffect(() => {
     if (signedIn !== null) saveAccount(origin, signedIn);
   }, [origin, signedIn]);
 
-  return !isLoading && !isAuthenticated ? null : known;
+  return next;
 };
 
 /**
@@ -208,7 +212,9 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
   const current = useRef<DownloadSync | null>(null);
   const vaultOpening = useRef<Promise<ExpoVault> | null>(null);
 
-  useEffect(() => {
+  // A layout effect, so the vault is opening before any child's effect (the player's session
+  // router) asks it for the session it stored.
+  useLayoutEffect(() => {
     if (userId === null) return undefined;
     let closed = false;
     let created: DownloadSync | null = null;
