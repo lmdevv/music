@@ -21,13 +21,17 @@ import { nodeTransfer } from "./node-transfer";
 import type { StoredCopy, VaultView } from "./plan";
 import { downloadStatus, trackDownloadState } from "./status";
 import { DownloadSync } from "./sync";
-import { applyChange, emptyVault } from "./vault";
-import type { VaultChange, VaultStore } from "./vault";
+import { applyChange, emptyVault, VaultChange } from "./vault";
+import type { VaultStore } from "./vault";
 
 /** A vault whose rows live in memory and whose files live in a real directory. */
 class DirectoryVault implements VaultStore {
   view: VaultView;
   free: number | null = 64 * 1024 ** 3;
+  /** Loads that fail before one works, as an unreadable database would. */
+  failingLoads = 0;
+  /** Song rows refused before one is written, as a full disk would. */
+  failingCopies = 0;
   readonly #dir: string;
 
   constructor(dir: string, view: VaultView = emptyVault) {
@@ -35,9 +39,23 @@ class DirectoryVault implements VaultStore {
     this.view = view;
   }
 
-  load = (): Promise<VaultView> => Promise.resolve(this.view);
+  load = (): Promise<VaultView> => {
+    if (this.failingLoads > 0) {
+      this.failingLoads -= 1;
+
+      return Promise.reject(new Error("database disk image is malformed"));
+    }
+
+    return Promise.resolve(this.view);
+  };
 
   commit = (change: VaultChange): Promise<void> => {
+    if (VaultChange.$is("PutCopy")(change) && this.failingCopies > 0) {
+      this.failingCopies -= 1;
+
+      return Promise.reject(new Error("database or disk is full"));
+    }
+
     this.view = applyChange(this.view, change);
 
     return Promise.resolve();
@@ -293,6 +311,49 @@ describe("DownloadSync", () => {
         kind: "downloaded",
       });
     }, SETTLE);
+  });
+
+  it("counts a song whose row the vault refused as failed, and leaves no file behind", async () => {
+    const vault = new DirectoryVault(dir);
+    vault.failingCopies = 1;
+    const sync = started(vault);
+    sync.setOnline(true);
+    sync.offerPins([ALBUM]);
+    sync.offerManifest(ALBUM.id, MANIFEST);
+
+    await vi.waitFor(() => {
+      expect(trackDownloadState(sync.getSnapshot(), UNFINISHED.id)).toBe("downloaded");
+      expect(trackDownloadState(sync.getSnapshot(), SAFE.id)).toBe("failed");
+    }, SETTLE);
+
+    expect(await exists("audio/t1.r1.aac-320.m4a")).toBe(false);
+    sync.retry(ALBUM.target);
+
+    await vi.waitFor(() => {
+      expect(trackDownloadState(sync.getSnapshot(), SAFE.id)).toBe("downloaded");
+    }, SETTLE);
+  });
+
+  it("opens the vault again later when it can't be read", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const vault = new DirectoryVault(dir);
+      vault.failingLoads = 1;
+      const sync = started(vault);
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(sync.getSnapshot().ready).toBe(false);
+      await vi.advanceTimersByTimeAsync(30_000);
+      // The second open lists the vault's files on disk, which fake timers don't drive.
+      vi.useRealTimers();
+
+      await vi.waitFor(() => {
+        expect(sync.getSnapshot().ready).toBe(true);
+      }, SETTLE);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("waits without fetching while the server doesn't answer", async () => {

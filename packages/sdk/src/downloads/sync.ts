@@ -204,7 +204,7 @@ export class DownloadSync {
    * killed in), then starts planning. Returns the function that stops every fetch.
    */
   start(): () => void {
-    void this.#open();
+    this.#tryOpen();
 
     return () => {
       this.#stop();
@@ -362,6 +362,18 @@ export class DownloadSync {
     this.#plan();
   }
 
+  /** Opens the vault, and tries again later when it can't be read (a full disk, say). */
+  #tryOpen(): void {
+    void this.#open().catch(() => {
+      if (this.#stopped) return;
+
+      this.#wake = setTimeout(() => {
+        this.#wake = null;
+        this.#tryOpen();
+      }, VAULT_RETRY_MS);
+    });
+  }
+
   #stop(): void {
     this.#stopped = true;
 
@@ -483,29 +495,29 @@ export class DownloadSync {
     this.#fetching.set(trackId, { rev: entry.rev, stop });
     this.#publish();
 
-    const outcome = await fetchFinishedFile(this.#options.transfer, {
-      sign: async () => {
-        const stream = await client.read("stream.url", { trackId, profile, requestedAt: now() });
-
-        return resolveUrl(stream.url);
-      },
-      destination: (contentType) => {
-        written.file = audioFile(trackId, entry.rev, profile, contentType);
-
-        return written.file === null ? null : vault.uri(written.file);
-      },
-      signal: stop.signal,
-      sleep: this.#sleep,
-    });
-
+    /** Records a fetch that didn't land and deletes what it wrote, which no row names. */
     const fail = async (message: string, retryable: boolean): Promise<void> => {
       const failure = nextFailure(this.#trackFailures.get(trackId), message, retryable, now());
       this.#trackFailures.set(trackId, { ...failure, rev: entry.rev });
-
-      if (written.file !== null) await vault.remove(written.file);
+      await this.#removeQuietly(written.file);
     };
 
     try {
+      const outcome = await fetchFinishedFile(this.#options.transfer, {
+        sign: async () => {
+          const stream = await client.read("stream.url", { trackId, profile, requestedAt: now() });
+
+          return resolveUrl(stream.url);
+        },
+        destination: (contentType) => {
+          written.file = audioFile(trackId, entry.rev, profile, contentType);
+
+          return written.file === null ? null : vault.uri(written.file);
+        },
+        signal: stop.signal,
+        sleep: this.#sleep,
+      });
+
       await FetchOutcome.$match(outcome, {
         Fetched: async ({ bytes }) => {
           // A stopped sync's vault is closing; the next start's sweep deletes the file.
@@ -524,15 +536,17 @@ export class DownloadSync {
           await this.#commit(VaultChange.PutCopy({ copy }));
           this.#trackFailures.delete(trackId);
 
-          if (previous !== undefined && previous.file !== copy.file)
-            await vault.remove(previous.file);
+          if (previous !== undefined && previous.file !== copy.file) {
+            await this.#removeQuietly(previous.file);
+          }
         },
         Gone: () => fail("The song is no longer on the server", true),
         Failed: ({ message, retryable }) => fail(message, retryable),
-        Stopped: async () => {
-          if (written.file !== null) await vault.remove(written.file);
-        },
+        Stopped: () => this.#removeQuietly(written.file),
       });
+    } catch (error) {
+      // The vault refused the row (a full disk, say): try again later, as after a failed fetch.
+      await fail(error instanceof Error ? error.message : "Couldn’t keep the song", true);
     } finally {
       // Held until the copy is in the vault, so no plan in between fetches it again.
       this.#fetching.delete(trackId);
@@ -552,23 +566,23 @@ export class DownloadSync {
 
     const stop = new AbortController();
     this.#fetchingArt.set(hash, stop);
-    const destination = vault.uri(file);
 
-    const result = await transfer.download({
-      url: resolveUrl(url),
-      destination,
-      signal: stop.signal,
-    });
-
-    const fail = (message: string): void => {
+    const fail = async (message: string): Promise<void> => {
       this.#artFailures.set(hash, nextFailure(this.#artFailures.get(hash), message, true, now()));
+      await this.#removeQuietly(file);
     };
 
     try {
+      const result = await transfer.download({
+        url: resolveUrl(url),
+        destination: vault.uri(file),
+        signal: stop.signal,
+      });
+
       await DownloadResult.$match(result, {
         Written: async ({ bytes }) => {
           if (stop.signal.aborted || this.#stopped) {
-            await vault.remove(file);
+            await this.#removeQuietly(file);
 
             return;
           }
@@ -576,21 +590,22 @@ export class DownloadSync {
           await this.#commit(VaultChange.PutArt({ art: { hash, file, bytes } }));
           this.#artFailures.delete(hash);
         },
-        Refused: ({ status }) => {
-          fail(`The media service answered ${String(status)}`);
-
-          return Promise.resolve();
-        },
-        Broken: ({ message }) => {
-          fail(message);
-
-          return Promise.resolve();
-        },
+        Refused: ({ status }) => fail(`The media service answered ${String(status)}`),
+        Broken: ({ message }) => fail(message),
       });
+    } catch (error) {
+      await fail(error instanceof Error ? error.message : "Couldn’t keep the cover");
     } finally {
       this.#fetchingArt.delete(hash);
       this.#plan();
     }
+  }
+
+  /** Deletes a vault file if there is one; a file left behind goes with the next start's sweep. */
+  async #removeQuietly(file: string | null): Promise<void> {
+    if (file === null) return;
+
+    await this.#options.vault.remove(file).catch(() => undefined);
   }
 
   async #drop(copy: StoredCopy): Promise<void> {

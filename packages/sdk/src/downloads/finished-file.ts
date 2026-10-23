@@ -244,5 +244,15 @@ export const fetchFinishedFile = async (
     return (await download(response)) ?? ask(round + 1);
   };
 
-  return ask(0);
+  try {
+    return await ask(0);
+  } catch (cause) {
+    // A platform transfer or destination that threw, rather than answering with a result.
+    return stopped()
+      ? FetchOutcome.Stopped()
+      : FetchOutcome.Failed({
+          message: cause instanceof Error ? cause.message : "The download failed",
+          retryable: true,
+        });
+  }
 };
