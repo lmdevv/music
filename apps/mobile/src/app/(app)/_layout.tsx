@@ -24,6 +24,8 @@ const SHEETS = [
   "song/[id]/actions",
   "song/[id]/add-to-playlist",
   "sort/[list]",
+  "album/[id]/actions",
+  "download/remove",
   "playlist/[id]/actions",
   "playlist/[id]/delete",
   "playlist/[id]/share/[userId]",

@@ -11,11 +11,13 @@ import {
   downloadStatus,
   DownloadSync,
   EMPTY_DOWNLOADS,
+  offlineLibrary,
 } from "@music/sdk/downloads";
 import type {
   DownloadsSnapshot,
   DownloadStatus,
   LocalCopy,
+  OfflineLibrary,
   SyncPolicy,
 } from "@music/sdk/downloads";
 import { makeMusicClient } from "@music/sdk/client";
@@ -271,6 +273,14 @@ export const useDownload = (target: DownloadTarget): DownloadView => {
       sync?.retry(target);
     },
   };
+};
+
+/** Everything on this phone: each download, the albums, playlists, and songs, and their space. */
+export const useDownloadsLibrary = (): OfflineLibrary => {
+  const { sync } = useDownloads("useDownloadsLibrary");
+  const snapshot = useSnapshot(sync);
+
+  return useMemo(() => offlineLibrary(snapshot), [snapshot]);
 };
 
 /**
