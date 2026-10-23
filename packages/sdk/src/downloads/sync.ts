@@ -194,6 +194,8 @@ export class DownloadSync {
   #wake: ReturnType<typeof setTimeout> | null = null;
   #snapshot: DownloadsSnapshot = EMPTY_DOWNLOADS;
   readonly #listeners = new Set<() => void>();
+  /** Plans, fetches, and checks still running: what `stop` waits for. */
+  readonly #work = new Set<Promise<void>>();
 
   constructor(options: DownloadSyncOptions) {
     this.#options = options;
@@ -208,8 +210,25 @@ export class DownloadSync {
     this.#tryOpen();
 
     return () => {
-      this.#stop();
+      void this.stop();
     };
+  }
+
+  /**
+   * Stops every fetch and plan, and resolves once they have all ended: then nothing writes to the
+   * vault or its files any more, and it can be closed or deleted.
+   */
+  async stop(): Promise<void> {
+    this.#stop();
+
+    const settle = async (): Promise<void> => {
+      if (this.#work.size === 0) return;
+      await Promise.allSettled(this.#work);
+
+      return settle();
+    };
+
+    await settle();
   }
 
   /** The device's downloads, as `downloads.list` answered for it. */
@@ -318,7 +337,7 @@ export class DownloadSync {
       this.#plan();
     };
 
-    void check().catch(() => {
+    this.#track(check()).catch(() => {
       this.#wakeIn(VAULT_RETRY_MS);
     });
   }
@@ -442,7 +461,7 @@ export class DownloadSync {
     this.#planning = true;
     this.#replan = false;
 
-    void this.#planOnce()
+    void this.#track(this.#planOnce())
       .catch(() => {
         this.#wakeIn(VAULT_RETRY_MS);
       })
@@ -526,7 +545,7 @@ export class DownloadSync {
       if (!this.#fetchingArt.has(cover.hash) && due(failure, now)) {
         // The retry is under way: it no longer waits for its time.
         if (failure !== undefined) this.#artFailures.set(cover.hash, { ...failure, retryAt: null });
-        void this.#fetchArt(cover);
+        void this.#track(this.#fetchArt(cover));
       }
     }
 
@@ -539,7 +558,7 @@ export class DownloadSync {
       if (!this.#fetching.has(trackId) && due(failure, now)) {
         // The retry is under way: it no longer waits for its time.
         if (failure !== undefined) this.#trackFailures.set(trackId, { ...failure, retryAt: null });
-        void this.#fetchTrack(fetch);
+        void this.#track(this.#fetchTrack(fetch));
       }
     }
   }
@@ -661,6 +680,19 @@ export class DownloadSync {
       this.#fetchingArt.delete(hash);
       this.#plan();
     }
+  }
+
+  /** Counts `work` as running until it ends, for `stop`. */
+  #track(work: Promise<void>): Promise<void> {
+    this.#work.add(work);
+
+    void work
+      .catch(() => undefined)
+      .finally(() => {
+        this.#work.delete(work);
+      });
+
+    return work;
   }
 
   /** Deletes a vault file if there is one; a file left behind goes with the next start's sweep. */

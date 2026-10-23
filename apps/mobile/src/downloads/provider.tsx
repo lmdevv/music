@@ -34,12 +34,13 @@ import {
 import type { ReactNode } from "react";
 
 import { expoTransfer } from "./expo-transfer";
-import { openVault } from "./expo-vault";
+import { openVault, wipeVaults } from "./expo-vault";
 import type { ExpoVault } from "./expo-vault";
 import { loadDownloadQuality, loadPhoneId } from "../player/native-host";
 import type { DownloadQuality } from "../player/native-host";
 import { playsOnIos } from "../player/player-state";
 import { mediaUrl } from "../lib/media-url";
+import type { ServerOrigin } from "../lib/server";
 import { useConnection } from "../session/connection";
 
 /** What a song, album, or playlist row offers for its download. */
@@ -68,6 +69,21 @@ interface Downloads {
 }
 
 const DownloadsContext = createContext<Downloads | null>(null);
+
+/**
+ * How to stop each server's sync and close its vault, so a wipe never races a fetch still
+ * writing. Kept until the shutdown has ended, so a wipe that starts meanwhile waits for it.
+ */
+const shutdowns = new Map<ServerOrigin, () => Promise<void>>();
+
+/**
+ * Deletes every download kept for the server at `origin`, for any account: after its sync has
+ * stopped and its vault closed, so no transfer still in flight writes a file back.
+ */
+export const wipeDownloads = async (origin: ServerOrigin): Promise<void> => {
+  await shutdowns.get(origin)?.();
+  await wipeVaults(origin);
+};
 
 const subscribeToNothing = (): (() => void) => () => undefined;
 
@@ -144,8 +160,25 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
   useEffect(() => {
     if (userId === null) return undefined;
     let closed = false;
-    let stop = (): void => undefined;
+    let created: DownloadSync | null = null;
+    let shutting: Promise<void> | null = null;
     const opening = openVault(origin, userId);
+
+    /** Stops the sync, waiting for its fetches to end, then closes the vault. Once. */
+    const shutdown = (): Promise<void> => {
+      shutting ??= (async () => {
+        closed = true;
+        current.current = null;
+        setSync(null);
+        await created?.stop();
+        const vault = await opening.catch(() => null);
+        await vault?.close();
+      })();
+
+      return shutting;
+    };
+
+    shutdowns.set(origin, shutdown);
 
     const run = async (): Promise<void> => {
       let vault: ExpoVault;
@@ -162,7 +195,7 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
 
       if (closed) return;
 
-      const created = new DownloadSync({
+      const opened = new DownloadSync({
         client: makeMusicClient(convex),
         vault,
         transfer: expoTransfer,
@@ -172,23 +205,18 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
         now: Date.now,
       });
 
-      stop = created.start();
-      current.current = created;
-      setSync(created);
+      created = opened;
+      opened.start();
+      current.current = opened;
+      setSync(opened);
     };
 
     void run();
 
     return () => {
-      closed = true;
-      stop();
-      current.current = null;
-      setSync(null);
-
-      void opening.then(
-        (vault) => vault.close(),
-        () => undefined,
-      );
+      void shutdown().finally(() => {
+        if (shutdowns.get(origin) === shutdown) shutdowns.delete(origin);
+      });
     };
   }, [convex, origin, userId, deviceId]);
 

@@ -318,11 +318,12 @@ export const openVault = async (origin: ServerOrigin, account: UserId): Promise<
 };
 
 /**
- * Deletes every download kept for the server at `origin`: files and rows, for any account. Safe
- * while a vault there is still open: its directory is renamed away first, so an open database or
- * a fetch in flight writes nowhere that stays.
+ * Deletes every download kept for the server at `origin`: files and rows, for any account. Its
+ * directory is renamed away first, so a delete that fails leaves nothing a vault opens again. Stop
+ * the server's sync and close its vault first: an iOS download task in flight re-creates its
+ * directories and would land its file at the old path.
  */
-export const wipeDownloads = async (origin: ServerOrigin): Promise<void> => {
+export const wipeVaults = async (origin: ServerOrigin): Promise<void> => {
   const server = await serverDirectory(origin);
 
   if (!server.exists) return;

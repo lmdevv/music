@@ -591,6 +591,44 @@ describe("DownloadSync", () => {
     });
   });
 
+  it("says it stopped only once a transfer in flight has ended", async () => {
+    const ended = { value: false };
+
+    const transfer: Transfer = {
+      head: () =>
+        Promise.resolve(
+          new Response(null, { status: 200, headers: { "Content-Type": "audio/mp4" } }),
+        ),
+      download: ({ signal }) =>
+        new Promise((resolve) => {
+          // The platform takes a moment to cancel, as an iOS download task does.
+          signal.addEventListener(
+            "abort",
+            () => {
+              setTimeout(() => {
+                ended.value = true;
+                resolve(DownloadResult.Broken({ message: "cancelled" }));
+              }, 50);
+            },
+            { once: true },
+          );
+        }),
+    };
+
+    const sync = started(new DirectoryVault(dir), { transfer });
+    sync.setOnline(true);
+    sync.offerPins([ALBUM]);
+    sync.offerManifest(ALBUM.id, MANIFEST);
+
+    await vi.waitFor(() => {
+      expect(trackDownloadState(sync.getSnapshot(), SAFE.id)).toBe("downloading");
+    }, SETTLE);
+
+    await sync.stop();
+
+    expect(ended.value).toBe(true);
+  });
+
   it("asks the server to download a target to this device", async () => {
     const sync = started(new DirectoryVault(dir));
     await sync.request({ kind: "playlist", id: PlaylistId.make("late-night") });
