@@ -3,8 +3,7 @@
  * never purges, unlike Caches) and excluded from backup. One per server and account:
  * `<Application Support>/downloads/<server>/<account>/{vault.db, audio/, art/}`.
  */
-import { DownloadPinId, TrackId } from "@music/commands/ids";
-import type { UserId } from "@music/commands/ids";
+import { DownloadPinId, TrackId, UserId } from "@music/commands/ids";
 import {
   DownloadPin,
   DownloadTarget,
@@ -321,6 +320,24 @@ export const openVault = async (origin: ServerOrigin, account: UserId): Promise<
     session: vaultSessions(db),
     close: () => db.closeAsync(),
   };
+};
+
+const decodeAccount = Schema.decodeUnknownOption(UserId);
+
+/**
+ * The accounts whose downloads this phone keeps for the server at `origin`. Signing out wipes the
+ * server's downloads, so there is at most one in practice.
+ */
+export const vaultAccounts = async (origin: ServerOrigin): Promise<ReadonlyArray<UserId>> => {
+  const server = await serverDirectory(origin);
+
+  if (!server.exists) return [];
+
+  return server
+    .list()
+    .flatMap((entry) =>
+      entry instanceof Directory ? Option.toArray(decodeAccount(entry.name)) : [],
+    );
 };
 
 /**
