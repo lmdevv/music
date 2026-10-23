@@ -44,6 +44,14 @@ describe("downloadControl", () => {
     });
   });
 
+  it("never calls a download with no songs here downloaded", () => {
+    expect(downloadControl({ kind: "failed", failed: 9, total: 9 }, true)).toEqual({
+      ring: { kind: "waiting" },
+      press: "cancel",
+      label: "Cancel download, 9 songs couldn’t download",
+    });
+  });
+
   it("says what removing a download frees, and doesn't name a size before songs arrive", () => {
     expect(removeDownloadCopy("Blue Lines", 412_000_000)).toEqual({
       body: "Blue Lines and the 412 MB it takes leave this iPhone. Nothing changes on your server, and you can download it again any time.",
@@ -58,6 +66,10 @@ describe("downloadControl", () => {
       body: "55 songs and 2.4 GB leave this iPhone. Nothing changes on your server, and you can download them again any time.",
       confirmLabel: "Remove 2.4 GB",
     });
+
+    expect(removeAllCopy({ tracks: 0, bytes: 0, freeBytes: null }).confirmLabel).toBe(
+      "Remove all downloads",
+    );
   });
 
   it("fills the ring by songs finished, from empty to full", () => {

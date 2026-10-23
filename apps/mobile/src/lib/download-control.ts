@@ -58,12 +58,20 @@ export const downloadControl = (status: DownloadStatus, canToggle: boolean): Dow
         press: "cancel",
         label: `Cancel download, ${String(done)} of ${String(total)} songs downloaded`,
       }),
-      // Paper's D05: the album stays downloaded; its rows say which songs to retry.
-      failed: ({ failed, total }): DownloadControl => ({
-        ring: DOWNLOADED,
-        press: "confirm-remove",
-        label: `Downloaded, ${String(failed)} of ${String(total)} songs couldn’t download. Remove download`,
-      }),
+      // Paper's D05: an album with some songs here stays downloaded, and its rows say which songs
+      // to retry. With none here it isn't downloaded, so it waits for its retries instead.
+      failed: ({ failed, total }): DownloadControl =>
+        failed < total
+          ? {
+              ring: DOWNLOADED,
+              press: "confirm-remove",
+              label: `Downloaded, ${String(failed)} of ${String(total)} songs couldn’t download. Remove download`,
+            }
+          : {
+              ring: WAITING,
+              press: "cancel",
+              label: `Cancel download, ${countOf(failed, "song")} couldn’t download`,
+            },
       downloaded: (): DownloadControl => ({
         ring: DOWNLOADED,
         press: "confirm-remove",
@@ -92,10 +100,16 @@ export interface RemoveCopy {
 }
 
 /** D17's Remove all downloads sheet, for the songs and space downloads take now. */
-export const removeAllCopy = (usage: DownloadUsage): RemoveCopy => ({
-  body: `${countOf(usage.tracks, "song")} and ${formatBytes(usage.bytes)} leave this iPhone. Nothing changes on your server, and you can download them again any time.`,
-  confirmLabel: `Remove ${formatBytes(usage.bytes)}`,
-});
+export const removeAllCopy = (usage: DownloadUsage): RemoveCopy =>
+  usage.tracks === 0
+    ? {
+        body: "Downloads still to come stop, and nothing is kept on this iPhone. Nothing changes on your server, and you can download them again any time.",
+        confirmLabel: "Remove all downloads",
+      }
+    : {
+        body: `${countOf(usage.tracks, "song")} and ${formatBytes(usage.bytes)} leave this iPhone. Nothing changes on your server, and you can download them again any time.`,
+        confirmLabel: `Remove ${formatBytes(usage.bytes)}`,
+      };
 
 /** The Remove download sheet for `title`, which takes `bytes` on this iPhone. */
 export const removeDownloadCopy = (title: string, bytes: number): RemoveCopy => {
