@@ -180,6 +180,8 @@ export class DownloadSync {
   readonly #manifests = new Map<DownloadPinId, DownloadManifest>();
   /** `targetKey`s this device removes; each goes once the server stops listing it. */
   readonly #removing = new Set<string>();
+  /** Copies that failed to play, no longer offered while their row is deleted. */
+  readonly #discarded = new Set<TrackId>();
   readonly #fetching = new Map<TrackId, { readonly rev: string; readonly stop: AbortController }>();
   readonly #fetchingArt = new Map<string, AbortController>();
   readonly #trackFailures = new Map<TrackId, Failure & { readonly rev: string }>();
@@ -295,7 +297,27 @@ export class DownloadSync {
   localCopy(trackId: TrackId): LocalCopy | null {
     const copy = this.#view.copies.get(trackId);
 
-    return copy === undefined ? null : this.#localCopy(copy);
+    return copy === undefined || this.#discarded.has(trackId) ? null : this.#localCopy(copy);
+  }
+
+  /**
+   * A copy that failed to play: it stops being offered at once, its file and row go, and the next
+   * plan fetches it again.
+   */
+  discard(trackId: TrackId): void {
+    const copy = this.#view.copies.get(trackId);
+
+    if (copy === undefined || this.#discarded.has(trackId)) return;
+    this.#discarded.add(trackId);
+
+    void this.#drop(copy)
+      .catch(() => {
+        this.#wakeIn(VAULT_RETRY_MS);
+      })
+      .finally(() => {
+        this.#discarded.delete(trackId);
+        this.#plan();
+      });
   }
 
   /** The current snapshot, for `useSyncExternalStore`. */

@@ -151,6 +151,10 @@ const started = (vault: VaultStore): DownloadSync => {
   return sync;
 };
 
+/** How many times the media service sent the file of `trackId`. */
+const fetchesOf = (trackId: string): number =>
+  media.seen.filter(({ method, url }) => method === "GET" && url.includes(`/${trackId}?`)).length;
+
 const exists = async (file: string): Promise<boolean> =>
   stat(join(dir, file)).then(
     () => true,
@@ -187,6 +191,27 @@ describe("DownloadSync", () => {
       kind: "included",
       by: { kind: "album", title: "Blue Lines" },
     });
+  });
+
+  it("stops offering a copy that failed to play and fetches it again", async () => {
+    const vault = new DirectoryVault(dir);
+    const sync = started(vault);
+    sync.setOnline(true);
+    sync.offerPins([ALBUM]);
+    sync.offerManifest(ALBUM.id, MANIFEST);
+
+    await vi.waitFor(() => {
+      expect(sync.localCopy(SAFE.id)).not.toBeNull();
+    }, SETTLE);
+
+    sync.discard(SAFE.id);
+
+    expect(sync.localCopy(SAFE.id)).toBeNull();
+
+    await vi.waitFor(() => {
+      expect(fetchesOf("t1")).toBe(2);
+      expect(sync.localCopy(SAFE.id)).not.toBeNull();
+    }, SETTLE);
   });
 
   it("deletes the files of a removed download at once and tells the server", async () => {
