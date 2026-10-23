@@ -42,7 +42,7 @@ import {
 import type { ReactNode } from "react";
 
 import { expoTransfer } from "./expo-transfer";
-import { openVault, vaultAccounts, wipeVaults } from "./expo-vault";
+import { openVault, wipeVaults } from "./expo-vault";
 import type { ExpoVault } from "./expo-vault";
 import { loadDownloadQuality, loadPhoneId, saveDownloadQuality } from "../player/native-host";
 import type { DownloadQuality } from "../player/native-host";
@@ -189,28 +189,6 @@ const useDownloadsAccount = (origin: ServerOrigin): UserId | null => {
   useEffect(() => {
     if (signedIn !== null) saveAccount(origin, signedIn);
   }, [origin, signedIn]);
-
-  // A build that remembered no account yet finds the one whose downloads this phone keeps, so the
-  // first launch without the server after an update still opens them. Only when there is one.
-  useEffect(() => {
-    if (next !== null || signedOut) return undefined;
-    let cancelled = false;
-
-    const find = async (): Promise<void> => {
-      const accounts = await vaultAccounts(origin).catch(() => []);
-      const [only] = accounts;
-
-      if (cancelled || accounts.length !== 1 || only === undefined) return;
-      saveAccount(origin, only);
-      setKnown(only);
-    };
-
-    void find();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [origin, next, signedOut]);
 
   return next;
 };
