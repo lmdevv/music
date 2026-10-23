@@ -1,4 +1,17 @@
 import type { PlaybackPosition, PlaybackQueue } from "@music/commands/models";
+import {
+  MAX_QUEUE,
+  addedOrder,
+  isNewPlay,
+  keptOrder,
+  movedInOrder,
+  nextIndex,
+  playOrder,
+  previousIndex,
+  shuffledOff,
+  shuffledOn,
+  withoutUpcomingAutoplay,
+} from "@music/commands/queue-rules";
 
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
@@ -6,12 +19,10 @@ import { autoplaySongs } from "../lib/autoplay";
 import { DEVICE_LISTED_MS, DEVICE_LIST_LIMIT, listedDevices } from "../lib/devices";
 import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
-import { MAX_QUEUE, ensureSession, findSession, livePosition, shuffled } from "../lib/playback";
+import { ensureSession, findSession, livePosition } from "../lib/playback";
 import { DEVICE_ONLINE_MS, makeContributors, makePresenter, presentDevice } from "../lib/present";
 import {
-  endOfQueued,
   itemPosition,
-  keptOrder,
   loadQueue,
   newItems,
   normaliseStored,
@@ -35,15 +46,6 @@ import { canRead } from "../lib/viewer";
 import type { ReadCtx, Viewer } from "../lib/viewer";
 import type { MutationHandlers, QueryHandlers } from "./types";
 import { ok } from "./types";
-
-const RESTART_THRESHOLD_MS = 3000;
-
-/**
- * A report this close to the start of the song history last recorded, after the session had
- * played this much further, is the same song starting again (repeat one, or a seek back to the
- * start), so it counts as another play.
- */
-const REPLAY_GAP_MS = 10_000;
 
 /** How long after a command moves the queue a report naming another song counts as stale. */
 const MOVE_GRACE_MS = 3000;
@@ -251,7 +253,7 @@ export const refreshJamAutoplay = async (ctx: MutationCtx, host: Viewer): Promis
   const before = await loadQueue(ctx, host);
 
   if (before.items.some((item, position) => position > before.index && item.autoplay)) {
-    await saveTopped(ctx, host, withoutAutoplay(before));
+    await saveTopped(ctx, host, { ...before, ...withoutUpcomingAutoplay(before) });
   }
 
   // A song autoplay picked from a library shared with the host alone may be playing: move on to
@@ -290,32 +292,6 @@ export const refreshJamAutoplay = async (ctx: MutationCtx, host: Viewer): Promis
  */
 const saveTopped = async (ctx: MutationCtx, viewer: Viewer, queue: StoredQueue): Promise<void> => {
   await saveQueue(ctx, viewer.id, await toppedUp(ctx, viewer, queue));
-};
-
-/**
- * The unshuffled order with `itemId` moved after `afterItemId` there too (or to the top), so a
- * move made while shuffled still holds once shuffle turns off.
- */
-const movedInOrder = (
-  order: ReadonlyArray<string>,
-  itemId: string,
-  afterItemId: string | undefined,
-): Array<string> => {
-  const rest = order.filter((id) => id !== itemId);
-  const after = afterItemId === undefined ? -1 : rest.indexOf(afterItemId);
-
-  return [...rest.slice(0, after + 1), itemId, ...rest.slice(after + 1)];
-};
-
-/** Removes the upcoming entries autoplay added, for when autoplay turns off. */
-const withoutAutoplay = (queue: StoredQueue): StoredQueue => {
-  const items = queue.items.filter((item, position) => position <= queue.index || !item.autoplay);
-
-  return {
-    ...queue,
-    items,
-    unshuffled: queue.unshuffled === undefined ? undefined : keptOrder(queue.unshuffled, items),
-  };
 };
 
 /** The device someone in a Jam listens along on, when they do and the host allows it. */
@@ -562,32 +538,10 @@ export const playbackMutations = {
     const stored = await storedQueue(ctx, viewer.id);
     const playable = await playableTracks(ctx, viewer, args.trackIds, args.index);
     const created = newItems(stored, playable.ids, { kind: "person", userId: viewer.id });
-    let items: ReadonlyArray<QueueItem> = created.items;
-    let { index } = playable;
-    let unshuffled: ReadonlyArray<string> | undefined;
-
-    if (stored.shuffle) {
-      // Shuffle the whole list, then keep `MAX_QUEUE` of it: a long list shuffled from a random
-      // song near its end still fills the queue.
-      const current = items[index];
-      const rest = shuffled(items.filter((_, position) => position !== index));
-      const kept = (current === undefined ? rest : [current, ...rest]).slice(0, MAX_QUEUE);
-      unshuffled = keptOrder(
-        items.map((item) => item.id),
-        kept,
-      );
-      items = kept;
-      index = 0;
-    } else if (items.length > MAX_QUEUE) {
-      items = items.slice(index, index + MAX_QUEUE);
-      index = 0;
-    }
 
     const next = await toppedUp(ctx, viewer, {
       ...stored,
-      items,
-      unshuffled,
-      index,
+      ...playOrder(created.items, playable.index, stored.shuffle, Math.random),
       nextItemId: created.nextItemId,
       reportedTrackId: undefined,
     });
@@ -645,21 +599,11 @@ export const playbackMutations = {
     const session = await ensureSession(ctx, viewer.id);
     // Whatever comes next starts from the top, so it counts as a new play.
     const queue = { ...(await loadQueue(ctx, viewer)), reportedTrackId: undefined };
-    const last = queue.items.length - 1;
+    const index = nextIndex(queue.index, queue.items.length, queue.repeat);
 
-    if (queue.index < last) {
-      await saveQueue(
-        ctx,
-        viewer.id,
-        await toppedUp(ctx, viewer, { ...queue, index: queue.index + 1 }),
-      );
-      await restartSession(ctx, session);
-
-      return ok;
-    }
-
-    if (queue.repeat === "all" && queue.items.length > 0) {
-      await saveQueue(ctx, viewer.id, { ...queue, index: 0 });
+    // `toppedUp` leaves a repeat-all queue alone, so wrapping to the start never adds autoplay.
+    if (index !== null) {
+      await saveQueue(ctx, viewer.id, await toppedUp(ctx, viewer, { ...queue, index }));
       await restartSession(ctx, session);
 
       return ok;
@@ -689,16 +633,13 @@ export const playbackMutations = {
 
     const session = await ensureSession(ctx, viewer.id);
     const queue = await loadQueue(ctx, viewer);
-    const position = livePosition(session, Date.now());
 
-    const index =
-      position > RESTART_THRESHOLD_MS
-        ? queue.index
-        : queue.index > 0
-          ? queue.index - 1
-          : queue.repeat === "all"
-            ? Math.max(0, queue.items.length - 1)
-            : 0;
+    const index = previousIndex(
+      livePosition(session, Date.now()),
+      queue.index,
+      queue.items.length,
+      queue.repeat,
+    );
 
     await saveQueue(ctx, viewer.id, { ...queue, index, reportedTrackId: undefined });
     await restartSession(ctx, session);
@@ -758,50 +699,10 @@ export const playbackMutations = {
       return ok;
     }
 
-    const current = queue.items[queue.index];
-
-    if (args.on) {
-      // People's songs are shuffled; autoplay's stay after them, so autoplay still plays last.
-      const others = queue.items.filter((_, position) => position !== queue.index);
-
-      const rest = [
-        ...shuffled(others.filter((item) => !item.autoplay)),
-        ...others.filter((item) => item.autoplay),
-      ];
-
-      await saveQueue(ctx, viewer.id, {
-        ...queue,
-        shuffle: true,
-        unshuffled: queue.items.map((item) => item.id),
-        items: current === undefined ? rest : [current, ...rest],
-        index: 0,
-      });
-
-      return ok;
-    }
-
-    // Back to the order before shuffle; entries it does not list (none, normally) go at the end.
-    const byId = new Map(queue.items.map((item) => [item.id, item]));
-    const order = keptOrder(queue.unshuffled ?? [], queue.items);
-    const listed = new Set(order);
-
-    const items = [
-      ...order.flatMap((id) => {
-        const item = byId.get(id);
-
-        return item === undefined ? [] : [item];
-      }),
-      ...queue.items.filter((item) => !listed.has(item.id)),
-    ];
-
-    const index = current === undefined ? 0 : items.findIndex((item) => item.id === current.id);
-
     await saveQueue(ctx, viewer.id, {
       ...queue,
-      shuffle: false,
-      unshuffled: undefined,
-      items,
-      index: Math.max(0, index),
+      shuffle: args.on,
+      ...(args.on ? shuffledOn(queue, Math.random) : shuffledOff(queue)),
     });
 
     return ok;
@@ -876,15 +777,11 @@ export const playbackMutations = {
       return ok;
     }
 
-    // A short song loops sooner than the gap, so its gap is half its length.
-    const gap = Math.min(REPLAY_GAP_MS, track.durationMs / 2);
-
-    const startedAgain =
-      track._id === queue.reportedTrackId &&
-      args.positionMs < gap &&
-      livePosition(session, now) - args.positionMs > gap;
-
-    const newPlay = args.playing && (track._id !== queue.reportedTrackId || startedAgain);
+    const newPlay = isNewPlay(
+      { trackId: track._id, positionMs: args.positionMs, playing: args.playing },
+      { trackId: queue.reportedTrackId ?? null, livePositionMs: livePosition(session, now) },
+      track.durationMs,
+    );
 
     await ctx.db.patch(session._id, {
       positionMs: args.positionMs,
@@ -949,44 +846,14 @@ export const playbackMutations = {
       return { ok: true, itemIds: items.map((item) => item.id) } as const;
     }
 
-    const insertAt = args.next === true ? queue.index + 1 : endOfQueued(queue);
+    const order = addedOrder(queue, created.items, args.next === true ? "next" : "end");
+    await saveTopped(ctx, viewer, { ...queue, ...order, nextItemId: created.nextItemId });
+    const kept = new Set(order.items.map((item) => item.id));
 
-    const items = [
-      ...queue.items.slice(0, insertAt),
-      ...created.items,
-      ...queue.items.slice(insertAt),
-    ].slice(0, MAX_QUEUE);
-
-    // Added songs join the unshuffled order too, after the current song or at the end, so
-    // turning shuffle off keeps them.
-    const current = queue.items[queue.index];
-    const addedIds = created.items.map((item) => item.id);
-
-    const unshuffledAt = (order: ReadonlyArray<string>): number =>
-      args.next === true && current !== undefined ? order.indexOf(current.id) + 1 : order.length;
-
-    const unshuffled =
-      queue.unshuffled === undefined
-        ? undefined
-        : keptOrder(
-            [
-              ...queue.unshuffled.slice(0, unshuffledAt(queue.unshuffled)),
-              ...addedIds,
-              ...queue.unshuffled.slice(unshuffledAt(queue.unshuffled)),
-            ],
-            items,
-          );
-
-    await saveTopped(ctx, viewer, {
-      ...queue,
-      items,
-      unshuffled,
-      nextItemId: created.nextItemId,
-    });
-
-    const kept = new Set(items.map((item) => item.id));
-
-    return { ok: true, itemIds: addedIds.filter((id) => kept.has(id)) } as const;
+    return {
+      ok: true,
+      itemIds: created.items.flatMap((item) => (kept.has(item.id) ? [item.id] : [])),
+    } as const;
   },
 
   "queue.remove": async (ctx, actor, args) => {
@@ -1101,7 +968,9 @@ export const playbackMutations = {
     await saveQueue(
       ctx,
       viewer.id,
-      args.on ? await toppedUp(ctx, viewer, queue) : withoutAutoplay(queue),
+      args.on
+        ? await toppedUp(ctx, viewer, queue)
+        : { ...queue, ...withoutUpcomingAutoplay(queue) },
     );
 
     return ok;
