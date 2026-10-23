@@ -90,7 +90,7 @@ interface Downloads {
   readonly copies: DownloadedCopies;
   readonly quality: DownloadQuality;
   readonly setQuality: (quality: DownloadQuality) => void;
-  /** Stable for the provider's lifetime, whichever vault is open. */
+  /** The account's session store; a new one when the account changes. */
   readonly sessions: SessionStore;
 }
 
@@ -210,7 +210,8 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
   // The sync reads the policy at every plan, so a new quality applies from the next fetch.
   const chosen = useRef(quality);
   const current = useRef<DownloadSync | null>(null);
-  const vaultOpening = useRef<Promise<ExpoVault> | null>(null);
+  // Each account's vault while it is open, so a session store reaches only its own account's.
+  const vaults = useRef(new Map<UserId, Promise<ExpoVault>>());
 
   // A layout effect, so the vault is opening before any child's effect (the player's session
   // router) asks it for the session it stored.
@@ -220,7 +221,7 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     let created: DownloadSync | null = null;
     let shutting: Promise<void> | null = null;
     const opening = openVault(origin, userId);
-    vaultOpening.current = opening;
+    vaults.current.set(userId, opening);
 
     /** Stops the sync, waiting for its fetches to end, then closes the vault. Once. */
     const shutdown = (): Promise<void> => {
@@ -272,7 +273,7 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     void run();
 
     return () => {
-      vaultOpening.current = null;
+      if (vaults.current.get(userId) === opening) vaults.current.delete(userId);
       void shutdown().finally(() => {
         if (shutdowns.get(origin) === shutdown) shutdowns.delete(origin);
       });
@@ -295,11 +296,14 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     setStoredQuality(next);
   }, []);
 
+  // Bound to this account: a player built for it, even one left running past a sign-out, never
+  // reads or writes another account's session. Without a vault open, nothing is stored.
   const sessions = useMemo((): SessionStore => {
-    // The vault open now, or none: a session written while none is open has nowhere to go.
     const vault = async (): Promise<ExpoVault | null> => {
+      const opening = userId === null ? undefined : vaults.current.get(userId);
+
       try {
-        return (await vaultOpening.current) ?? null;
+        return (await opening) ?? null;
       } catch {
         return null;
       }
@@ -314,7 +318,7 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
         await (await vault())?.session.saveServer(state);
       },
     };
-  }, []);
+  }, [userId]);
 
   const value = useMemo(
     () => ({ sync, copies, sessions, quality, setQuality }),
@@ -450,6 +454,7 @@ export const useHasDownloads = (): boolean => {
 
 /**
  * Where the player keeps its playback session across launches: the open vault's database, so it
- * belongs to the account whose downloads it plays and goes with them on sign-out. Stable.
+ * belongs to the account whose downloads it plays and goes with them on sign-out. A new store for
+ * each account: build the player again when it changes.
  */
 export const useSessionStore = (): SessionStore => useDownloads("useSessionStore").sessions;

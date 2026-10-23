@@ -42,9 +42,9 @@ const setup = (
   });
 
   server.state.connected = options.connected ?? true;
-  router.start();
+  const stop = router.start();
 
-  return { router, server, clock, memory };
+  return { router, server, clock, memory, stop };
 };
 
 const settle = (): Promise<void> =>
@@ -332,6 +332,25 @@ describe("handing the session back", () => {
     server.setConnected(true);
     await vi.waitFor(() => expect(router.mode()).toBe("server"));
     expect(router.getSnapshot().state).toBe(elsewhere);
+  });
+
+  it("sends nothing more once stopped, even when a hand-back still out then fails", async () => {
+    const { router, server, clock, stop } = setup();
+
+    router.offerServer(sessionOf(["a"]));
+    server.setConnected(false);
+    server.hold();
+    server.state.failures = 1;
+    server.setConnected(true);
+    await settle();
+
+    stop();
+    server.release();
+    await settle();
+    clock.advance(60_000);
+    await settle();
+
+    expect(server.names()).toEqual(["devices.reconcile"]);
   });
 
   it("tries the hand-back again after it fails", async () => {

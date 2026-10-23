@@ -185,6 +185,11 @@ export class SessionRouter implements SessionPort {
   /** Counts changes to the local session other than a hand-back's, so one can tell it moved. */
   #revision = 0;
   #reconciling = false;
+  /**
+   * `start`'s stop ran. The client may outlive this device's account (signing out keeps the
+   * connection), so nothing more is sent or stored for it: no hand-back, retry, or store write.
+   */
+  #stopped = false;
   #retryMs = RETRY_FIRST_MS;
   #cancelRetry: (() => void) | null = null;
   #stored: Promise<StoredSessions | null> | null = null;
@@ -227,6 +232,7 @@ export class SessionRouter implements SessionPort {
     void this.#resumeStored();
 
     return () => {
+      this.#stopped = true;
       unsubscribe();
       this.#cancelRetry?.();
       this.#cancelRetry = null;
@@ -484,7 +490,15 @@ export class SessionRouter implements SessionPort {
    * session stored at an earlier launch goes back with it. A failure is tried again later.
    */
   async #reconcile(): Promise<void> {
-    if (this.#reconciling || this.#local === null || !this.#connection.connected()) return;
+    if (
+      this.#stopped ||
+      this.#reconciling ||
+      this.#local === null ||
+      !this.#connection.connected()
+    ) {
+      return;
+    }
+
     this.#cancelRetry?.();
     this.#cancelRetry = null;
     this.#reconciling = true;
@@ -510,7 +524,7 @@ export class SessionRouter implements SessionPort {
   async #handBack(): Promise<void> {
     const local = this.#local;
 
-    if (local === null) return;
+    if (local === null || this.#stopped) return;
     const revision = this.#revision;
     const offers = this.#offers;
     const plays = local.plays.slice(0, PLAYS_PER_RECONCILE);
@@ -568,6 +582,8 @@ export class SessionRouter implements SessionPort {
    * moved here meanwhile writes over the row itself.
    */
   #clearStored(): void {
+    if (this.#stopped) return;
+
     void this.#store.saveLocal(null).catch(() => {
       this.#clock.after(RETRY_FIRST_MS, () => {
         if (this.#local === null) this.#clearStored();
@@ -576,6 +592,7 @@ export class SessionRouter implements SessionPort {
   }
 
   #retryLater(): void {
+    if (this.#stopped) return;
     const delay = this.#retryMs;
 
     this.#retryMs = Math.min(delay * 2, RETRY_LONGEST_MS);
