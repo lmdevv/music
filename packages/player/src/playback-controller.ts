@@ -52,7 +52,6 @@ const MEDIA_OFFLINE_MESSAGE = "Can't reach the media server. Retrying…";
 /** Shown when the media server refuses a stream URL even right after it was signed. */
 const STREAM_REFUSED_MESSAGE = "The media server refused this song's stream";
 
-/** Shown while this device plays its own session and the song has no copy here. */
 const UNREACHABLE_MESSAGE = "This song isn't downloaded";
 
 /** What the engine is doing, as the UI sees it. */
@@ -112,22 +111,19 @@ export interface ControllerEnvironment {
 interface LoadedEntry {
   readonly track: QueueEntry;
   readonly index: number;
-  /** Where its bytes come from; null until its source is resolved. */
   readonly origin: ResolvedSource["origin"] | null;
-  /** The profile requested for this entry; null until its source is resolved. */
+  /** The profile requested for this entry; null until its source resolves. */
   readonly profile: StreamProfile | null;
   readonly url: string | null;
   /** See `ResolvedSource.renewAt`; null without a URL. */
   readonly renewAt: number | null;
 }
 
-/** The entry buffered to follow the one playing. */
 interface PreloadedEntry extends ResolvedSource {
   readonly track: QueueEntry;
   readonly index: number;
 }
 
-/** Whether a plan plays a copy on this device, which needs neither the server nor media service. */
 const isLocal = (plan: SourcePlan): boolean =>
   SourcePlan.$is("Ready")(plan) && plan.resolved.origin === "local";
 
@@ -548,7 +544,7 @@ export class PlaybackController {
 
   /**
    * Waits for the first heartbeat, and sends another when it failed: the server refuses to play
-   * on a device it has never heard from. This device's own session needs no registration.
+   * on a device it has never heard from.
    */
   async #ensureRegistered(): Promise<void> {
     if (this.#session.mode() === "local" || (await this.#registered)) return;
@@ -733,7 +729,6 @@ export class PlaybackController {
       return;
     }
 
-    // A stream waits until the media service answers again; a copy on this device plays now.
     if (!this.#snapshot.mediaOnline && !isLocal(plan)) return;
     this.#update({ engineStatus: "loading", error: null, autoplayBlocked: false });
     this.#useEngine(engine);
@@ -757,11 +752,7 @@ export class PlaybackController {
     await this.#engine.load(resolved.source, start, autoplay);
   }
 
-  /**
-   * The current song can't play on this device now (no copy here, and the server can't sign a
-   * stream): the engine lets go of the song before it, the player says why, and the session moves
-   * on to the next song that can play.
-   */
+  /** Lets go of the song before, so a play can't resume it, and moves on to one that can play. */
   #skipUnreachable(): void {
     this.#engine.unload();
     this.#update({ engineStatus: "error", error: UNREACHABLE_MESSAGE, autoplayBlocked: false });
@@ -781,7 +772,6 @@ export class PlaybackController {
       : chooseStreamProfile(this.#snapshot.quality, track.codec, this.#env.canPlay);
   }
 
-  /** Has the server sign a stream. A refusal becomes the player error, and resolves null. */
   async #sign(
     sign: () => Promise<Result.Result<ResolvedSource, StreamRefused>>,
   ): Promise<ResolvedSource | null> {
@@ -813,7 +803,6 @@ export class PlaybackController {
     if (index === null || track === undefined) return;
     const plan = this.#sources.resolve(track, this.#profileFor(track, this.#snapshot.engine));
 
-    // Nothing to buffer for a song that can't play here; a stream waits for the media service.
     if (SourcePlan.$is("Unreachable")(plan)) return;
 
     if (!this.#snapshot.mediaOnline && !isLocal(plan)) return;
@@ -950,8 +939,6 @@ export class PlaybackController {
 
     const loaded = this.#loaded;
 
-    // A copy on this device that fails to play is damaged: stop offering it, and load the song
-    // again from wherever it can come from now.
     if (loaded?.origin === "local") {
       this.#sources.discard(loaded.track.id);
       void this.#load(loaded.track, loaded.index, this.#positionMs, this.#view?.playing ?? false);

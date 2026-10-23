@@ -62,7 +62,6 @@ describe("fieldsOf", () => {
       .filter(isCommandName)
       .filter((name) => fieldsOf(name) === null);
 
-    // The one exception, never in the menu: players hand back a list of plays and a queue.
     expect(unreadable).toEqual(["devices.reconcile"]);
   });
 });

@@ -17,7 +17,6 @@ import {
   songIds,
 } from "./testing/offline-session";
 
-/** A started router on a recording server, a manual clock, and a JSON store. */
 const setup = (
   options: {
     readonly stored?: StoredSessions;
@@ -47,13 +46,11 @@ const setup = (
   return { router, server, clock, memory };
 };
 
-/** Lets every pending promise and store write settle. */
 const settle = (): Promise<void> =>
   new Promise((resolve) => {
     setImmediate(resolve);
   });
 
-/** The failure a rejected command shows the listener. */
 const shownFailure = async (call: Promise<unknown>): Promise<string> => {
   try {
     await call;
@@ -226,7 +223,6 @@ describe("handing the session back", () => {
     await settle();
     expect(memory.local()).toBeNull();
 
-    // Until the server's snapshot shows the adopted session, the engine keeps the one it plays.
     expect(router.getSnapshot().state?.index).toBe(1);
     const adopted = sessionOf(["a", "b", "c"], { index: 1 });
 

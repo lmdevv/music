@@ -32,7 +32,6 @@ export const songIds = ["a", "b", "c", "d", "e", "f"] as const;
 /** One song of the test library. */
 export type SongId = (typeof songIds)[number];
 
-/** A song of the test library; each has its own length. */
 const song = (id: SongId): Track => ({
   id: TrackId.make(id),
   title: id,

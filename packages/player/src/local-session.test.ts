@@ -20,7 +20,6 @@ import type { LocalContext } from "./local-session";
 import { holding, phone, sessionOf, songIds } from "./testing/offline-session";
 import type { SongId } from "./testing/offline-session";
 
-/** The context of a step at `now`, where `downloaded` are the songs this device holds. */
 const contextOf = (downloaded: Iterable<string>, now = 50_000): LocalContext => ({
   now,
   device: phone,
@@ -28,11 +27,9 @@ const contextOf = (downloaded: Iterable<string>, now = 50_000): LocalContext => 
   random: () => 0.5,
 });
 
-/** The server's session, last reported at 40 seconds. */
 const server = (queue: ReadonlyArray<SongId>, overrides: Partial<PlaybackState> = {}) =>
   sessionOf(queue, { updatedAt: 40_000, ...overrides });
 
-/** Runs one command, failing the test when the local session refuses it. */
 const run = <Name extends SessionMutation>(
   name: Name,
   state: LocalSessionState,
@@ -42,7 +39,6 @@ const run = <Name extends SessionMutation>(
 
 const songArb = fc.constantFrom(...songIds);
 
-/** A session this device took over: a queue, where it stands, and which songs it holds. */
 const session = fc
   .record({
     queue: fc.array(songArb, { minLength: 1, maxLength: 10 }),
@@ -70,7 +66,6 @@ describe("next and previous on this device", () => {
   it("next lands on the first following song this device holds, and stops when none is left", () => {
     fc.assert(
       fc.property(session, ({ queue, downloaded, repeat, index, state, context }) => {
-        // In play order after the current entry; around to the start only under repeat all.
         const following = [
           ...queue.keys().filter((position) => position > index),
           ...(repeat === "all" ? queue.keys().filter((position) => position <= index) : []),
@@ -146,7 +141,6 @@ describe("next and previous on this device", () => {
   });
 });
 
-/** A report from this device of the entry at `position`, `positionMs` into it. */
 const report = (
   state: LocalSessionState,
   position: number,
@@ -165,7 +159,6 @@ describe("plays", () => {
     const downloaded = new Set<string>(songIds);
     let state = seedLocal(server(["a", "b"], { playing: false }), phone.id);
 
-    // Seeded on `a`, which the server already counted.
     state = run("playback.report", state, report(state, 0, 1000), contextOf(downloaded, 41_000));
     state = run("playback.report", state, report(state, 0, 16_000), contextOf(downloaded, 56_000));
     expect(state.plays).toEqual([]);
@@ -180,7 +173,6 @@ describe("plays", () => {
     state = run("playback.report", state, report(state, 1, 5000), contextOf(downloaded, 70_000));
     expect(state.plays).toEqual([{ trackId: "b", playedAt: 60_000 }]);
 
-    // Played well past its start, then back to the start: another play.
     state = run("playback.report", state, report(state, 1, 90_000), contextOf(downloaded, 155_000));
     state = run("playback.report", state, report(state, 1, 1000), contextOf(downloaded, 160_000));
 
@@ -303,7 +295,6 @@ describe("what needs the server", () => {
   });
 });
 
-/** Applies a command, keeping the state when the local session refuses it. */
 const apply =
   <Name extends SessionMutation>(name: Name, args: CommandArgs<Name>) =>
   (state: LocalSessionState, context: LocalContext): LocalSessionState =>
@@ -312,7 +303,6 @@ const apply =
       onFailure: () => state,
     });
 
-/** Any session command, with arguments that name entries and songs of a small world. */
 const command = (
   items: ReadonlyArray<QueueItemId>,
 ): fc.Arbitrary<(state: LocalSessionState, context: LocalContext) => LocalSessionState> => {

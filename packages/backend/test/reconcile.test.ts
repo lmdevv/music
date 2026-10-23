@@ -1,7 +1,3 @@
-/**
- * `devices.reconcile` through the real dispatcher: a device that played without a connection
- * hands back its plays and, when it may, its queue.
- */
 import { DeviceId, TrackId } from "@music/commands/ids";
 import type { LibraryId } from "@music/commands/ids";
 import type { OfflinePlay, OfflineResume } from "@music/commands/models";
@@ -26,17 +22,13 @@ const HOST = DeviceId.make("host-laptop");
 
 const START = 1_800_000_000_000;
 
-/** Times songs started on the phone while it was offline, before it reconnected at `START`. */
 const OFFLINE = [START - 900_000, START - 600_000, START - 300_000] as const;
 
 interface Fixture {
   readonly backend: Backend;
   readonly owner: User;
-  /** Someone who can read Rock and not Secret, with a phone and a laptop, autoplay off. */
   readonly listener: User;
-  /** Five songs everyone can read, `Rock 0001` to `Rock 0005`. */
   readonly rock: ReadonlyArray<TrackId>;
-  /** Two songs only the owner can read. */
   readonly secret: ReadonlyArray<TrackId>;
   readonly rockLibrary: LibraryId;
   readonly secretLibrary: LibraryId;
@@ -58,7 +50,6 @@ const setup = async (): Promise<Fixture> => {
 
   await listener.music.run("devices.heartbeat", { deviceId: PHONE, name: "Phone", kind: "phone" });
   await listener.music.run("devices.heartbeat", { deviceId: LAPTOP, name: "Laptop", kind: "web" });
-  // Autoplay would add songs after a queue's last one; off, the queue is exactly what was sent.
   await listener.music.run("queue.autoplay", { on: false });
 
   return {
@@ -87,7 +78,6 @@ const reconcile = (
   deviceId: DeviceId = PHONE,
 ) => user.music.run("devices.reconcile", { deviceId, plays, resume });
 
-/** A device's offline queue, paused on its first song with shuffle and repeat off. */
 const resumeOf = (
   songs: ReadonlyArray<TrackId>,
   overrides: Partial<OfflineResume> = {},
@@ -101,7 +91,6 @@ const resumeOf = (
   ...overrides,
 });
 
-/** The user's history, newest first, as each song and the time it played. */
 const history = async (user: User) =>
   (await user.music.read("history.list", { limit: 200 })).map((entry) => ({
     trackId: entry.track.id,
@@ -127,7 +116,6 @@ describe("offline plays", () => {
     const plays = [
       { trackId: at(rock, 0), playedAt: OFFLINE[0] },
       { trackId: at(rock, 1), playedAt: OFFLINE[1] },
-      // The batch lists one play twice.
       { trackId: at(rock, 1), playedAt: OFFLINE[1] },
       { trackId: at(rock, 0), playedAt: OFFLINE[2] },
     ];
@@ -141,7 +129,6 @@ describe("offline plays", () => {
     expect(await reconcile(listener, plays, null)).toEqual({ adopted: false });
     expect(await history(listener)).toEqual(recorded);
 
-    // The answer was lost, so the device sends the same plays again.
     vi.setSystemTime(START + 5000);
     await reconcile(listener, plays, null);
     expect(await history(listener)).toEqual(recorded);
@@ -183,7 +170,6 @@ describe("offline plays", () => {
     expect(result).toEqual({ adopted: false });
     expect(await history(listener)).toEqual([{ trackId: at(rock, 2), playedAt: OFFLINE[2] }]);
 
-    // Nothing was kept back for later either: letting them listen to Secret shows no play of it.
     await owner.music.run("libraries.update", { libraryId: secretLibrary, visibility: "shared" });
     expect(await history(listener)).toEqual([{ trackId: at(rock, 2), playedAt: OFFLINE[2] }]);
   });
@@ -312,7 +298,6 @@ describe("handing the queue back", () => {
     await listener.music.run("playback.play", { trackIds: [...rock], deviceId: PHONE });
     await markMissing(backend, rockLibrary, ["Rock/0002.flac"]);
 
-    // The phone was on the private song: the next one it may play is Rock 0003.
     const result = await reconcile(
       listener,
       [],
@@ -364,7 +349,6 @@ describe("handing the queue back", () => {
 
     expect(await history(listener)).toEqual([offline]);
 
-    // The next song is a new play, as usual.
     vi.setSystemTime(START + 125_000);
 
     await listener.music.run("playback.report", {

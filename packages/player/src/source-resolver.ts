@@ -66,9 +66,8 @@ export interface SourceResolver {
 }
 
 /**
- * Signs every song as a stream through `stream.url`, as the controller always did. A new
- * `requestedAt` on each call gets a newly signed URL rather than an earlier one from Convex's
- * query cache.
+ * Signs every song as a stream through `stream.url`. A new `requestedAt` on each call gets a newly
+ * signed URL rather than an earlier one from Convex's query cache.
  *
  * @param env - The device clock, and how the host turns the URL the server signed (relative
  *   behind the image's proxy) into the one it fetches.

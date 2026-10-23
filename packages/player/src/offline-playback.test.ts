@@ -1,8 +1,3 @@
-/**
- * The player without a connection, end to end below the UI: the real controller, session router,
- * local session, and local-first sources, over a recording Convex server, copies on the device,
- * and an engine that plays instantly.
- */
 import type { TrackId } from "@music/commands/ids";
 import { describe, expect, it, vi } from "vitest";
 
@@ -22,7 +17,6 @@ import {
 } from "./testing/offline-session";
 import type { SongId } from "./testing/offline-session";
 
-/** An engine that starts as soon as it loads and records every URL it loaded. */
 const instantEngine = () => {
   const listeners = new Set<(event: EngineEvent) => void>();
   const loads: Array<string> = [];
@@ -61,10 +55,6 @@ const instantEngine = () => {
 
 const fileOf = (trackId: string): string => `file:///vault/${trackId}.m4a`;
 
-/**
- * A phone playing `queue` with copies of `downloaded`, wired the way its player provider wires
- * it: the server's snapshots go to the router, and the router's session to the controller.
- */
 const setup = (queue: ReadonlyArray<SongId>, downloaded: ReadonlyArray<SongId>) => {
   const server = recordingServer();
   const clock = manualClock();
@@ -187,7 +177,6 @@ describe("playing without a connection", () => {
     await vi.waitFor(() => expect(output.loads).toEqual([streamed]));
     server.setConnected(false);
 
-    // The stream breaks with the connection, and the media service doesn't answer either.
     output.emit({ type: "error", reason: "network", message: "The network dropped" });
     await vi.waitFor(() => expect(controller.getSnapshot().mediaOnline).toBe(false));
     lockScreen().next();

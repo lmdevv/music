@@ -12,13 +12,11 @@ import {
 } from "./queue-rules";
 import type { QueueSlot } from "./queue-rules";
 
-/** Entries with distinct IDs; any of them may be autoplay's. */
 const entries = (prefix: string, maxLength = 30): fc.Arbitrary<ReadonlyArray<QueueSlot>> =>
   fc
     .array(fc.boolean(), { maxLength })
     .map((flags) => flags.map((autoplay, position) => ({ id: `${prefix}${position}`, autoplay })));
 
-/** A queue with at least one entry and an index inside it. */
 const queue = entries("q").chain((items) =>
   items.length === 0
     ? fc.constant({ items: [{ id: "q0", autoplay: false }], index: 0 })
@@ -140,7 +138,6 @@ describe("adding to the queue", () => {
     const two = { id: "2", autoplay: false };
     const three = { id: "3", autoplay: true };
 
-    // Shuffled from 1, 2, 3 with 2 playing; "play next" adds 4.
     const order = addedOrder(
       { items: [two, one, three], index: 0, unshuffled: ["1", "2", "3"] },
       [{ id: "4", autoplay: false }],

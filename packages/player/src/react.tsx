@@ -224,8 +224,7 @@ const createController = (
   const probe = document.createElement("audio");
   const client = makeMusicClient(convex);
 
-  // The web always plays the server's session and streams every song. The browser resolves the
-  // server's relative stream URLs against the page.
+  // The browser resolves the server's relative stream URLs against the page.
   const sources = streamSources(client, { now: Date.now, resolveUrl: (url) => url });
 
   return new PlaybackController(serverSession(client), sources, engines, {

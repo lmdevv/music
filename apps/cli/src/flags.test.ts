@@ -95,7 +95,6 @@ describe("deriveFlags", () => {
       ),
     );
 
-    // The one exception: players hand back a list of plays and a queue, and nobody types it.
     expect(jsonFlags).toEqual(["devices.reconcile --plays", "devices.reconcile --resume"]);
   });
 

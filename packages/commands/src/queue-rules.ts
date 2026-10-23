@@ -8,7 +8,6 @@ import type { RepeatMode } from "./models";
 /** Longest queue kept; Convex arrays and query reads stay well inside limits. */
 export const MAX_QUEUE = 1000;
 
-/** Previous restarts the song once it has played longer than this; before, it goes back a song. */
 const RESTART_THRESHOLD_MS = 3000;
 
 /**
@@ -32,15 +31,11 @@ export interface QueueOrder<Item extends QueueSlot> {
   readonly unshuffled: ReadonlyArray<Item["id"]> | undefined;
 }
 
-/** A queue the rules read; the order before shuffle may be left out when shuffle is off. */
 type CurrentOrder<Item extends QueueSlot> = Omit<QueueOrder<Item>, "unshuffled"> & {
   readonly unshuffled?: ReadonlyArray<Item["id"]> | undefined;
 };
 
-/**
- * The entry `next` moves to, or null when the queue has run out (the server then tries autoplay,
- * and stops when it finds nothing).
- */
+/** The entry `next` moves to, or null when the queue has run out. */
 export const nextIndex = (index: number, length: number, repeat: RepeatMode): number | null => {
   if (index < length - 1) return index + 1;
 
