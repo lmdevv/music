@@ -550,8 +550,21 @@ export class SessionRouter implements SessionPort {
           server.queue[server.index]?.id === handed.items[handed.index]?.track.id));
 
     this.#local = null;
-    this.#save(this.#store.saveLocal(null));
+    this.#clearStored();
     this.#publish(shows ? server : this.#snapshot.state);
+  }
+
+  /**
+   * Clears the stored session once the server took it back. A clear that fails is tried again:
+   * a stored session left behind would be handed back again at the next launch. A session that
+   * moved here meanwhile writes over the row itself.
+   */
+  #clearStored(): void {
+    void this.#store.saveLocal(null).catch(() => {
+      this.#clock.after(RETRY_FIRST_MS, () => {
+        if (this.#local === null) this.#clearStored();
+      });
+    });
   }
 
   #retryLater(): void {

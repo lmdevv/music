@@ -387,6 +387,40 @@ describe("handing the session back", () => {
   });
 });
 
+describe("after a hand-back", () => {
+  it("clears the stored session, trying again when the store fails to", async () => {
+    const memory = memorySessionStore();
+    let failures = 1;
+
+    const store: SessionStore = {
+      load: memory.store.load,
+      saveServer: memory.store.saveServer,
+      saveLocal: async (state) => {
+        if (state === null && failures > 0) {
+          failures -= 1;
+
+          throw new Error("The disk is full");
+        }
+
+        await memory.store.saveLocal(state);
+      },
+    };
+
+    const { router, server, clock } = setup({ store });
+
+    router.offerServer(sessionOf(["a"]));
+    server.setConnected(false);
+    server.setConnected(true);
+    await vi.waitFor(() => expect(router.mode()).toBe("server"));
+    await settle();
+    expect(memory.local()).not.toBeNull();
+
+    clock.advance(1000);
+    await settle();
+    expect(memory.local()).toBeNull();
+  });
+});
+
 describe("launching", () => {
   it("resumes a session played offline and never handed back, paused, and hands it back", async () => {
     const played = { ...seedLocal(sessionOf(["a", "b"], { index: 1 }), phone.id), changed: true };
