@@ -5,4 +5,4 @@ export { DownloadsProvider, useDownload, useLocalCopies } from "./provider";
 
 export { wipeDownloads } from "./expo-vault";
 
-export type { LocalCopy } from "@music/sdk/downloads";
+export type { DownloadedCopies } from "./provider";

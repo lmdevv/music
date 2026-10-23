@@ -9,7 +9,7 @@ import type { DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
 import type { DeviceKind, PlaybackState } from "@music/commands/models";
 import { PlaybackController } from "@music/player/playback-controller";
 import { serverSession } from "@music/player/session-router";
-import { streamSources } from "@music/player/source-resolver";
+import { localFirst, streamSources } from "@music/player/source-resolver";
 import type { StreamQuality } from "@music/player/stream-quality";
 import { makeMusicClient } from "@music/sdk/client";
 import type { MusicClient } from "@music/sdk/client";
@@ -52,7 +52,7 @@ import type { NowPlaying, PlayerRole, PlayerStatus, PlayerView } from "./player-
 import { idleTransfer, nextTransfer, TRANSFER_TIMEOUT_MS } from "./transfer";
 import type { Transfer } from "./transfer";
 import { useLocalCopies } from "../downloads";
-import type { LocalCopy } from "../downloads";
+import type { DownloadedCopies } from "../downloads";
 import { mediaUrl, resolveMediaUrl } from "../lib/media-url";
 import type { ServerOrigin } from "../lib/server";
 
@@ -184,15 +184,24 @@ interface Phone {
 const createPhone = (
   client: MusicClient,
   origin: ServerOrigin,
-  localCopy: (trackId: TrackId) => LocalCopy | null,
+  copies: DownloadedCopies,
 ): Phone => {
   const engine = new NativeEngine(openExpoOutput);
   const id = loadPhoneId();
   const name = phoneName();
 
-  const controller = new PlaybackController(
-    serverSession(client),
+  const session = serverSession(client);
+
+  // A downloaded song plays from its file, online too; anything else streams.
+  const sources = localFirst(
+    copies,
     streamSources(client, { now: Date.now, resolveUrl: (url) => mediaUrl(origin, url) }),
+    session,
+  );
+
+  const controller = new PlaybackController(
+    session,
+    sources,
     { mse: null, create: () => engine },
     {
       deviceId: id,
@@ -203,7 +212,7 @@ const createPhone = (
       saveQuality,
       nowPlaying: lockScreenControls(
         engine,
-        (track) => localCopy(track.id)?.artUri ?? resolveMediaUrl(origin, track.artUrl),
+        (track) => copies.find(track.id)?.artUri ?? resolveMediaUrl(origin, track.artUrl),
       ),
       onForeground,
     },
@@ -327,11 +336,11 @@ export function PlayerProvider({
   readonly children: ReactNode;
 }) {
   const convex = useConvex();
-  const localCopy = useLocalCopies();
+  const copies = useLocalCopies();
 
   const phone = useMemo(
-    () => createPhone(makeMusicClient(convex), origin, localCopy),
-    [convex, origin, localCopy],
+    () => createPhone(makeMusicClient(convex), origin, copies),
+    [convex, origin, copies],
   );
 
   const { controller } = phone;

@@ -25,7 +25,6 @@ import { useConvex, useConvexConnectionState } from "convex/react";
 import {
   createContext,
   use,
-  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -53,10 +52,18 @@ interface DownloadView {
   readonly retry: () => void;
 }
 
+/** The songs on this phone, as the player plays them. */
+export interface DownloadedCopies {
+  /** The copy of a song on this phone, or null; read when called. */
+  readonly find: (trackId: TrackId) => LocalCopy | null;
+  /** A copy failed to play: stop offering it, and fetch it again. */
+  readonly discard: (trackId: TrackId) => void;
+}
+
 interface Downloads {
   readonly sync: DownloadSync | null;
-  /** The copy of a song on this phone, read when called; stable for the provider's lifetime. */
-  readonly localCopy: (trackId: TrackId) => LocalCopy | null;
+  /** Stable for the provider's lifetime, whichever vault is open. */
+  readonly copies: DownloadedCopies;
 }
 
 const DownloadsContext = createContext<Downloads | null>(null);
@@ -174,12 +181,17 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     };
   }, [convex, origin, userId, deviceId]);
 
-  const localCopy = useCallback(
-    (trackId: TrackId): LocalCopy | null => current.current?.localCopy(trackId) ?? null,
+  const copies = useMemo(
+    (): DownloadedCopies => ({
+      find: (trackId) => current.current?.localCopy(trackId) ?? null,
+      discard: (trackId) => {
+        current.current?.discard(trackId);
+      },
+    }),
     [],
   );
 
-  const value = useMemo(() => ({ sync, localCopy }), [sync, localCopy]);
+  const value = useMemo(() => ({ sync, copies }), [sync, copies]);
 
   return (
     <DownloadsContext value={value}>
@@ -224,8 +236,7 @@ export const useDownload = (target: DownloadTarget): DownloadView => {
 };
 
 /**
- * The copy of a song on this phone, or null: for the player, which plays a downloaded song from
- * its file. Stable, and reads the vault when called.
+ * The songs on this phone, for the player, which plays a downloaded song from its file, online
+ * too. Stable, and reads the vault when called.
  */
-export const useLocalCopies = (): ((trackId: TrackId) => LocalCopy | null) =>
-  useDownloads("useLocalCopies").localCopy;
+export const useLocalCopies = (): DownloadedCopies => useDownloads("useLocalCopies").copies;
