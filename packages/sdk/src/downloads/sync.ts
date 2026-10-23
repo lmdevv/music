@@ -475,7 +475,7 @@ export class DownloadSync {
         SyncStep.$match(step, {
           SavePin: ({ pin }) => this.#commit(VaultChange.PutPin({ pin })),
           ForgetPin: ({ pinId }) => this.#commit(VaultChange.DeletePin({ pinId })),
-          Refresh: ({ copy }) => this.#commit(VaultChange.PutCopy({ copy })),
+          Refresh: ({ copy }) => this.#commit(VaultChange.UpdateCopy({ copy })),
           Drop: ({ copy }) => this.#drop(copy),
           DropArt: ({ art }) => this.#dropArt(art),
           Fetch: () => Promise.resolve(),

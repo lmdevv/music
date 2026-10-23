@@ -211,6 +211,22 @@ const commit = async (db: SQLiteDatabase, change: VaultChange): Promise<void> =>
         [row.track_id, row.rev, row.profile, row.file, row.bytes, row.art_hash, row.track],
       );
     },
+    UpdateCopy: ({ copy }) => {
+      const row = encodeCopy({
+        track_id: copy.track.id,
+        rev: copy.rev,
+        profile: copy.profile,
+        file: copy.file,
+        bytes: copy.bytes,
+        art_hash: copy.artHash,
+        track: copy.track,
+      });
+
+      return db.runAsync(
+        "UPDATE copies SET rev = ?, profile = ?, bytes = ?, art_hash = ?, track = ? WHERE track_id = ? AND file = ?",
+        [row.rev, row.profile, row.bytes, row.art_hash, row.track, row.track_id, row.file],
+      );
+    },
     DeleteCopy: ({ trackId, file }) =>
       db.runAsync("DELETE FROM copies WHERE track_id = ? AND file = ?", [trackId, file]),
     PutArt: ({ art }) =>

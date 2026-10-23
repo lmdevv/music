@@ -33,6 +33,8 @@ class DirectoryVault implements VaultStore {
   failingLoads = 0;
   /** Song rows refused before one is written, as a full disk would. */
   failingCopies = 0;
+  /** Holds a change until the returned promise settles, as a slow disk would; null lets it pass. */
+  hold: (change: VaultChange) => Promise<void> | null = () => null;
   readonly #dir: string;
 
   constructor(dir: string, view: VaultRows = emptyVault) {
@@ -50,16 +52,15 @@ class DirectoryVault implements VaultStore {
     return Promise.resolve(this.view);
   };
 
-  commit = (change: VaultChange): Promise<void> => {
+  commit = async (change: VaultChange): Promise<void> => {
     if (VaultChange.$is("PutCopy")(change) && this.failingCopies > 0) {
       this.failingCopies -= 1;
 
-      return Promise.reject(new Error("database or disk is full"));
+      throw new Error("database or disk is full");
     }
 
+    await this.hold(change);
     this.view = applyChange(this.view, change);
-
-    return Promise.resolve();
   };
 
   files = async (): Promise<ReadonlyArray<string>> => {
@@ -301,6 +302,40 @@ describe("DownloadSync", () => {
       await vi.waitFor(() => {
         expect(fetchesOf("t1")).toBe(2);
         expect(sync.localCopy(SAFE.id)).not.toBeNull();
+      }, SETTLE);
+    });
+
+    it("doesn't bring the row back when new details land after the copy was deleted", async () => {
+      const { sync, vault, uri } = await holdingAlbum();
+      const write = Promise.withResolvers<void>();
+      const REMASTERED = song("t1", "Safe from Harm (Remastered)");
+
+      vault.hold = (change) =>
+        (VaultChange.$is("PutCopy")(change) || VaultChange.$is("UpdateCopy")(change)) &&
+        change.copy.track.title === REMASTERED.title
+          ? write.promise
+          : null;
+
+      sync.offerManifest(ALBUM.id, {
+        pin: ALBUM,
+        entries: [
+          { track: REMASTERED, rev: "r1", artHash: "cover", state: "fetchable" },
+          { track: UNFINISHED, rev: "r1", artHash: "cover", state: "fetchable" },
+        ],
+      });
+
+      await writeFile(join(dir, "audio/t1.r1.aac-320.m4a"), "trunc");
+      sync.discard(SAFE.id, uri);
+
+      await vi.waitFor(() => {
+        expect(vault.view.copies.has(SAFE.id)).toBe(false);
+      }, SETTLE);
+
+      write.resolve();
+
+      await vi.waitFor(() => {
+        expect(fetchesOf("t1")).toBe(2);
+        expect(sync.localCopy(SAFE.id)?.track.title).toBe(REMASTERED.title);
       }, SETTLE);
     });
 

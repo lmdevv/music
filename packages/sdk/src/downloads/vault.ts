@@ -24,6 +24,11 @@ export type VaultChange = Data.TaggedEnum<{
   DeletePin: { readonly pinId: DownloadPinId };
   /** Adds a song's copy, or replaces the row of the copy it held. */
   PutCopy: { readonly copy: StoredCopy };
+  /**
+   * Rewrites a copy's details while its row still names the same file. A row deleted or replaced
+   * meanwhile stays as it is, so new details never bring back a copy whose file is gone.
+   */
+  UpdateCopy: { readonly copy: StoredCopy };
   /** Deletes a song's row while it still names `file`; a newer copy's row stays. */
   DeleteCopy: { readonly trackId: TrackId; readonly file: string };
   PutArt: { readonly art: StoredArt };
@@ -64,6 +69,10 @@ export const applyChange = (view: VaultRows, change: VaultChange): VaultRows =>
       return { ...view, pins };
     },
     PutCopy: ({ copy }) => ({ ...view, copies: new Map(view.copies).set(copy.track.id, copy) }),
+    UpdateCopy: ({ copy }) =>
+      view.copies.get(copy.track.id)?.file === copy.file
+        ? { ...view, copies: new Map(view.copies).set(copy.track.id, copy) }
+        : view,
     DeleteCopy: ({ trackId, file }) => {
       if (view.copies.get(trackId)?.file !== file) return view;
       const copies = new Map(view.copies);
