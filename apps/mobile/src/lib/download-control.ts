@@ -3,10 +3,10 @@
  * D01 and D04): a ring beside More that downloads, shows progress by songs, cancels, and asks
  * before it removes what is already here.
  */
-import type { DownloadStatus } from "@music/sdk/downloads";
+import type { DownloadStatus, DownloadUsage } from "@music/sdk/downloads";
 import { Match } from "effect";
 
-import { formatBytes } from "./format";
+import { countOf, formatBytes } from "./format";
 
 /** What the ring draws. */
 export type DownloadRing =
@@ -90,6 +90,12 @@ export interface RemoveCopy {
   readonly body: string;
   readonly confirmLabel: string;
 }
+
+/** D17's Remove all downloads sheet, for the songs and space downloads take now. */
+export const removeAllCopy = (usage: DownloadUsage): RemoveCopy => ({
+  body: `${countOf(usage.tracks, "song")} and ${formatBytes(usage.bytes)} leave this iPhone. Nothing changes on your server, and you can download them again any time.`,
+  confirmLabel: `Remove ${formatBytes(usage.bytes)}`,
+});
 
 /** The Remove download sheet for `title`, which takes `bytes` on this iPhone. */
 export const removeDownloadCopy = (title: string, bytes: number): RemoveCopy => {

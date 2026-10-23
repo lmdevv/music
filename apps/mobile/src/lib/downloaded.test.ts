@@ -8,6 +8,8 @@ import {
   downloadedNote,
   downloadedSummary,
   downloadsFor,
+  downloadsSettingsLine,
+  storageLine,
 } from "./downloaded";
 
 const album: DownloadedItem = {
@@ -84,6 +86,15 @@ describe("Downloaded", () => {
     expect(downloadedNote({ ...usage, freeBytes: null })).toBe(
       "Plays with no connection to your server.",
     );
+  });
+
+  it("words the Settings row and the storage line", () => {
+    expect(downloadsSettingsLine(usage)).toBe("2.4 GB · quality and storage");
+    expect(downloadsSettingsLine({ tracks: 0, bytes: 0, freeBytes: null })).toBe(
+      "Quality and storage",
+    );
+    expect(storageLine(usage)).toBe("55 songs · 2.4 GB");
+    expect(storageLine({ tracks: 0, bytes: 0, freeBytes: null })).toBe("Nothing downloaded");
   });
 
   it("counts songs on the Library row only once there are some", () => {

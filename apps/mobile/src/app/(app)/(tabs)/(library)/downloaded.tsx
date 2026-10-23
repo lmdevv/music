@@ -86,7 +86,7 @@ function Summary({
           <Text variant="mono" tone="muted" className="shrink">
             {downloadedSummary(usage, downloads)}
           </Text>
-          <Text variant="mono">{formatBytes(usage.bytes)}</Text>
+          {usage.bytes === 0 ? null : <Text variant="mono">{formatBytes(usage.bytes)}</Text>}
         </View>
         <Text variant="secondary" tone="muted">
           {downloadedNote(usage)}

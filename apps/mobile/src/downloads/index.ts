@@ -4,6 +4,7 @@
 export {
   DownloadsProvider,
   useDownload,
+  useDownloadSettings,
   useDownloadsLibrary,
   useLocalCopies,
   useTrackDownload,
@@ -11,3 +12,5 @@ export {
 } from "./provider";
 
 export type { DownloadedCopies } from "./provider";
+
+export type { DownloadQuality } from "../player/native-host";

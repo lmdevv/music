@@ -35,6 +35,7 @@ const SHEETS = [
   "jam/manage",
   "jam/end",
   "jam/remove/[userId]",
+  "settings/downloads/remove-all",
   "settings/keys/[id]/revoke",
   "settings/admin/people/[id]/remove",
   "settings/admin/people/[id]/suspend",

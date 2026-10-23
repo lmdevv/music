@@ -1,7 +1,7 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { downloadControl, removeDownloadCopy } from "./download-control";
+import { downloadControl, removeAllCopy, removeDownloadCopy } from "./download-control";
 
 describe("downloadControl", () => {
   it("downloads from the idle ring, and does nothing while the server is away", () => {
@@ -51,6 +51,13 @@ describe("downloadControl", () => {
     });
 
     expect(removeDownloadCopy("Blue Lines", 0).confirmLabel).toBe("Remove download");
+  });
+
+  it("says what removing every download frees, as D17 does", () => {
+    expect(removeAllCopy({ tracks: 55, bytes: 2_400_000_000, freeBytes: null })).toEqual({
+      body: "55 songs and 2.4 GB leave this iPhone. Nothing changes on your server, and you can download them again any time.",
+      confirmLabel: "Remove 2.4 GB",
+    });
   });
 
   it("fills the ring by songs finished, from empty to full", () => {

@@ -17,6 +17,7 @@ import {
 import type {
   DownloadsSnapshot,
   DownloadStatus,
+  DownloadUsage,
   LocalCopy,
   OfflineLibrary,
   SyncPolicy,
@@ -29,6 +30,7 @@ import { useConvex, useConvexConnectionState } from "convex/react";
 import {
   createContext,
   use,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -40,7 +42,7 @@ import type { ReactNode } from "react";
 import { expoTransfer } from "./expo-transfer";
 import { openVault, wipeVaults } from "./expo-vault";
 import type { ExpoVault } from "./expo-vault";
-import { loadDownloadQuality, loadPhoneId } from "../player/native-host";
+import { loadDownloadQuality, loadPhoneId, saveDownloadQuality } from "../player/native-host";
 import type { DownloadQuality } from "../player/native-host";
 import { playsOnIos } from "../player/player-state";
 import { mediaUrl } from "../lib/media-url";
@@ -66,10 +68,24 @@ export interface DownloadedCopies {
   readonly discard: (trackId: TrackId, uri: string) => void;
 }
 
+/** The Downloads settings (D16). */
+interface DownloadSettings {
+  readonly quality: DownloadQuality;
+  /** Saves the quality; songs already here keep theirs, and the next fetch uses the new one. */
+  readonly setQuality: (quality: DownloadQuality) => void;
+  readonly usage: DownloadUsage;
+  /** How many downloads this phone keeps, finished or not, songs or none. */
+  readonly downloads: number;
+  /** Removes every download from this phone; the server hears when it answers. */
+  readonly removeAll: () => Promise<void>;
+}
+
 interface Downloads {
   readonly sync: DownloadSync | null;
   /** Stable for the provider's lifetime, whichever vault is open. */
   readonly copies: DownloadedCopies;
+  readonly quality: DownloadQuality;
+  readonly setQuality: (quality: DownloadQuality) => void;
 }
 
 const DownloadsContext = createContext<Downloads | null>(null);
@@ -157,8 +173,9 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
   const userId = account === undefined || account instanceof Error ? null : account.id;
   const deviceId = useMemo(() => loadPhoneId(), []);
   const [sync, setSync] = useState<DownloadSync | null>(null);
-  // Read once: the setting arrives with Settings → Downloads, and applies to new downloads only.
-  const policy = useRef(policyFor(loadDownloadQuality()));
+  const [quality, setStoredQuality] = useState(loadDownloadQuality);
+  // The sync reads the policy at every plan, so a new quality applies from the next fetch.
+  const chosen = useRef(quality);
   const current = useRef<DownloadSync | null>(null);
 
   useEffect(() => {
@@ -204,7 +221,7 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
         vault,
         transfer: expoTransfer,
         deviceId,
-        policy: () => policy.current,
+        policy: () => policyFor(chosen.current),
         resolveUrl: (url) => mediaUrl(origin, url),
         now: Date.now,
       });
@@ -234,7 +251,16 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     [],
   );
 
-  const value = useMemo(() => ({ sync, copies }), [sync, copies]);
+  const setQuality = useCallback((next: DownloadQuality) => {
+    saveDownloadQuality(next);
+    chosen.current = next;
+    setStoredQuality(next);
+  }, []);
+
+  const value = useMemo(
+    () => ({ sync, copies, quality, setQuality }),
+    [sync, copies, quality, setQuality],
+  );
 
   return (
     <DownloadsContext value={value}>
@@ -308,6 +334,22 @@ export const useDownloadsLibrary = (): OfflineLibrary => {
   const snapshot = useSnapshot(sync);
 
   return useMemo(() => offlineLibrary(snapshot), [snapshot]);
+};
+
+/** Download quality, the space downloads take, and removing them all. */
+export const useDownloadSettings = (): DownloadSettings => {
+  const { sync, quality, setQuality } = useDownloads("useDownloadSettings");
+  const { usage, pins } = useSnapshot(sync);
+
+  return {
+    quality,
+    setQuality,
+    usage,
+    downloads: pins.length,
+    removeAll: async () => {
+      await sync?.removeAll();
+    },
+  };
 };
 
 /**

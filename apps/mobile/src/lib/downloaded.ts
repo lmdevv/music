@@ -89,6 +89,19 @@ export const downloadedLine = (item: DownloadedItem): DownloadedLine => {
   );
 };
 
+/**
+ * The Settings row's subtitle (D15), without Paper's "cellular": the app can't tell cellular from
+ * Wi-Fi yet, so there is no cellular setting.
+ */
+export const downloadsSettingsLine = (usage: DownloadUsage): string =>
+  usage.bytes === 0 ? "Quality and storage" : `${formatBytes(usage.bytes)} · quality and storage`;
+
+/** D16's storage line, such as `55 songs · 2.4 GB`. */
+export const storageLine = (usage: DownloadUsage): string =>
+  usage.tracks === 0
+    ? "Nothing downloaded"
+    : `${countOf(usage.tracks, "song")} · ${formatBytes(usage.bytes)}`;
+
 /** The Library row's count, such as `55 songs`; none while nothing is downloaded. */
 export const downloadedCount = (usage: DownloadUsage): string | null =>
   usage.tracks === 0 ? null : countOf(usage.tracks, "song");
