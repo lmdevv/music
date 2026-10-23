@@ -35,19 +35,6 @@ export const useSilentServer = (afterMs: number = SILENT_AFTER_MS): boolean => {
   return silent;
 };
 
-const ShownPhaseContext = createContext<SettledPhase | null>(null);
-
-/** Hands the phase on show to the screens below it. */
-export function ShownPhaseProvider({
-  phase,
-  children,
-}: {
-  readonly phase: SettledPhase;
-  readonly children: ReactNode;
-}) {
-  return <ShownPhaseContext value={phase}>{children}</ShownPhaseContext>;
-}
-
 /**
  * How long the connection may be down, or a request unanswered, before the app says it lost the
  * server (G04): a blip or a return from the background recovers sooner, without a flash.
@@ -88,18 +75,36 @@ export type ServerReach =
   /** The server answered this launch, then went away; Convex calls it again on its own (G04, D14). */
   | "reconnecting";
 
+const ServerReachContext = createContext<ServerReach | null>(null);
+
+/**
+ * Works out, once for every screen below it, whether the server answers: `phase` is the phase on
+ * show, offline when the app opened without the server.
+ */
+export function ServerReachProvider({
+  phase,
+  children,
+}: {
+  readonly phase: SettledPhase["kind"];
+  readonly children: ReactNode;
+}) {
+  const reconnecting = useReconnecting();
+
+  const reach: ServerReach =
+    phase === "offline" ? "offline" : reconnecting ? "reconnecting" : "online";
+
+  return <ServerReachContext value={reach}>{children}</ServerReachContext>;
+}
+
 /**
  * Whether the server answers, for the screens that change while it doesn't.
  *
- * @throws When used outside `ShownPhaseProvider`, a programming error.
+ * @throws When used outside `ServerReachProvider`, a programming error.
  */
 export const useServerReach = (): ServerReach => {
-  const phase = useContext(ShownPhaseContext);
-  const reconnecting = useReconnecting();
+  const reach = useContext(ServerReachContext);
 
-  if (phase === null) throw new Error("useServerReach needs ShownPhaseProvider above it");
+  if (reach === null) throw new Error("useServerReach needs ServerReachProvider above it");
 
-  if (phase.kind === "offline") return "offline";
-
-  return reconnecting ? "reconnecting" : "online";
+  return reach;
 };

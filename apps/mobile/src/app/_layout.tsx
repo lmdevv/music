@@ -24,7 +24,7 @@ import {
   SetupProgressProvider,
   useSettledPhase,
 } from "@/session/session-phase";
-import { ShownPhaseProvider } from "@/session/server-reach";
+import { ServerReachProvider } from "@/session/server-reach";
 import { DownloadsProvider } from "@/downloads";
 
 applyAppearance();
@@ -131,11 +131,11 @@ function ConnectedApp() {
   if (phase === null) return <View className="flex-1 bg-canvas" />;
 
   return (
-    <ShownPhaseProvider phase={phase}>
+    <ServerReachProvider phase={phase.kind}>
       <HideSplash />
       <RootStack phase={phase.kind} />
       <OpenEntryLink phase={phase.kind} />
-    </ShownPhaseProvider>
+    </ServerReachProvider>
   );
 }
 
