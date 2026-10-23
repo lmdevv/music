@@ -17,6 +17,8 @@ import { makeMusicClient } from "../client";
 import type { CommandTransport } from "../client";
 import { FakeMedia, recordingTransport } from "./fake-media";
 import type { Mutation } from "./fake-media";
+import { DownloadResult } from "./finished-file";
+import type { Transfer } from "./finished-file";
 import { nodeTransfer } from "./node-transfer";
 import type { StoredCopy, VaultView } from "./plan";
 import { downloadStatus, trackDownloadState } from "./status";
@@ -152,21 +154,62 @@ afterEach(async () => {
 
 const transport = (): CommandTransport => recordingTransport(mutations);
 
-const started = (vault: VaultStore): DownloadSync => {
+/** What a test changes about the sync it starts. */
+interface SyncSetup {
+  readonly transfer?: Transfer;
+  readonly now?: () => number;
+}
+
+const started = (vault: VaultStore, setup: SyncSetup = {}): DownloadSync => {
   const sync = new DownloadSync({
     client: makeMusicClient(transport()),
     vault,
-    transfer: nodeTransfer,
+    transfer: setup.transfer ?? nodeTransfer,
     deviceId: DeviceId.make("phone"),
     policy: () => ({ profileFor: () => "aac-320" }),
     resolveUrl: (url) => `${base}${url}`,
-    now: Date.now,
+    now: setup.now ?? Date.now,
     sleep: () => Promise.resolve(),
   });
 
   stops.push(sync.start());
 
   return sync;
+};
+
+/** A transfer with no network behind it: downloads break, or once `hang` is set, wait until aborted. */
+const brokenTransfer = (state: { hang: boolean }): Transfer => ({
+  head: () =>
+    Promise.resolve(new Response(null, { status: 200, headers: { "Content-Type": "audio/mp4" } })),
+  download: ({ signal }) =>
+    state.hang
+      ? new Promise((resolve) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              resolve(DownloadResult.Broken({ message: "aborted" }));
+            },
+            { once: true },
+          );
+        })
+      : Promise.resolve(DownloadResult.Broken({ message: "connection reset" })),
+});
+
+/** How many snapshots `sync` publishes in `ms` of real time. An idle sync publishes about none. */
+const publishesIn = async (sync: DownloadSync, ms: number): Promise<number> => {
+  let count = 0;
+
+  const unsubscribe = sync.subscribe(() => {
+    count += 1;
+  });
+
+  await new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+  unsubscribe();
+
+  return count;
 };
 
 /** How many times the media service sent the file of `trackId`. */
@@ -369,6 +412,56 @@ describe("DownloadSync", () => {
     }, SETTLE);
 
     expect(media.seen).toEqual([]);
+  });
+
+  describe("with a retry due", () => {
+    const ONE_SONG: DownloadManifest = { pin: ALBUM, entries: MANIFEST.entries.slice(0, 1) };
+
+    /** A sync whose only song failed once, its retry due by the clock it reads. */
+    const failedOnce = async (state: { hang: boolean }) => {
+      const clock = { now: 1_000_000 };
+      const vault = new DirectoryVault(dir);
+      const sync = started(vault, { transfer: brokenTransfer(state), now: () => clock.now });
+      sync.setOnline(true);
+      sync.offerPins([ALBUM]);
+      sync.offerManifest(ALBUM.id, ONE_SONG);
+
+      await vi.waitFor(() => {
+        expect(trackDownloadState(sync.getSnapshot(), SAFE.id)).toBe("failed");
+      }, SETTLE);
+
+      clock.now += 60 * 60_000;
+
+      return { sync, vault, manifest: ONE_SONG };
+    };
+
+    it("doesn't spin while it waits for the server", async () => {
+      const { sync } = await failedOnce({ hang: false });
+      sync.setOnline(false);
+
+      expect(await publishesIn(sync, 300)).toBeLessThan(5);
+    });
+
+    it("doesn't spin while the retry is in flight", async () => {
+      const state = { hang: false };
+      const { sync, manifest } = await failedOnce(state);
+      state.hang = true;
+      sync.offerManifest(ALBUM.id, manifest);
+
+      await vi.waitFor(() => {
+        expect(trackDownloadState(sync.getSnapshot(), SAFE.id)).toBe("downloading");
+      }, SETTLE);
+
+      expect(await publishesIn(sync, 300)).toBeLessThan(5);
+    });
+
+    it("doesn't spin while it waits for space", async () => {
+      const { sync, vault, manifest } = await failedOnce({ hang: false });
+      vault.free = 0;
+      sync.offerManifest(ALBUM.id, manifest);
+
+      expect(await publishesIn(sync, 300)).toBeLessThan(5);
+    });
   });
 
   it("asks the server to download a target to this device", async () => {

@@ -472,7 +472,11 @@ export class DownloadSync {
     for (const cover of covers) {
       if (!free()) return;
 
-      if (!this.#fetchingArt.has(cover.hash) && due(this.#artFailures.get(cover.hash), now)) {
+      const failure = this.#artFailures.get(cover.hash);
+
+      if (!this.#fetchingArt.has(cover.hash) && due(failure, now)) {
+        // The retry is under way: it no longer waits for its time.
+        if (failure !== undefined) this.#artFailures.set(cover.hash, { ...failure, retryAt: null });
         void this.#fetchArt(cover);
       }
     }
@@ -481,7 +485,11 @@ export class DownloadSync {
       if (!free()) return;
       const trackId = fetch.entry.track.id;
 
-      if (!this.#fetching.has(trackId) && due(this.#trackFailures.get(trackId), now)) {
+      const failure = this.#trackFailures.get(trackId);
+
+      if (!this.#fetching.has(trackId) && due(failure, now)) {
+        // The retry is under way: it no longer waits for its time.
+        if (failure !== undefined) this.#trackFailures.set(trackId, { ...failure, retryAt: null });
         void this.#fetchTrack(fetch);
       }
     }
@@ -542,7 +550,12 @@ export class DownloadSync {
         },
         Gone: () => fail("The song is no longer on the server", true),
         Failed: ({ message, retryable }) => fail(message, retryable),
-        Stopped: () => this.#removeQuietly(written.file),
+        Stopped: () => {
+          // Stopped for a new revision, a removal, or the vault closing: no retry is owed.
+          this.#trackFailures.delete(trackId);
+
+          return this.#removeQuietly(written.file);
+        },
       });
     } catch (error) {
       // The vault refused the row (a full disk, say): try again later, as after a failed fetch.
@@ -624,12 +637,29 @@ export class DownloadSync {
     this.#publish();
   }
 
+  /**
+   * Wakes the sync for the next retry that could start then, and to check space again while it is
+   * low. A retry that is due waits for nothing while no fetch can start (offline, low on space,
+   * both slots busy): the connection coming back or a fetch ending plans again.
+   */
   #scheduleWake(): void {
     const now = this.#options.now();
 
-    const retries = [...this.#trackFailures.values(), ...this.#artFailures.values()].flatMap(
-      ({ retryAt }) => (retryAt === null ? [] : [retryAt - now]),
-    );
+    const canStart =
+      this.#online &&
+      !this.#lowSpace &&
+      this.#fetching.size + this.#fetchingArt.size < MAX_TRANSFERS;
+
+    const retries = canStart
+      ? [
+          ...Array.from(this.#trackFailures, ([trackId, { retryAt }]) =>
+            this.#fetching.has(trackId) ? null : retryAt,
+          ),
+          ...Array.from(this.#artFailures, ([hash, { retryAt }]) =>
+            this.#fetchingArt.has(hash) ? null : retryAt,
+          ),
+        ].flatMap((retryAt) => (retryAt === null ? [] : [retryAt - now]))
+      : [];
 
     const waits = this.#lowSpace ? [...retries, SPACE_RECHECK_MS] : retries;
 
