@@ -12,9 +12,10 @@ import { ok } from "./types";
 
 /**
  * Most pins `downloads.list` reads across all of someone's devices. Asked for one device, it reads
- * that device's whole list, which `downloads.add` keeps to `DOWNLOAD_PIN_LIMIT`.
+ * that device's whole list, which `downloads.add` keeps to `DOWNLOAD_PIN_LIMIT`. A playlist pin
+ * someone else owns costs four index reads, so more would near Convex's limit of 4,096 a query.
  */
-const LISTED_PINS = 4 * DOWNLOAD_PIN_LIMIT;
+const LISTED_PINS = DOWNLOAD_PIN_LIMIT;
 
 const NOT_FOUND: Readonly<Record<DownloadTargetKind, string>> = {
   track: "Song not found",
@@ -68,7 +69,7 @@ export const downloadQueries = {
       Promise.all(deviceIds.map((deviceId) => findDevice(ctx, viewer.id, deviceId))),
       Promise.all(
         pins.map(async (pin) =>
-          presentPin(ctx, viewer, present, pin, await openTarget(ctx, viewer, pin.target)),
+          presentPin(ctx, present, pin, await openTarget(ctx, viewer, pin.target)),
         ),
       ),
     ]);

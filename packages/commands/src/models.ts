@@ -370,6 +370,7 @@ export const DownloadPin = Schema.Union([
     title: Schema.String,
     /** The artist of a song or album; the owner of a playlist. */
     subtitle: Schema.String,
+    /** A playlist's cover comes with its manifest; `downloads.list` leaves it null. */
     artUrl: Schema.NullOr(Schema.String),
     /** The cover's content hash, which stays the same while `artUrl`'s signature rotates. */
     artHash: Schema.NullOr(Schema.String),

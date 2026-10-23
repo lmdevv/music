@@ -561,6 +561,59 @@ describe("downloads.list", () => {
       expect.objectContaining({ deviceId: quiet, pins: [] }),
     ]);
   });
+
+  it(`lists a device's ${DOWNLOAD_PIN_LIMIT} playlist pins within one query's reads`, async () => {
+    const { admin, backend, scan, trackAt } = await setup();
+    const owner = await signUp(backend, "member");
+
+    // Songs without art, so a list that looked for playlist covers would read every one.
+    await scan(
+      Array.from({ length: 8 }, (_, index) =>
+        file(String(index), "Mix", index + 1, { artHash: undefined }),
+      ),
+    );
+
+    const songs = await Promise.all(
+      Array.from({ length: 8 }, (_, index) => trackAt(`Mix/${String(index)}.flac`)),
+    );
+
+    // Someone else's shared playlists cost the most to list: their owner and shares are read too.
+    await inOrder(
+      Array.from({ length: DOWNLOAD_PIN_LIMIT / 100 }, (_, batch) => batch),
+      async () => {
+        await backend.run(async (ctx) => {
+          await Promise.all(
+            Array.from({ length: 100 }, async () => {
+              const playlistId = await ctx.db.insert("playlists", {
+                ownerId: owner.id,
+                name: "Mix",
+                trackCount: songs.length,
+                durationMs: 0,
+                updatedAt: START,
+                visibility: "shared",
+              });
+
+              await Promise.all(
+                songs.map((song, position) =>
+                  ctx.db.insert("playlistItems", { playlistId, trackId: song._id, position }),
+                ),
+              );
+              await ctx.db.insert("downloadPins", {
+                userId: admin.id,
+                deviceId: PHONE,
+                target: { kind: "playlist", id: playlistId },
+              });
+            }),
+          );
+        });
+      },
+    );
+
+    const [listed] = await admin.music.read("downloads.list", { deviceId: PHONE });
+
+    expect(listed?.pins).toHaveLength(DOWNLOAD_PIN_LIMIT);
+    expect(listed?.pins.every((each) => each.available && each.artHash === null)).toBe(true);
+  }, 60_000);
 });
 
 describe("pins and the people and devices they belong to", () => {

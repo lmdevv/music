@@ -39,9 +39,6 @@ interface PinnedSong {
   readonly state: ManifestEntryState;
 }
 
-/** Playlist songs looked at for a pin's cover, as `presentPlaylist` does for its mosaic. */
-const COVER_SCAN = 24;
-
 /** Parses a wire `{ kind, id }` into a target; an ID of another table fails `not_found`. */
 export const parseTarget = (ctx: ReadCtx, kind: DownloadTargetKind, id: string): PinTarget =>
   Match.value(kind).pipe(
@@ -171,32 +168,23 @@ const songsOf = async (
   );
 };
 
-/** The cover of a playlist pin: the first one among its first songs the viewer can read. */
-const playlistCover = async (
-  ctx: ReadCtx,
-  viewer: Viewer,
-  playlist: Doc<"playlists">,
-): Promise<string | undefined> => {
-  const items = await ctx.db
-    .query("playlistItems")
-    .withIndex("by_playlist", (q) => q.eq("playlistId", playlist._id))
-    .take(COVER_SCAN);
-
-  const tracks = await Promise.all(items.map((item) => ctx.db.get(item.trackId)));
-
-  return tracks.find(
-    (track) => track !== null && track.artHash !== undefined && canRead(viewer, track.libraryId),
-  )?.artHash;
-};
-
-/** How an opened target is named on its pin. */
+/** A pin's name and cover. */
 interface ShownAs {
   readonly title: string;
   readonly subtitle: string;
   readonly artHash: string | undefined;
 }
 
-const shownAs = (ctx: ReadCtx, viewer: Viewer, opened: OpenedTarget): Promise<ShownAs> =>
+/**
+ * How an opened target is named on its pin. A playlist's cover is the first one among `songs`,
+ * the songs it holds when a manifest has read them; `downloads.list` reads none, which keeps a
+ * list of hundreds of playlist pins within one query's reads.
+ */
+const shownAs = (
+  ctx: ReadCtx,
+  opened: OpenedTarget,
+  songs: ReadonlyArray<PinnedSong>,
+): Promise<ShownAs> =>
   Match.value(opened).pipe(
     Match.discriminatorsExhaustive("kind")({
       track: async ({ track }): Promise<ShownAs> => ({
@@ -210,27 +198,27 @@ const shownAs = (ctx: ReadCtx, viewer: Viewer, opened: OpenedTarget): Promise<Sh
         artHash: album.artHash,
       }),
       playlist: async ({ playlist }): Promise<ShownAs> => {
-        const [owner, artHash] = await Promise.all([
-          ctx.db.get(playlist.ownerId),
-          playlistCover(ctx, viewer, playlist),
-        ]);
+        const owner = await ctx.db.get(playlist.ownerId);
 
         return {
           title: playlist.name,
           subtitle: owner === null ? "" : contributorOf(owner).name,
-          artHash,
+          artHash: songs.find((song) => song.track.artHash !== undefined)?.track.artHash,
         };
       },
     }),
   );
 
-/** A pin as its owner sees it, given its target as `openTarget` found it. */
+/**
+ * A pin as its owner sees it, given its target as `openTarget` found it and, for a manifest, the
+ * songs it holds.
+ */
 export const presentPin = async (
   ctx: ReadCtx,
-  viewer: Viewer,
   present: Presenter,
   pin: Doc<"downloadPins">,
   opened: OpenedTarget | null,
+  songs: ReadonlyArray<PinnedSong> = [],
 ): Promise<(typeof DownloadPin)["Encoded"]> => {
   const fields = {
     id: pin._id,
@@ -240,7 +228,7 @@ export const presentPin = async (
   };
 
   if (opened === null) return { ...fields, available: false };
-  const shown = await shownAs(ctx, viewer, opened);
+  const shown = await shownAs(ctx, opened, songs);
 
   return {
     ...fields,
@@ -263,7 +251,7 @@ export const resolveManifest = async (
   const songs = opened === null ? [] : await songsOf(ctx, viewer, opened);
 
   return {
-    pin: await presentPin(ctx, viewer, present, pin, opened),
+    pin: await presentPin(ctx, present, pin, opened, songs),
     entries: await Promise.all(
       songs.map(async ({ track, state }) => ({
         track: await present.offlineTrack(track),
