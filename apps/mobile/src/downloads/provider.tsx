@@ -25,6 +25,7 @@ import type {
 } from "@music/sdk/downloads";
 import { makeMusicClient } from "@music/sdk/client";
 import { useReadSettled } from "@music/sdk/react";
+import type { SessionStore, StoredSessions } from "@music/player/session-router";
 import { chooseStreamProfile } from "@music/player/stream-quality";
 import { useConvex, useConvexAuth, useConvexConnectionState } from "convex/react";
 import {
@@ -88,7 +89,12 @@ interface Downloads {
   readonly copies: DownloadedCopies;
   readonly quality: DownloadQuality;
   readonly setQuality: (quality: DownloadQuality) => void;
+  /** Stable for the provider's lifetime, whichever vault is open. */
+  readonly sessions: SessionStore;
 }
+
+/** What a session store holds when no vault is open. */
+const NOTHING_STORED: StoredSessions = { local: null, server: null };
 
 const DownloadsContext = createContext<Downloads | null>(null);
 
@@ -200,6 +206,7 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
   // The sync reads the policy at every plan, so a new quality applies from the next fetch.
   const chosen = useRef(quality);
   const current = useRef<DownloadSync | null>(null);
+  const vaultOpening = useRef<Promise<ExpoVault> | null>(null);
 
   useEffect(() => {
     if (userId === null) return undefined;
@@ -207,6 +214,7 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     let created: DownloadSync | null = null;
     let shutting: Promise<void> | null = null;
     const opening = openVault(origin, userId);
+    vaultOpening.current = opening;
 
     /** Stops the sync, waiting for its fetches to end, then closes the vault. Once. */
     const shutdown = (): Promise<void> => {
@@ -258,6 +266,7 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     void run();
 
     return () => {
+      vaultOpening.current = null;
       void shutdown().finally(() => {
         if (shutdowns.get(origin) === shutdown) shutdowns.delete(origin);
       });
@@ -280,9 +289,30 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     setStoredQuality(next);
   }, []);
 
+  const sessions = useMemo((): SessionStore => {
+    // The vault open now, or none: a session written while none is open has nowhere to go.
+    const vault = async (): Promise<ExpoVault | null> => {
+      try {
+        return (await vaultOpening.current) ?? null;
+      } catch {
+        return null;
+      }
+    };
+
+    return {
+      load: async () => (await vault())?.session.load() ?? NOTHING_STORED,
+      saveLocal: async (state) => {
+        await (await vault())?.session.saveLocal(state);
+      },
+      saveServer: async (state) => {
+        await (await vault())?.session.saveServer(state);
+      },
+    };
+  }, []);
+
   const value = useMemo(
-    () => ({ sync, copies, quality, setQuality }),
-    [sync, copies, quality, setQuality],
+    () => ({ sync, copies, sessions, quality, setQuality }),
+    [sync, copies, sessions, quality, setQuality],
   );
 
   return (
@@ -411,3 +441,9 @@ export const useHasDownloads = (): boolean => {
     () => sync !== null && sync.getSnapshot().copies.size > 0,
   );
 };
+
+/**
+ * Where the player keeps its playback session across launches: the open vault's database, so it
+ * belongs to the account whose downloads it plays and goes with them on sign-out. Stable.
+ */
+export const useSessionStore = (): SessionStore => useDownloads("useSessionStore").sessions;
