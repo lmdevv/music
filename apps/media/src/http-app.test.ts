@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { serve } from "@hono/node-server";
 
 import type { TrackId } from "@music/commands/ids";
+import { fileRevision } from "@music/commands/revision";
 import { signResource } from "@music/commands/signed-url";
 import { describe, expect, it } from "vitest";
 import { Duration, Effect, HashSet, Layer, Ref, Schedule } from "effect";
@@ -219,7 +220,11 @@ describe("media HTTP API", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(response.headers.get("Access-Control-Expose-Headers")).toContain("Content-Range");
         expect(yield* bytes(response)).toEqual(file);
 
+        // A download stores the file's revision and resumes with it as the validator.
+        const { size, mtimeMs } = yield* Files.statPath(join(root, DAWN));
         const etag = response.headers.get("ETag") ?? "";
+
+        expect(etag).toBe(`"${fileRevision(size, mtimeMs)}"`);
         const cached = yield* request(url, { headers: { "If-None-Match": etag } });
 
         expect(cached.status).toBe(304);
