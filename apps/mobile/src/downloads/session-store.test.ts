@@ -1,6 +1,7 @@
 import { AlbumId, ArtistId, DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
 import type { PlaybackState } from "@music/commands/models";
 import { seedLocal } from "@music/player/local-session";
+import { Struct } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { vaultSessions } from "./session-store";
@@ -43,6 +44,9 @@ const server: PlaybackState = {
   repeat: "off",
   autoplay: true,
 };
+
+/** The server's session, `positionMs` into its song. */
+const serverAt = (positionMs: number): PlaybackState => Struct.assign(server, { positionMs });
 
 /** A database holding the session table in memory, answering the store's three statements. */
 const memoryDatabase = () => {
@@ -88,6 +92,31 @@ describe("vaultSessions", () => {
     await store.saveLocal(null);
 
     expect(await store.load()).toEqual({ local: null, server });
+  });
+
+  it("writes the server's session one at a time, skipping to the newest", async () => {
+    const { db, rows } = memoryDatabase();
+    const writes: Array<string> = [];
+
+    const counting: SessionDatabase = {
+      getAllAsync: db.getAllAsync,
+      runAsync: (sql, params) => {
+        writes.push(params[1] ?? "");
+
+        return db.runAsync(sql, params);
+      },
+    };
+
+    const store = vaultSessions(counting);
+
+    await Promise.all([
+      store.saveServer(serverAt(1)),
+      store.saveServer(serverAt(2)),
+      store.saveServer(serverAt(3)),
+    ]);
+
+    expect(writes).toHaveLength(2);
+    expect(JSON.parse(rows.get("server") ?? "")).toMatchObject({ positionMs: 3 });
   });
 
   it("reads a row it can't parse as nothing stored", async () => {

@@ -50,20 +50,53 @@ const save = async (db: SessionDatabase, key: SessionKey, state: string | null):
  * The session store over a vault's database. A row that no longer parses, from an older app or a
  * damaged file, reads as nothing stored.
  */
-export const vaultSessions = (db: SessionDatabase): SessionStore => ({
-  load: async () => {
-    const rows = (await db.getAllAsync("SELECT key, state FROM session")).flatMap((row) =>
-      Option.toArray(decodeRow(row)),
-    );
+export const vaultSessions = (db: SessionDatabase): SessionStore => {
+  // The server's session changes with every position report: one write at a time, and while one
+  // runs only the newest snapshot waits for the next.
+  let writing: Promise<void> | null = null;
+  let waiting: PlaybackState | null = null;
 
-    const stored = (key: SessionKey): string | undefined =>
-      rows.find((row) => row.key === key)?.state;
+  const writeServer = async (): Promise<void> => {
+    const state = waiting;
 
-    return {
-      local: Option.getOrNull(decodeLocal(stored("local"))),
-      server: Option.getOrNull(decodeServer(stored("server"))),
-    };
-  },
-  saveLocal: (state) => save(db, "local", state === null ? null : encodeLocal(state)),
-  saveServer: (state) => save(db, "server", encodeServer(state)),
-});
+    if (state === null) {
+      writing = null;
+
+      return;
+    }
+
+    waiting = null;
+
+    try {
+      await save(db, "server", encodeServer(state));
+    } catch (error) {
+      writing = null;
+      throw error;
+    }
+
+    await writeServer();
+  };
+
+  return {
+    load: async () => {
+      const rows = (await db.getAllAsync("SELECT key, state FROM session")).flatMap((row) =>
+        Option.toArray(decodeRow(row)),
+      );
+
+      const stored = (key: SessionKey): string | undefined =>
+        rows.find((row) => row.key === key)?.state;
+
+      return {
+        local: Option.getOrNull(decodeLocal(stored("local"))),
+        server: Option.getOrNull(decodeServer(stored("server"))),
+      };
+    },
+    saveLocal: (state) => save(db, "local", state === null ? null : encodeLocal(state)),
+    saveServer: (state) => {
+      waiting = state;
+      writing ??= writeServer();
+
+      return writing;
+    },
+  };
+};
