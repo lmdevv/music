@@ -6,6 +6,7 @@ export {
   useDownload,
   useDownloadsLibrary,
   useLocalCopies,
+  useTrackDownload,
   wipeDownloads,
 } from "./provider";
 

@@ -12,6 +12,7 @@ import {
   DownloadSync,
   EMPTY_DOWNLOADS,
   offlineLibrary,
+  trackDownloadState,
 } from "@music/sdk/downloads";
 import type {
   DownloadsSnapshot,
@@ -19,6 +20,7 @@ import type {
   LocalCopy,
   OfflineLibrary,
   SyncPolicy,
+  TrackDownloadState,
 } from "@music/sdk/downloads";
 import { makeMusicClient } from "@music/sdk/client";
 import { useReadSettled } from "@music/sdk/react";
@@ -271,6 +273,31 @@ export const useDownload = (target: DownloadTarget): DownloadView => {
     },
     retry: () => {
       sync?.retry(target);
+    },
+  };
+};
+
+/** What this phone holds or is getting for one song, and how to try it again once it failed. */
+interface TrackDownload {
+  readonly state: TrackDownloadState | "none";
+  readonly retry: () => void;
+}
+
+/**
+ * The download of one song, for its row's glyph; `none` for a song that isn't a real track. Reads
+ * only this song's state, so a row redraws when its own song changes, not on every download.
+ */
+export const useTrackDownload = (trackId: TrackId | null): TrackDownload => {
+  const { sync } = useDownloads("useTrackDownload");
+
+  const state = useSyncExternalStore(sync?.subscribe ?? subscribeToNothing, () =>
+    sync === null || trackId === null ? "none" : trackDownloadState(sync.getSnapshot(), trackId),
+  );
+
+  return {
+    state,
+    retry: () => {
+      if (trackId !== null) sync?.retry({ kind: "track", id: trackId });
     },
   };
 };

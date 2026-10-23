@@ -29,6 +29,10 @@ type RowLeading =
 export interface RowProps {
   readonly title: string;
   readonly subtitle?: string;
+  /** Muted by default; a failed download's subtitle is danger. */
+  readonly subtitleTone?: TextTone;
+  /** A 12pt glyph before the subtitle, such as a song's download state. */
+  readonly subtitleGlyph?: ReactNode;
   readonly leading?: RowLeading;
   /** The trailing lane: `RowChevron`, `RowCheck`, `RowMore`, or nothing. */
   readonly trailing?: ReactNode;
@@ -62,6 +66,8 @@ function Leading({ leading }: { readonly leading: RowLeading }) {
 export function Row({
   title,
   subtitle,
+  subtitleTone = "muted",
+  subtitleGlyph,
   leading,
   trailing,
   active = false,
@@ -80,10 +86,17 @@ export function Row({
         >
           {title}
         </Text>
-        {subtitle === undefined ? null : (
-          <Text variant="secondary" tone="muted" numberOfLines={1}>
+        {subtitle === undefined ? null : subtitleGlyph === undefined ? (
+          <Text variant="secondary" tone={subtitleTone} numberOfLines={1}>
             {subtitle}
           </Text>
+        ) : (
+          <View className="flex-row items-center gap-1">
+            {subtitleGlyph}
+            <Text variant="secondary" tone={subtitleTone} numberOfLines={1} className="shrink">
+              {subtitle}
+            </Text>
+          </View>
         )}
       </View>
     </>
