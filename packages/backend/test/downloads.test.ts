@@ -1,7 +1,7 @@
 /**
  * Download pins and their manifests against convex-test: what a pin holds as the library changes
- * under it (missing files, in-place changes, re-encodes, unclaimed folders, lost access), and the
- * rules for adding, removing, and listing pins.
+ * under it (missing files, in-place changes, re-encodes, re-tags, unclaimed folders, lost access),
+ * and the rules for adding, removing, and listing pins.
  */
 import { DeviceId, LibraryId, TrackId } from "@music/commands/ids";
 import type { DownloadPinId } from "@music/commands/ids";
@@ -14,7 +14,14 @@ import { api } from "../convex/_generated/api";
 import type { Doc, Id } from "../convex/_generated/dataModel";
 import type { ScannedTrack } from "../convex/lib/catalog";
 import { inOrder } from "../convex/lib/sequence";
-import { MEDIA_SECRET, makeBackend, markMissing, signUp, upsertFiles } from "./backend";
+import {
+  MEDIA_SECRET,
+  drainScheduled,
+  makeBackend,
+  markMissing,
+  signUp,
+  upsertFiles,
+} from "./backend";
 import type { Backend, User } from "./backend";
 import { failureCode } from "./harness";
 
@@ -333,6 +340,69 @@ describe("a pin whose target can't be read", () => {
     const pinId = await pin(admin, "track", (await trackAt("Kind/One.flac"))._id);
 
     expect(await failureCode(member.music.read("downloads.manifest", { pinId }))).toBe("not_found");
+  });
+});
+
+describe("a retag that empties an album", () => {
+  it("moves its pins to the album that got most of its songs, keeping the song IDs", async () => {
+    const { admin, scan, trackAt } = await setup();
+
+    await scan([file("One", "Old", 1), file("Two", "Old", 2), file("Three", "Old", 3)]);
+
+    const before = await Promise.all(
+      ["Old/One.flac", "Old/Two.flac", "Old/Three.flac"].map(trackAt),
+    );
+
+    const pinId = await pin(admin, "album", before[0]?.albumId ?? "");
+
+    // The files keep their paths; the tags send two songs to one album and the last to another.
+    await scan([
+      file("One", "New", 1, { path: "Old/One.flac" }),
+      file("Two", "New", 2, { path: "Old/Two.flac" }),
+      file("Three", "Other", 3, { path: "Old/Three.flac" }),
+    ]);
+
+    const one = await trackAt("Old/One.flac");
+    const moved = await manifest(admin, pinId);
+
+    expect(moved.pin).toMatchObject({
+      available: true,
+      title: "New",
+      target: { kind: "album", id: one.albumId },
+    });
+    expect(moved.entries.map((entry) => entry.track.id)).toEqual([before[0]?._id, before[1]?._id]);
+  });
+
+  it("drops the moved pin on a device that already keeps the album the songs went to", async () => {
+    const { admin, scan, trackAt } = await setup();
+
+    await scan([file("One", "Old", 1), file("Two", "New", 2)]);
+    const [one, two] = await Promise.all([trackAt("Old/One.flac"), trackAt("New/Two.flac")]);
+
+    await pin(admin, "album", one.albumId);
+    const kept = await pin(admin, "album", two.albumId);
+
+    await scan([file("One", "New", 1, { path: "Old/One.flac" })]);
+
+    const [listed] = await admin.music.read("downloads.list", { deviceId: PHONE });
+
+    expect(listed?.pins.map((each) => each.id)).toEqual([kept]);
+    expect(await entries(admin, kept)).toEqual([
+      ["One", "fetchable"],
+      ["Two", "fetchable"],
+    ]);
+  });
+
+  it("leaves a pin unavailable when its album goes with no song moving on", async () => {
+    const { admin, backend, libraryId, scan, trackAt } = await setup();
+
+    await scan([file("One", "Old", 1)]);
+    const pinId = await pin(admin, "album", (await trackAt("Old/One.flac")).albumId);
+
+    await admin.music.run("libraries.delete", { libraryId: LibraryId.make(libraryId) });
+    await drainScheduled(backend);
+
+    expect((await manifest(admin, pinId)).pin.available).toBe(false);
   });
 });
 

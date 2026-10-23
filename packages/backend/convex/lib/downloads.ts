@@ -15,6 +15,7 @@ import { fileRevision } from "@music/commands/revision";
 import { Match } from "effect";
 
 import type { Doc, Id } from "../_generated/dataModel";
+import type { MutationCtx } from "../_generated/server";
 import { tableId } from "./ids";
 import { isClaimed } from "./paths";
 import { playlistAccess } from "./playlists";
@@ -272,4 +273,30 @@ export const resolveManifest = async (
       })),
     ),
   };
+};
+
+/**
+ * Moves every pin of album `from` to album `to`, after a re-tag moved its songs there and emptied
+ * it. A device that already keeps `to` loses the duplicate. Idempotent.
+ */
+export const repointAlbumPins = async (
+  ctx: MutationCtx,
+  from: Id<"albums">,
+  to: Id<"albums">,
+): Promise<void> => {
+  const pins = await ctx.db
+    .query("downloadPins")
+    .withIndex("by_target", (q) => q.eq("target.kind", "album").eq("target.id", from))
+    .collect();
+
+  const target = { kind: "album", id: to } as const;
+
+  // A device keeps an album once, so no two of these pins land on the same row.
+  await Promise.all(
+    pins.map(async (pin) => {
+      const kept = await findPin(ctx, pin.userId, pin.deviceId, target);
+
+      await (kept === null ? ctx.db.patch(pin._id, { target }) : ctx.db.delete(pin._id));
+    }),
+  );
 };
