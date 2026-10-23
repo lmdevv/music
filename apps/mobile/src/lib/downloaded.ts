@@ -27,6 +27,30 @@ export const downloadsFor = (
     ? downloads
     : downloads.filter((item) => item.target.kind === (filter === "albums" ? "album" : "playlist"));
 
+/** An empty state's title and body. */
+interface EmptyCopy {
+  readonly title: string;
+  readonly body: string;
+}
+
+/** The empty state's words: for a phone with nothing downloaded, or for a filter with nothing in it. */
+export const downloadedEmpty = (filter: DownloadedFilter, anything: boolean): EmptyCopy => {
+  if (!anything || filter === "all") {
+    return {
+      title: "Nothing downloaded yet",
+      body: "Download an album or playlist from its page\nto play it with no connection.",
+    };
+  }
+
+  const how = {
+    albums: "Download an album from its page",
+    playlists: "Download a playlist from its page",
+    songs: "Download a song from its menu",
+  }[filter];
+
+  return { title: `No ${filter} downloaded`, body: `${how}\nto play it with no connection.` };
+};
+
 /** `55 SONGS · 3 ALBUMS · 1 PLAYLIST`, the mono line over the list. */
 export const downloadedSummary = (
   usage: DownloadUsage,

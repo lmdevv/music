@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   downloadedCount,
+  downloadedEmpty,
   downloadedLine,
   downloadedNote,
   downloadedSummary,
@@ -95,6 +96,15 @@ describe("Downloaded", () => {
     );
     expect(storageLine(usage)).toBe("55 songs · 2.4 GB");
     expect(storageLine({ tracks: 0, bytes: 0, freeBytes: null })).toBe("Nothing downloaded");
+  });
+
+  it("says what is missing when a filter holds nothing", () => {
+    expect(downloadedEmpty("all", false).title).toBe("Nothing downloaded yet");
+    expect(downloadedEmpty("albums", false).title).toBe("Nothing downloaded yet");
+    expect(downloadedEmpty("albums", true)).toEqual({
+      title: "No albums downloaded",
+      body: "Download an album from its page\nto play it with no connection.",
+    });
   });
 
   it("counts songs on the Library row only once there are some", () => {

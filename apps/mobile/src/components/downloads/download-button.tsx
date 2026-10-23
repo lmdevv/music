@@ -45,9 +45,11 @@ export function DownloadButton({
 
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-    // Removing never fails here: the files go at once, and the server hears when it answers.
-    if (control.press === "cancel") void download.toggle();
-    else void save(download.toggle, `${title} isn’t downloading.`);
+    // Cancelling fails only when this phone can't record it; adding also needs the server.
+    void save(
+      download.toggle,
+      control.press === "cancel" ? `${title} is still downloading.` : `${title} isn’t downloading.`,
+    );
   };
 
   const off = control.press === "none";

@@ -22,6 +22,7 @@ import { Text } from "@/components/ui/text";
 import { useDownloadsLibrary } from "@/downloads";
 import {
   DOWNLOADED_FILTERS,
+  downloadedEmpty,
   downloadedLine,
   downloadedNote,
   downloadedSummary,
@@ -118,11 +119,10 @@ export default function Downloaded() {
       getItemType={(cell) => cell.kind}
       header={<Summary library={library} filter={filter} onFilter={setFilter} />}
       footer={
-        downloads.length === 0 && songs.length === 0 ? (
+        cells.length === 0 ? (
           <EmptyState
             icon={CircleArrowDown}
-            title="Nothing downloaded yet"
-            body={"Download an album or playlist from its page\nto play it with no connection."}
+            {...downloadedEmpty(filter, downloads.length > 0 || songs.length > 0)}
           />
         ) : null
       }

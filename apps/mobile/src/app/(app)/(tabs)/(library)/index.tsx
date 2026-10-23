@@ -24,7 +24,7 @@ import { Row, RowChevron } from "@/components/ui/row";
 import { SectionHeader } from "@/components/ui/section-header";
 import { TabRoot } from "@/components/ui/tab-root";
 import { Text } from "@/components/ui/text";
-import { useDownloadsLibrary } from "@/downloads";
+import { useDownloadSettings } from "@/downloads";
 import { downloadedCount } from "@/lib/downloaded";
 import { librarySummary } from "@/lib/format";
 
@@ -61,7 +61,7 @@ export default function Library() {
   const libraries = useRead("libraries.list", {});
   const me = useRead("account.me", {});
   const admin = me !== undefined && can(me.role, "admin");
-  const downloaded = downloadedCount(useDownloadsLibrary().usage);
+  const downloaded = downloadedCount(useDownloadSettings().usage);
 
   return (
     <TabRoot title="Library">
