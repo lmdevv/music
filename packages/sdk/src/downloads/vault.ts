@@ -47,6 +47,8 @@ export interface VaultStore {
   readonly uri: (file: string) => string;
   /** Deletes a vault file; one that isn't there is fine. */
   readonly remove: (file: string) => Promise<void>;
+  /** The size of a vault file in bytes, or null when it isn't there. */
+  readonly size: (file: string) => Promise<number | null>;
   /** Free space on the device, or null when the platform can't tell. */
   readonly freeBytes: () => number | null;
 }

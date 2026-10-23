@@ -57,8 +57,8 @@ interface DownloadView {
 export interface DownloadedCopies {
   /** The copy of a song on this phone, or null; read when called. */
   readonly find: (trackId: TrackId) => LocalCopy | null;
-  /** A copy failed to play: stop offering it, and fetch it again. */
-  readonly discard: (trackId: TrackId) => void;
+  /** The copy at `uri` failed to play: stop offering it, and fetch it again if it is broken. */
+  readonly discard: (trackId: TrackId, uri: string) => void;
 }
 
 interface Downloads {
@@ -195,8 +195,8 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
   const copies = useMemo(
     (): DownloadedCopies => ({
       find: (trackId) => current.current?.localCopy(trackId) ?? null,
-      discard: (trackId) => {
-        current.current?.discard(trackId);
+      discard: (trackId, uri) => {
+        current.current?.discard(trackId, uri);
       },
     }),
     [],

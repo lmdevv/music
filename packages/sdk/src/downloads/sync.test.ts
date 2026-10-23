@@ -76,6 +76,12 @@ class DirectoryVault implements VaultStore {
 
   remove = (file: string): Promise<void> => rm(join(this.#dir, file), { force: true });
 
+  size = (file: string): Promise<number | null> =>
+    stat(join(this.#dir, file)).then(
+      (found) => found.size,
+      () => null,
+    );
+
   freeBytes = (): number | null => this.free;
 }
 
@@ -221,6 +227,21 @@ const exists = async (file: string): Promise<boolean> =>
     () => false,
   );
 
+/** A sync holding the album, and the URI of its first song's copy. */
+const holdingAlbum = async () => {
+  const vault = new DirectoryVault(dir);
+  const sync = started(vault);
+  sync.setOnline(true);
+  sync.offerPins([ALBUM]);
+  sync.offerManifest(ALBUM.id, MANIFEST);
+
+  await vi.waitFor(() => {
+    expect(sync.localCopy(SAFE.id)).not.toBeNull();
+  }, SETTLE);
+
+  return { sync, vault, uri: sync.localCopy(SAFE.id)?.uri ?? "" };
+};
+
 describe("DownloadSync", () => {
   it("keeps an album's songs and cover on the device once the server lists it", async () => {
     const vault = new DirectoryVault(dir);
@@ -253,25 +274,49 @@ describe("DownloadSync", () => {
     });
   });
 
-  it("stops offering a copy that failed to play and fetches it again", async () => {
-    const vault = new DirectoryVault(dir);
-    const sync = started(vault);
-    sync.setOnline(true);
-    sync.offerPins([ALBUM]);
-    sync.offerManifest(ALBUM.id, MANIFEST);
+  describe("when a copy fails to play", () => {
+    it("keeps a whole file on disk and stops offering it for the session", async () => {
+      const { sync, vault, uri } = await holdingAlbum();
+      sync.discard(SAFE.id, uri);
 
-    await vi.waitFor(() => {
+      expect(sync.localCopy(SAFE.id)).toBeNull();
+
+      await new Promise((resolve) => {
+        setTimeout(resolve, 200);
+      });
+
+      expect(await exists("audio/t1.r1.aac-320.m4a")).toBe(true);
+      expect(vault.view.copies.has(SAFE.id)).toBe(true);
+      expect(fetchesOf("t1")).toBe(1);
+      expect(sync.localCopy(SAFE.id)).toBeNull();
+    });
+
+    it("deletes a broken file and fetches the song again", async () => {
+      const { sync, uri } = await holdingAlbum();
+      await writeFile(join(dir, "audio/t1.r1.aac-320.m4a"), "trunc");
+      sync.discard(SAFE.id, uri);
+
+      expect(sync.localCopy(SAFE.id)).toBeNull();
+
+      await vi.waitFor(() => {
+        expect(fetchesOf("t1")).toBe(2);
+        expect(sync.localCopy(SAFE.id)).not.toBeNull();
+      }, SETTLE);
+    });
+
+    it("leaves a newer copy alone when an older one failed", async () => {
+      const { sync, vault } = await holdingAlbum();
+      sync.discard(SAFE.id, join(dir, "audio/t1.r0.aac-320.m4a"));
+
+      await new Promise((resolve) => {
+        setTimeout(resolve, 200);
+      });
+
       expect(sync.localCopy(SAFE.id)).not.toBeNull();
-    }, SETTLE);
-
-    sync.discard(SAFE.id);
-
-    expect(sync.localCopy(SAFE.id)).toBeNull();
-
-    await vi.waitFor(() => {
-      expect(fetchesOf("t1")).toBe(2);
-      expect(sync.localCopy(SAFE.id)).not.toBeNull();
-    }, SETTLE);
+      expect(vault.view.copies.has(SAFE.id)).toBe(true);
+      expect(await exists("audio/t1.r1.aac-320.m4a")).toBe(true);
+      expect(fetchesOf("t1")).toBe(1);
+    });
   });
 
   it("deletes the files of a removed download at once and tells the server", async () => {

@@ -178,8 +178,11 @@ export class DownloadSync {
   #lowSpace = false;
   #pins: Option.Option<ReadonlyArray<DownloadPin>> = Option.none();
   readonly #manifests = new Map<DownloadPinId, DownloadManifest>();
-  /** Copies that failed to play, no longer offered while their row is deleted. */
-  readonly #discarded = new Set<TrackId>();
+  /**
+   * Files of copies that failed to play, not offered again in this session. A whole file stays
+   * on disk, since playing may have failed for a passing reason; a broken one is fetched again.
+   */
+  readonly #discarded = new Set<string>();
   readonly #fetching = new Map<TrackId, { readonly rev: string; readonly stop: AbortController }>();
   readonly #fetchingArt = new Map<string, AbortController>();
   readonly #trackFailures = new Map<TrackId, Failure & { readonly rev: string }>();
@@ -287,27 +290,37 @@ export class DownloadSync {
   localCopy(trackId: TrackId): LocalCopy | null {
     const copy = this.#view.copies.get(trackId);
 
-    return copy === undefined || this.#discarded.has(trackId) ? null : this.#localCopy(copy);
+    return copy === undefined || this.#discarded.has(copy.file) ? null : this.#localCopy(copy);
   }
 
   /**
-   * A copy that failed to play: it stops being offered at once, its file and row go, and the next
-   * plan fetches it again.
+   * The copy of `trackId` at `uri` failed to play, and stops being offered at once. When its file
+   * is missing or not the size it was fetched at, it is deleted and fetched again. A whole file
+   * stays on disk for the next session: the failure may have been a passing one (an interruption,
+   * a slow start), and offline it is the only copy. A copy a newer one replaced meanwhile changes
+   * nothing.
    */
-  discard(trackId: TrackId): void {
+  discard(trackId: TrackId, uri: string): void {
     const copy = this.#view.copies.get(trackId);
+    const { vault } = this.#options;
 
-    if (copy === undefined || this.#discarded.has(trackId)) return;
-    this.#discarded.add(trackId);
+    if (copy === undefined || vault.uri(copy.file) !== uri || this.#discarded.has(copy.file)) {
+      return;
+    }
 
-    void this.#drop(copy)
-      .catch(() => {
-        this.#wakeIn(VAULT_RETRY_MS);
-      })
-      .finally(() => {
-        this.#discarded.delete(trackId);
-        this.#plan();
-      });
+    this.#discarded.add(copy.file);
+
+    const check = async (): Promise<void> => {
+      if ((await vault.size(copy.file)) === copy.bytes) return;
+      await this.#drop(copy);
+      // The next copy has the same name; it is offered once it lands.
+      this.#discarded.delete(copy.file);
+      this.#plan();
+    };
+
+    void check().catch(() => {
+      this.#wakeIn(VAULT_RETRY_MS);
+    });
   }
 
   /** The current snapshot, for `useSyncExternalStore`. */

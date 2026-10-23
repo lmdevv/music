@@ -291,6 +291,11 @@ export const openVault = async (origin: ServerOrigin, account: UserId): Promise<
 
       if (found.exists) found.delete();
     },
+    size: async (file) => {
+      const found = fileIn(vault, file);
+
+      return found.exists ? found.size : null;
+    },
     freeBytes: () => Paths.availableDiskSpace,
     close: () => db.closeAsync(),
   };
