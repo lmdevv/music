@@ -163,6 +163,36 @@ describe("a command the server doesn't answer", () => {
     expect(server.ran[1]?.args).toMatchObject({ resume: { index: 1, playing: true } });
   });
 
+  it("plays here a song started here, even while another device is still named in the session", async () => {
+    const { router, server, clock } = setup({ downloaded: ["a", "b"] });
+
+    const elsewhere = {
+      id: laptop,
+      name: "Laptop",
+      kind: "web",
+      lastSeenAt: 0,
+      online: true,
+    } as const;
+
+    router.offerServer(sessionOf(["a", "b", "c"], { activeDevice: elsewhere, playing: false }));
+    server.setConnected(false);
+    expect(router.mode()).toBe("server");
+
+    const play = router.run("playback.play", {
+      trackIds: [TrackId.make("a"), TrackId.make("b")],
+      deviceId: phone.id,
+    });
+
+    clock.advance(ACK_DEADLINE_MS);
+    await expect(play).resolves.toEqual({ ok: true });
+    expect(router.mode()).toBe("local");
+    expect(router.getSnapshot().state).toMatchObject({
+      activeDevice: { id: phone.id },
+      playing: true,
+      queue: [{ id: "a" }, { id: "b" }],
+    });
+  });
+
   it("keeps waiting for the server when the command can't run here", async () => {
     const { router, server, clock } = setup();
 
@@ -458,5 +488,18 @@ describe("launching", () => {
     await fresh.router.startLocal();
     expect(fresh.router.mode()).toBe("local");
     expect(fresh.router.getSnapshot().state?.queue).toEqual([]);
+  });
+
+  it("starts its own session at a launch whose socket is up but whose server doesn't answer", async () => {
+    const { router, server } = setup({
+      stored: { local: null, server: sessionOf(["a", "b"]) },
+      connected: true,
+    });
+
+    server.hold();
+    await router.startLocal();
+
+    expect(router.mode()).toBe("local");
+    expect(router.getSnapshot().state).toMatchObject({ index: 0, playing: false });
   });
 });

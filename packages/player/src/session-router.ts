@@ -4,7 +4,7 @@
  * hands it back when the server answers again. The controller and the player's actions send every
  * command through a `SessionPort` and never learn which one runs.
  */
-import type { TrackId } from "@music/commands/ids";
+import type { DeviceId, TrackId } from "@music/commands/ids";
 import type { OfflinePlay, PlaybackState } from "@music/commands/models";
 import type { CommandArgs, CommandResult, MutationName } from "@music/commands/registry";
 import { isSessionMutation } from "@music/commands/session-commands";
@@ -152,13 +152,15 @@ interface Outstanding {
     state: LocalSessionState,
     context: LocalContext,
   ) => { readonly state: LocalSessionState; readonly ran: boolean; readonly answer: () => void };
+  /** The command starts playback on this device, so the session is this device's to take. */
+  readonly playsHere: boolean;
 }
 
 /**
  * Routes session commands to the server while it answers, and to this device's own session while
  * it doesn't. The session moves onto the device when the connection drops while the device plays
- * it, or when a command goes unanswered past the deadline and this device plays it or nothing
- * does; never while it listens along to someone's Jam. When the connection is back it hands the
+ * it, or when a command goes unanswered past the deadline and this device plays it, nothing
+ * does, or the command starts playback here; never while it listens along to someone's Jam. When the connection is back it hands the
  * session back with `devices.reconcile`: the plays for history, then the queue, which the server
  * adopts while it still names this device active or the device still plays.
  */
@@ -255,7 +257,8 @@ export class SessionRouter implements SessionPort {
 
     this.#takeStored(stored);
 
-    if (this.mode() === "local" || this.#connection.connected()) return;
+    // Even with the socket up: a server that answers takes the session straight back.
+    if (this.mode() === "local") return;
     const now = this.#clock.now();
     const server = this.#server ?? stored?.server ?? null;
     const session = server === null ? emptyLocal(now) : seedLocal(server, this.#device.id);
@@ -289,6 +292,7 @@ export class SessionRouter implements SessionPort {
     });
 
     const command: Outstanding = {
+      playsHere: playsOn(name, args, this.#device.id),
       runHere: (state, context) => {
         const stepped = stepLocal(name, state, args, context);
 
@@ -377,7 +381,8 @@ export class SessionRouter implements SessionPort {
    * Moves the session onto this device, from the session the player shows, with every command
    * still out with the server run here first, in the order sent; each caller is answered from
    * here, a refusal included. On a dropped connection (`needed` null) only while this device plays
-   * the session; for a command past its deadline also while nothing plays it, and only when that
+   * the session; for a command past its deadline also while nothing plays it or when the command
+   * starts playback here (another device may still be named, paused), and only when that
    * command runs here, or it keeps waiting for the server. Returns whether the session moved.
    */
   #takeOver(needed: Outstanding | null): boolean {
@@ -386,7 +391,10 @@ export class SessionRouter implements SessionPort {
     if (this.#local !== null || shown === undefined || shown.following) return false;
     const active = shown.activeDevice?.id ?? null;
 
-    if (active !== this.#device.id && (needed === null || active !== null)) return false;
+    const claimed = needed?.playsHere === true;
+
+    if (active !== this.#device.id && !claimed && (needed === null || active !== null))
+      return false;
     const context = this.#context();
     let state = seedLocal(shown, this.#device.id);
     const answers: Array<() => void> = [];
@@ -609,6 +617,19 @@ export class SessionRouter implements SessionPort {
     for (const listener of this.#listeners) listener();
   }
 }
+
+/**
+ * Whether a command starts playback on `device`: playing songs on it, or moving playback to it.
+ * Such a command may take the session over from another device that last played it.
+ */
+const playsOn = <Name extends SessionMutation>(
+  name: Name,
+  args: CommandArgs<Name>,
+  device: DeviceId,
+): boolean =>
+  (name === "playback.play" || name === "playback.transfer") &&
+  "deviceId" in args &&
+  args.deviceId === device;
 
 const isPlayReport = (name: SessionMutation): name is "playback.report" =>
   name === "playback.report";
