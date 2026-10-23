@@ -1,18 +1,19 @@
 /**
  * Download pins and their manifests against convex-test: what a pin holds as the library changes
  * under it (missing files, in-place changes, re-encodes, re-tags, unclaimed folders, lost access),
- * and the rules for adding, removing, and listing pins.
+ * and the rules for adding, removing, listing, pruning, and purging pins.
  */
-import { DeviceId, LibraryId, TrackId } from "@music/commands/ids";
+import { DeviceId, LibraryId, TrackId, UserId } from "@music/commands/ids";
 import type { DownloadPinId } from "@music/commands/ids";
 import { DOWNLOAD_PIN_LIMIT } from "@music/commands/models";
 import type { DownloadManifest, DownloadTargetKind } from "@music/commands/models";
 import { fileRevision } from "@music/commands/revision";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "../convex/_generated/api";
+import { api, internal } from "../convex/_generated/api";
 import type { Doc, Id } from "../convex/_generated/dataModel";
 import type { ScannedTrack } from "../convex/lib/catalog";
+import { DEVICE_RETAINED_MS } from "../convex/lib/devices";
 import { inOrder } from "../convex/lib/sequence";
 import {
   MEDIA_SECRET,
@@ -559,5 +560,47 @@ describe("downloads.list", () => {
     expect(await admin.music.read("downloads.list", { deviceId: quiet })).toEqual([
       expect.objectContaining({ deviceId: quiet, pins: [] }),
     ]);
+  });
+});
+
+describe("pins and the people and devices they belong to", () => {
+  it("keep a long-silent device that holds downloads from the prune", async () => {
+    const { admin, backend, scan, trackAt } = await setup();
+    const tablet = DeviceId.make("tablet");
+
+    await admin.music.run("devices.heartbeat", { deviceId: tablet, name: "iPad", kind: "phone" });
+    await scan([file("One", "Kind", 1)]);
+    await pin(admin, "track", (await trackAt("Kind/One.flac"))._id);
+
+    vi.setSystemTime(START + DEVICE_RETAINED_MS + 24 * 60 * 60 * 1000);
+    await backend.mutation(internal.maintenance.pruneStaleDevices, {});
+    await drainScheduled(backend);
+
+    const devices = await backend.run(async (ctx) =>
+      (await ctx.db.query("devices").collect()).map((device) => device.deviceId),
+    );
+
+    expect(devices).toEqual([PHONE]);
+  });
+
+  it("go with the person who made them", async () => {
+    const { admin, backend, scan, trackAt } = await setup();
+    const member = await signUp(backend, "member");
+
+    await member.music.run("devices.heartbeat", { deviceId: PHONE, name: "iPhone", kind: "phone" });
+    await scan([file("One", "Kind", 1)]);
+    const one = await trackAt("Kind/One.flac");
+
+    await pin(member, "track", one._id);
+    const kept = await pin(admin, "track", one._id);
+
+    await admin.music.run("people.remove", { userId: UserId.make(member.id) });
+    await drainScheduled(backend);
+
+    const left = await backend.run(async (ctx) =>
+      (await ctx.db.query("downloadPins").collect()).map((each) => each._id),
+    );
+
+    expect(left).toEqual([kept]);
   });
 });
