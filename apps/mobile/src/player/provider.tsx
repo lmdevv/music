@@ -201,6 +201,7 @@ const createPhone = (
   origin: ServerOrigin,
   copies: DownloadedCopies,
   store: SessionStore,
+  inJam: () => boolean,
 ): Phone => {
   const client = makeMusicClient(convex);
   const engine = new NativeEngine(openExpoOutput);
@@ -215,6 +216,7 @@ const createPhone = (
     playable: (trackId) => copies.find(trackId)?.track ?? null,
     clock: systemClock,
     random: Math.random,
+    inJam,
   });
 
   // A downloaded song plays from its file, online too; anything else streams.
@@ -363,9 +365,11 @@ export function PlayerProvider({
   const convex = useConvex();
   const copies = useLocalCopies();
   const store = useSessionStore();
+  // Whether the account is in a Jam, as the server last said; the router reads it when it decides.
+  const inJam = useRef(false);
 
   const phone = useMemo(
-    () => createPhone(convex, origin, copies, store),
+    () => createPhone(convex, origin, copies, store, () => inJam.current),
     [convex, origin, copies, store],
   );
 
@@ -376,6 +380,10 @@ export function PlayerProvider({
   const position = useRead("playback.position", {});
   const queue = useRead("queue.list", {});
   const jam = useRead("jam.get", {}) ?? null;
+
+  useLayoutEffect(() => {
+    inJam.current = jam?.status === "active";
+  }, [jam]);
   const devices = useRead("devices.list", { deviceId: phone.id });
 
   const served = useMemo(

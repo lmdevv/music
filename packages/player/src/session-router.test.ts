@@ -24,6 +24,7 @@ const setup = (
     readonly downloaded?: Iterable<string>;
     readonly ackDeadlineMs?: number;
     readonly connected?: boolean;
+    readonly inJam?: boolean;
   } = {},
 ) => {
   const server = recordingServer();
@@ -39,6 +40,7 @@ const setup = (
     clock,
     random: () => 0.5,
     ackDeadlineMs: options.ackDeadlineMs ?? ACK_DEADLINE_MS,
+    inJam: () => options.inJam ?? false,
   });
 
   server.state.connected = options.connected ?? true;
@@ -191,6 +193,35 @@ describe("a command the server doesn't answer", () => {
       playing: true,
       queue: [{ id: "a" }, { id: "b" }],
     });
+  });
+
+  it("leaves a session named on another device with the server for a move here and in a Jam", async () => {
+    const elsewhere = {
+      id: laptop,
+      name: "Laptop",
+      kind: "web",
+      lastSeenAt: 0,
+      online: true,
+    } as const;
+
+    const playing = sessionOf(["a", "b"], { activeDevice: elsewhere, playing: true });
+    const moved = setup();
+
+    moved.router.offerServer(playing);
+    moved.server.setConnected(false);
+    void moved.router.run("playback.transfer", { deviceId: phone.id });
+    moved.clock.advance(ACK_DEADLINE_MS * 2);
+    await settle();
+    expect(moved.router.mode()).toBe("server");
+
+    const member = setup({ inJam: true });
+
+    member.router.offerServer(playing);
+    member.server.setConnected(false);
+    void member.router.run("playback.play", { trackIds: [TrackId.make("a")], deviceId: phone.id });
+    member.clock.advance(ACK_DEADLINE_MS * 2);
+    await settle();
+    expect(member.router.mode()).toBe("server");
   });
 
   it("keeps waiting for the server when the command can't run here", async () => {

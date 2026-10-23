@@ -140,6 +140,11 @@ export interface SessionRouterDeps {
   readonly random: () => number;
   /** Overrides `ACK_DEADLINE_MS`. */
   readonly ackDeadlineMs?: number;
+  /**
+   * Whether this device's user is in a Jam. The session may then be the host's, which a command
+   * started here never takes over. Defaults to no Jam.
+   */
+  readonly inJam?: () => boolean;
 }
 
 /** A session command sent to the server and not answered yet. */
@@ -152,17 +157,18 @@ interface Outstanding {
     state: LocalSessionState,
     context: LocalContext,
   ) => { readonly state: LocalSessionState; readonly ran: boolean; readonly answer: () => void };
-  /** The command starts playback on this device, so the session is this device's to take. */
+  /** The command plays songs on this device, so the session may be this device's to take. */
   readonly playsHere: boolean;
 }
 
 /**
  * Routes session commands to the server while it answers, and to this device's own session while
  * it doesn't. The session moves onto the device when the connection drops while the device plays
- * it, or when a command goes unanswered past the deadline and this device plays it, nothing
- * does, or the command starts playback here; never while it listens along to someone's Jam. When the connection is back it hands the
- * session back with `devices.reconcile`: the plays for history, then the queue, which the server
- * adopts while it still names this device active or the device still plays.
+ * it, or when a command goes unanswered past the deadline and this device plays it, nothing does,
+ * or the command plays songs here outside a Jam; never while it listens along to someone's Jam.
+ * When the connection is back it hands the session back with `devices.reconcile`: the plays for
+ * history, then the queue, which the server adopts while it still names this device active or the
+ * device still plays.
  */
 export class SessionRouter implements SessionPort {
   readonly #client: MusicClient;
@@ -173,6 +179,7 @@ export class SessionRouter implements SessionPort {
   readonly #clock: RouterClock;
   readonly #random: () => number;
   readonly #ackDeadlineMs: number;
+  readonly #inJam: () => boolean;
   readonly #listeners = new Set<() => void>();
   /** In the order they were sent, which is the order the session takes them in. */
   readonly #outstanding = new Set<Outstanding>();
@@ -205,6 +212,7 @@ export class SessionRouter implements SessionPort {
     this.#clock = deps.clock;
     this.#random = deps.random;
     this.#ackDeadlineMs = deps.ackDeadlineMs ?? ACK_DEADLINE_MS;
+    this.#inJam = deps.inJam ?? (() => false);
   }
 
   /** Where session commands go right now. */
@@ -388,7 +396,7 @@ export class SessionRouter implements SessionPort {
    * still out with the server run here first, in the order sent; each caller is answered from
    * here, a refusal included. On a dropped connection (`needed` null) only while this device plays
    * the session; for a command past its deadline also while nothing plays it or when the command
-   * starts playback here (another device may still be named, paused), and only when that
+   * plays songs here outside a Jam (another device may still be named), and only when that
    * command runs here, or it keeps waiting for the server. Returns whether the session moved.
    */
   #takeOver(needed: Outstanding | null): boolean {
@@ -397,7 +405,7 @@ export class SessionRouter implements SessionPort {
     if (this.#local !== null || shown === undefined || shown.following) return false;
     const active = shown.activeDevice?.id ?? null;
 
-    const claimed = needed?.playsHere === true;
+    const claimed = needed?.playsHere === true && !this.#inJam();
 
     if (active !== this.#device.id && !claimed && (needed === null || active !== null))
       return false;
@@ -636,17 +644,15 @@ export class SessionRouter implements SessionPort {
 }
 
 /**
- * Whether a command starts playback on `device`: playing songs on it, or moving playback to it.
- * Such a command may take the session over from another device that last played it.
+ * Whether a command plays songs on `device`, which may take the session over from another device
+ * that last played it. Moving playback here doesn't: the session would come over paused, at the
+ * other device's last report, while that device may still be playing.
  */
 const playsOn = <Name extends SessionMutation>(
   name: Name,
   args: CommandArgs<Name>,
   device: DeviceId,
-): boolean =>
-  (name === "playback.play" || name === "playback.transfer") &&
-  "deviceId" in args &&
-  args.deviceId === device;
+): boolean => name === "playback.play" && "deviceId" in args && args.deviceId === device;
 
 const isPlayReport = (name: SessionMutation): name is "playback.report" =>
   name === "playback.report";
