@@ -8,6 +8,7 @@ import { loadDeviceId, readItem, writeItem } from "@music/player/device-identity
 import type { KeyValueStorage } from "@music/player/device-identity";
 import type { NowPlayingControls } from "@music/player/playback-controller";
 import type { StreamQuality } from "@music/player/stream-quality";
+import { Option, Schema } from "effect";
 import { requireNativeModule } from "expo";
 import type { EventEmitter } from "expo";
 import { randomUUID } from "expo-crypto";
@@ -46,11 +47,15 @@ export const saveQuality = (quality: StreamQuality): void => {
 };
 
 /** The quality songs download in: AAC 320 kbps, or the original file when this iPhone plays it. */
-export type DownloadQuality = "high" | "lossless";
+const DownloadQuality = Schema.Literals(["high", "lossless"]);
 
-/** The saved download quality; `high` until someone picks lossless. */
+export type DownloadQuality = typeof DownloadQuality.Type;
+
+const decodeDownloadQuality = Schema.decodeUnknownOption(DownloadQuality);
+
+/** The saved download quality; `high` until someone picks lossless, or when the value is unknown. */
 export const loadDownloadQuality = (): DownloadQuality =>
-  readItem(storage, DOWNLOAD_QUALITY_KEY) === "lossless" ? "lossless" : "high";
+  Option.getOrElse(decodeDownloadQuality(readItem(storage, DOWNLOAD_QUALITY_KEY)), () => "high");
 
 /** Calls `listener` each time the app comes back to the screen. */
 export const onForeground = (listener: () => void): (() => void) => {

@@ -15,7 +15,7 @@ import { VaultChange } from "@music/sdk/downloads";
 import type { StoredArt, StoredCopy, StoredPin, VaultStore, VaultView } from "@music/sdk/downloads";
 import { Option, Schema } from "effect";
 import { requireNativeModule } from "expo";
-import { CryptoDigestAlgorithm, digestStringAsync } from "expo-crypto";
+import { CryptoDigestAlgorithm, digestStringAsync, randomUUID } from "expo-crypto";
 import { Directory, File, Paths } from "expo-file-system";
 import { openDatabaseAsync } from "expo-sqlite";
 import type { SQLiteDatabase } from "expo-sqlite";
@@ -208,10 +208,19 @@ const commit = async (db: SQLiteDatabase, change: VaultChange): Promise<void> =>
 /** A vault file as `File`; vault files are named `<directory>/<name>`. */
 const fileIn = (vault: Directory, file: string): File => new File(vault, ...file.split("/"));
 
-/** Deletes servers' directories a wipe renamed but didn't finish deleting. */
+/**
+ * Deletes servers' directories a wipe renamed but didn't finish deleting. Each is tried on its
+ * own; one that can't go yet is tried again at the next open or wipe.
+ */
 const sweepWiped = (downloads: Directory): void => {
   for (const entry of downloads.list()) {
-    if (entry instanceof Directory && entry.name.startsWith(WIPED)) entry.delete();
+    if (!(entry instanceof Directory) || !entry.name.startsWith(WIPED)) continue;
+
+    try {
+      entry.delete();
+    } catch {
+      // Left for the next sweep.
+    }
   }
 };
 
@@ -231,26 +240,29 @@ export const openVault = async (origin: ServerOrigin, account: UserId): Promise<
   }
 
   const db = await openDatabaseAsync("vault.db", undefined, vault.uri);
-  await db.execAsync(SCHEMA);
+
+  try {
+    await db.execAsync(SCHEMA);
+  } catch (error) {
+    await db.closeAsync();
+    throw error;
+  }
 
   return {
     load: () => load(db),
     commit: (change) => commit(db, change),
-    files: () =>
-      Promise.resolve(
-        FILE_DIRECTORIES.flatMap((name) =>
-          new Directory(vault, name)
-            .list()
-            .flatMap((entry) => (entry instanceof File ? [`${name}/${entry.name}`] : [])),
-        ),
+    // Async, so a file system error rejects rather than throwing at the caller.
+    files: async () =>
+      FILE_DIRECTORIES.flatMap((name) =>
+        new Directory(vault, name)
+          .list()
+          .flatMap((entry) => (entry instanceof File ? [`${name}/${entry.name}`] : [])),
       ),
     uri: (file) => fileIn(vault, file).uri,
-    remove: (file) => {
+    remove: async (file) => {
       const found = fileIn(vault, file);
 
       if (found.exists) found.delete();
-
-      return Promise.resolve();
     },
     freeBytes: () => Paths.availableDiskSpace,
     close: () => db.closeAsync(),
@@ -266,6 +278,7 @@ export const wipeDownloads = async (origin: ServerOrigin): Promise<void> => {
   const server = await serverDirectory(origin);
 
   if (!server.exists) return;
-  server.rename(`${WIPED}${server.name}`);
+  // A unique name: an earlier wipe's directory may still be waiting to be deleted.
+  server.rename(`${WIPED}${server.name}-${randomUUID()}`);
   sweepWiped(downloadsDirectory());
 };

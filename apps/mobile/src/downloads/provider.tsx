@@ -35,6 +35,7 @@ import type { ReactNode } from "react";
 
 import { expoTransfer } from "./expo-transfer";
 import { openVault } from "./expo-vault";
+import type { ExpoVault } from "./expo-vault";
 import { loadDownloadQuality, loadPhoneId } from "../player/native-host";
 import type { DownloadQuality } from "../player/native-host";
 import { playsOnIos } from "../player/player-state";
@@ -147,7 +148,17 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     const opening = openVault(origin, userId);
 
     const run = async (): Promise<void> => {
-      const vault = await opening;
+      let vault: ExpoVault;
+
+      try {
+        vault = await opening;
+      } catch (error) {
+        // The phone streams as before; downloads come back when the app opens the vault again.
+        const reason = error instanceof Error ? error.message : "unknown error";
+        console.warn(`Downloads are unavailable: the vault didn't open (${reason}).`);
+
+        return;
+      }
 
       if (closed) return;
 
