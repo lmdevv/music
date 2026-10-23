@@ -10,6 +10,8 @@
     "./engine": "./src/engine.ts",
     "./playback-controller": "./src/playback-controller.ts",
     "./react": "./src/react.tsx",
+    "./session-router": "./src/session-router.ts",
+    "./source-resolver": "./src/source-resolver.ts",
     "./stream-offset": "./src/stream-offset.ts",
     "./stream-quality": "./src/stream-quality.ts"
   },
