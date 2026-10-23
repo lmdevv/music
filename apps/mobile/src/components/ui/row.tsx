@@ -36,12 +36,18 @@ export interface RowProps {
   readonly leading?: RowLeading;
   /** The trailing lane: `RowChevron`, `RowCheck`, `RowMore`, or nothing. */
   readonly trailing?: ReactNode;
+  /**
+   * A muted figure before the trailing lane: a count at 14/20 (`callout`, D09) or a size in mono
+   * (D10). With a detail and no `trailing`, the row drops the empty lane and the figure meets the
+   * edge. VoiceOver skips it, so put it in `accessibilityLabel`.
+   */
+  readonly detail?: { readonly text: string; readonly variant: "callout" | "mono" } | undefined;
   /** The playing row: accent title at semibold. */
   readonly active?: boolean;
   readonly onPress?: (() => void) | undefined;
   readonly onLongPress?: (() => void) | undefined;
   /** Read instead of the title and subtitle, when they don't say enough. */
-  readonly accessibilityLabel?: string;
+  readonly accessibilityLabel?: string | undefined;
 }
 
 function Leading({ leading }: { readonly leading: RowLeading }) {
@@ -70,6 +76,7 @@ export function Row({
   subtitleGlyph,
   leading,
   trailing,
+  detail,
   active = false,
   onPress,
   onLongPress,
@@ -124,7 +131,21 @@ export function Row({
           {main}
         </Pressable>
       )}
-      <View className="w-8 shrink-0 items-center">{trailing}</View>
+      {detail === undefined ? null : (
+        // The row's label carries the figure, so VoiceOver doesn't stop on it twice.
+        <Text
+          variant={detail.variant}
+          tone="muted"
+          className="shrink-0"
+          accessibilityElementsHidden
+          importantForAccessibility="no"
+        >
+          {detail.text}
+        </Text>
+      )}
+      {detail !== undefined && trailing === undefined ? null : (
+        <View className="w-8 shrink-0 items-center">{trailing}</View>
+      )}
     </View>
   );
 }
