@@ -119,6 +119,31 @@ describe("vaultSessions", () => {
     expect(JSON.parse(rows.get("server") ?? "")).toMatchObject({ positionMs: 3 });
   });
 
+  it("still writes the newest snapshot when the write before it failed", async () => {
+    const { db, rows } = memoryDatabase();
+    let failures = 1;
+
+    const flaky: SessionDatabase = {
+      getAllAsync: db.getAllAsync,
+      runAsync: (sql, params) => {
+        if (failures === 0) return db.runAsync(sql, params);
+        failures -= 1;
+
+        return Promise.reject(new Error("The disk is full"));
+      },
+    };
+
+    const store = vaultSessions(flaky);
+
+    const saved = await Promise.allSettled([
+      store.saveServer(serverAt(1)),
+      store.saveServer(serverAt(2)),
+    ]);
+
+    expect(saved.map((result) => result.status)).toEqual(["rejected", "rejected"]);
+    expect(JSON.parse(rows.get("server") ?? "")).toMatchObject({ positionMs: 2 });
+  });
+
   it("reads a row it can't parse as nothing stored", async () => {
     const { db, rows } = memoryDatabase();
 

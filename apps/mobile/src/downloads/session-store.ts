@@ -67,14 +67,18 @@ export const vaultSessions = (db: SessionDatabase): SessionStore => {
 
     waiting = null;
 
+    // A failed write still lets a newer snapshot through; the failure reaches the callers after.
+    let failure: Error | null = null;
+
     try {
       await save(db, "server", encodeServer(state));
     } catch (error) {
-      writing = null;
-      throw error;
+      failure = error instanceof Error ? error : new Error(String(error));
     }
 
     await writeServer();
+
+    if (failure !== null) throw failure;
   };
 
   return {
