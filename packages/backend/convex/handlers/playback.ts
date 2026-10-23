@@ -1,4 +1,4 @@
-import type { PlaybackPosition, PlaybackQueue } from "@music/commands/models";
+import type { OfflinePlay, PlaybackPosition, PlaybackQueue } from "@music/commands/models";
 import {
   MAX_QUEUE,
   addedOrder,
@@ -466,6 +466,128 @@ const restartSession = async (
   const now = Date.now();
 
   await ctx.db.patch(session._id, { positionMs: 0, updatedAt: now, movedAt: now, ...fields });
+};
+
+/**
+ * How many of the viewer's latest plays are checked for ones a device already handed back, so a
+ * device that sends its offline plays again (its first call's answer was lost) records them once.
+ */
+const RECENT_PLAYS_CHECKED = 500;
+
+const playKey = (trackId: Id<"tracks">, playedAt: number): string => `${trackId}@${playedAt}`;
+
+/**
+ * The songs among `ids` that exist and the viewer may read, by the ID as given. IDs that name no
+ * song are left out rather than failing: a device that played offline may name songs removed or
+ * hidden since.
+ */
+const readableById = async (
+  ctx: ReadCtx,
+  viewer: Viewer,
+  ids: ReadonlyArray<string>,
+): Promise<ReadonlyMap<string, Doc<"tracks">>> => {
+  const parsed = [...new Set(ids)].flatMap((id) => {
+    const trackId = ctx.db.normalizeId("tracks", id);
+
+    return trackId === null ? [] : [[id, trackId] as const];
+  });
+
+  const tracks = await Promise.all(parsed.map(([, trackId]) => ctx.db.get(trackId)));
+
+  return new Map(
+    parsed.flatMap(([id], position) => {
+      const track = tracks[position] ?? null;
+
+      return track !== null && canRead(viewer, track.libraryId) ? [[id, track] as const] : [];
+    }),
+  );
+};
+
+/**
+ * Records the plays a device made offline, in the order given, at the times it played them.
+ * Songs the viewer can't read are skipped, and so is a play history already holds from the same
+ * device for the same song at the same time.
+ */
+const recordOfflinePlays = async (
+  ctx: MutationCtx,
+  viewer: Viewer,
+  deviceId: string,
+  plays: ReadonlyArray<OfflinePlay>,
+): Promise<void> => {
+  const [recent, tracks] = await Promise.all([
+    ctx.db
+      .query("history")
+      .withIndex("by_user", (q) => q.eq("userId", viewer.id))
+      .order("desc")
+      .take(RECENT_PLAYS_CHECKED),
+    readableById(
+      ctx,
+      viewer,
+      plays.map((play) => play.trackId),
+    ),
+  ]);
+
+  const recorded = new Set(
+    recent.flatMap((play) =>
+      play.deviceId === deviceId && play.playedAt !== undefined
+        ? [playKey(play.trackId, play.playedAt)]
+        : [],
+    ),
+  );
+
+  // Keyed the same way, so a play the batch lists twice is recorded once, where it first appears.
+  const offered = new Map(
+    plays.flatMap((play) => {
+      const track = tracks.get(play.trackId);
+
+      return track === undefined
+        ? []
+        : [[playKey(track._id, play.playedAt), { track, playedAt: play.playedAt }] as const];
+    }),
+  );
+
+  await Promise.all(
+    [...offered].flatMap(([key, { track, playedAt }]) =>
+      recorded.has(key)
+        ? []
+        : [
+            ctx.db.insert("history", {
+              userId: viewer.id,
+              trackId: track._id,
+              albumId: track.albumId,
+              deviceId,
+              playedAt,
+            }),
+          ],
+    ),
+  );
+};
+
+/**
+ * The songs of a device's queue the viewer can play, in order: IDs that name no song, songs they
+ * can't read, and songs whose file is missing drop out. `index` moves to the same song, or to the
+ * next one kept. Null when none is left.
+ */
+const resumableTracks = async (
+  ctx: ReadCtx,
+  viewer: Viewer,
+  ids: ReadonlyArray<string>,
+  index: number,
+): Promise<{ readonly ids: Array<Id<"tracks">>; readonly index: number } | null> => {
+  const readable = await readableById(ctx, viewer, ids);
+
+  const kept = ids.map((id) => {
+    const track = readable.get(id);
+
+    return track === undefined || track.missing ? null : track._id;
+  });
+
+  const playable = kept.filter((id) => id !== null);
+
+  if (playable.length === 0) return null;
+  const before = kept.slice(0, index).filter((id) => id !== null).length;
+
+  return { ids: playable, index: Math.min(before, playable.length - 1) };
 };
 
 export const playbackQueries = {
@@ -993,5 +1115,53 @@ export const playbackMutations = {
     }
 
     return ok;
+  },
+
+  "devices.reconcile": async (ctx, viewer, args) => {
+    await recordOfflinePlays(ctx, viewer, args.deviceId, args.plays);
+
+    // In someone else's Jam the session is the host's, not this device's to hand back.
+    if ((await resolvePlayback(ctx, viewer)).kind === "member") return { adopted: false };
+    const { resume } = args;
+
+    if (resume === null || (await findDevice(ctx, viewer.id, args.deviceId)) === null) {
+      return { adopted: false };
+    }
+
+    const session = await ensureSession(ctx, viewer.id);
+
+    // When another device took over meanwhile, a paused device leaves playback there; a playing
+    // one takes it back.
+    if (session.activeDeviceId !== args.deviceId && !resume.playing) return { adopted: false };
+    const playable = await resumableTracks(ctx, viewer, resume.trackIds, resume.index);
+
+    if (playable === null) return { adopted: false };
+    const stored = await storedQueue(ctx, viewer.id);
+    const created = newItems(stored, playable.ids, { kind: "person", userId: viewer.id });
+    const order = playOrder(created.items, playable.index, false, Math.random);
+
+    await saveTopped(ctx, viewer, {
+      ...stored,
+      ...order,
+      shuffle: resume.shuffle,
+      repeat: resume.repeat,
+      // The device sends only its play order, so turning shuffle off later keeps that order.
+      unshuffled: undefined,
+      nextItemId: created.nextItemId,
+      // The device counted the current song's play offline, so its next report must not.
+      reportedTrackId: order.items[order.index]?.trackId,
+    });
+
+    const now = Date.now();
+
+    await ctx.db.patch(session._id, {
+      activeDeviceId: args.deviceId,
+      positionMs: resume.positionMs,
+      playing: resume.playing,
+      updatedAt: now,
+      movedAt: now,
+    });
+
+    return { adopted: true };
   },
 } satisfies Partial<MutationHandlers>;

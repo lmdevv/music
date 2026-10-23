@@ -373,6 +373,12 @@ export default defineSchema({
     trackId: v.id("tracks"),
     albumId: v.id("albums"),
     deviceId: v.string(),
+    /**
+     * When the song started, by the device's clock; set only on plays a device recorded offline.
+     * Others started when the row was made, so readers show `playedAt ?? _creationTime`. The
+     * order stays by creation: offline plays land in history when the device reconnects.
+     */
+    playedAt: v.optional(v.number()),
   })
     .index("by_user", ["userId"])
     .index("by_track", ["trackId"]),
