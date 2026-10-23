@@ -8,6 +8,7 @@ import { router } from "expo-router";
 import { Heart, ListMusic, Plus, Users } from "lucide-react-native";
 import { useState } from "react";
 
+import { OfflineNotice } from "@/components/states/offline-notice";
 import { Button } from "@/components/ui/button";
 import { ChipGroup } from "@/components/ui/chip";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -112,6 +113,7 @@ export default function Playlists() {
       title="Playlists"
       action={<IconButton icon={Plus} label="New playlist" onPress={openNew} />}
     >
+      <OfflineNotice variant="card" className="mb-1" />
       <ChipGroup label="Show" options={SHELVES} value={shelf} onChange={setShelf} />
       {shelf === "yours" ? <Yours /> : <Shared />}
     </TabRoot>

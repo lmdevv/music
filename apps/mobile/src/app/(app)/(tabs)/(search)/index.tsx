@@ -24,6 +24,7 @@ import { usePlayList } from "@/components/browse/play";
 import { useRecentSearches } from "@/components/browse/recent-searches-store";
 import { useOnSearchActivate } from "@/components/browse/search-activation";
 import { AlbumRow, ArtistRow, TrackRow, openAlbum, openArtist } from "@/components/browse/rows";
+import { OfflineNotice } from "@/components/states/offline-notice";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ChipGroup } from "@/components/ui/chip";
@@ -330,18 +331,17 @@ export default function Search() {
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
-          searching ? (
-            results === undefined || foundNothing(results) ? null : (
-              <View className="px-mobile-edge">
-                <ChipGroup
-                  label="Show"
-                  options={SEARCH_FILTERS}
-                  value={filter}
-                  onChange={setFilter}
-                />
-              </View>
-            )
-          ) : null
+          <View className="px-mobile-edge">
+            <OfflineNotice variant="card" className="mb-1" />
+            {searching && results !== undefined && !foundNothing(results) ? (
+              <ChipGroup
+                label="Show"
+                options={SEARCH_FILTERS}
+                value={filter}
+                onChange={setFilter}
+              />
+            ) : null}
+          </View>
         }
         ListFooterComponent={
           <>

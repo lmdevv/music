@@ -11,6 +11,7 @@ import { AlbumRail } from "@/components/browse/album-rail";
 import { usePlayList } from "@/components/browse/play";
 import { TrackRow } from "@/components/browse/rows";
 import { EmptyHome, HomeSkeleton, MoreOnTheWay, ScanNotice } from "@/components/states/home-states";
+import { OfflineNotice } from "@/components/states/offline-notice";
 import { SectionHeader } from "@/components/ui/section-header";
 import { TabRoot } from "@/components/ui/tab-root";
 import { distinctSongs } from "@/lib/history";
@@ -59,6 +60,7 @@ export default function Home() {
 
   return (
     <TabRoot title="Home">
+      <OfflineNotice variant="card" className="mb-1" />
       {home === undefined ? (
         <HomeSkeleton />
       ) : home.stats.tracks === 0 ? (

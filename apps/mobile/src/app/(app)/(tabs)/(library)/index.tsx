@@ -20,6 +20,7 @@ import {
 import type { LucideIcon } from "lucide-react-native";
 
 import { LinePlaceholder } from "@/components/states/home-states";
+import { OfflineNotice } from "@/components/states/offline-notice";
 import { Row, RowChevron } from "@/components/ui/row";
 import { SectionHeader } from "@/components/ui/section-header";
 import { TabRoot } from "@/components/ui/tab-root";
@@ -72,6 +73,7 @@ export default function Library() {
           {librarySummary(home.stats)}
         </Text>
       )}
+      <OfflineNotice variant="card" className="pt-3 pb-2" />
       {CATEGORIES.map((category) => (
         <Row
           key={category.title}
