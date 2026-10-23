@@ -28,7 +28,7 @@ export { canToggleDownload, downloadStatus, trackDownloadState } from "./status"
 
 export type { DownloadStatus } from "./status";
 
-export { DownloadSync } from "./sync";
+export { DownloadSync, EMPTY_DOWNLOADS } from "./sync";
 
 export type {
   DownloadsSnapshot,

@@ -1,6 +1,6 @@
 /**
- * What `PlaybackController` needs from the iPhone: its device identity, the saved quality, the
- * lock screen, and the app's return to the foreground.
+ * What `PlaybackController` needs from the iPhone: its device identity, the saved qualities (for
+ * streaming and for downloads), the lock screen, and the app's return to the foreground.
  */
 import type { DeviceId } from "@music/commands/ids";
 import type { Track } from "@music/commands/models";
@@ -21,6 +21,8 @@ import { resolveMediaUrl } from "../lib/media-url";
 import type { ServerOrigin } from "../lib/server";
 
 const QUALITY_KEY = "music.streamQuality";
+
+const DOWNLOAD_QUALITY_KEY = "music.downloadQuality";
 
 /** The keychain, read and written synchronously: the controller needs its device ID at once. */
 const storage: KeyValueStorage = {
@@ -44,6 +46,13 @@ export const loadQuality = (): StreamQuality => parseQuality(readItem(storage, Q
 export const saveQuality = (quality: StreamQuality): void => {
   writeItem(storage, QUALITY_KEY, quality);
 };
+
+/** The quality songs download in: AAC 320 kbps, or the original file when this iPhone plays it. */
+export type DownloadQuality = "high" | "lossless";
+
+/** The saved download quality; `high` until someone picks lossless. */
+export const loadDownloadQuality = (): DownloadQuality =>
+  readItem(storage, DOWNLOAD_QUALITY_KEY) === "lossless" ? "lossless" : "high";
 
 /** Calls `listener` each time the app comes back to the screen. */
 export const onForeground = (listener: () => void): (() => void) => {

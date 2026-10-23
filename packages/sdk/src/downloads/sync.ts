@@ -119,7 +119,8 @@ interface Destination {
 
 type FetchArtStep = Data.TaggedEnum.Value<SyncStep, "FetchArt">;
 
-const INITIAL: DownloadsSnapshot = {
+/** The snapshot before a vault opened: nothing held, nothing known. */
+export const EMPTY_DOWNLOADS: DownloadsSnapshot = {
   ready: false,
   online: false,
   lowSpace: false,
@@ -188,7 +189,7 @@ export class DownloadSync {
   #planning = false;
   #replan = false;
   #wake: ReturnType<typeof setTimeout> | null = null;
-  #snapshot: DownloadsSnapshot = INITIAL;
+  #snapshot: DownloadsSnapshot = EMPTY_DOWNLOADS;
   readonly #listeners = new Set<() => void>();
 
   constructor(options: DownloadSyncOptions) {
