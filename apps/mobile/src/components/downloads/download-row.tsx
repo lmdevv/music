@@ -19,7 +19,7 @@ const ICONS = {
   download: CircleArrowDown,
   retry: RotateCw,
   remove: CircleMinus,
-  none: CircleCheck,
+  downloaded: CircleCheck,
 } as const;
 
 /** The rows for `target`; `onDone` closes the sheet, `onFailure` shows why adding failed. */
@@ -50,7 +50,7 @@ export function DownloadRow({
   };
 
   return downloadRows(download.status, download.canToggle).map((label) => {
-    const leading = { kind: "icon", icon: ICONS[label.action], tone } as const;
+    const leading = { kind: "icon", icon: ICONS[label.icon], tone } as const;
     const onPress = label.action === "none" ? undefined : () => void press(label);
 
     return label.subtitle === null ? (

@@ -11,9 +11,13 @@ import { formatBytes } from "./format";
 /** What pressing a row does. */
 type DownloadRowAction = "download" | "retry" | "remove" | "none";
 
-/** A row's words and its press. */
+/** The row's glyph, which says what the row is about even when pressing it does nothing. */
+type DownloadRowIcon = "download" | "retry" | "remove" | "downloaded";
+
+/** A row's words, glyph, and press. */
 export interface DownloadRowLabel {
   readonly action: DownloadRowAction;
+  readonly icon: DownloadRowIcon;
   readonly title: string;
   readonly subtitle: string | null;
 }
@@ -21,6 +25,7 @@ export interface DownloadRowLabel {
 /** Cancel download, with what is happening to the songs still to come. */
 const cancel = (subtitle: string | null): DownloadRowLabel => ({
   action: "remove",
+  icon: "remove",
   title: "Cancel download",
   subtitle,
 });
@@ -35,6 +40,7 @@ export const downloadRows = (
       none: (): ReadonlyArray<DownloadRowLabel> => [
         {
           action: canToggle ? "download" : "none",
+          icon: "download",
           title: "Download",
           subtitle: canToggle ? null : "Downloads need a connection to the server",
         },
@@ -53,6 +59,7 @@ export const downloadRows = (
       failed: ({ failed, total }): ReadonlyArray<DownloadRowLabel> => [
         {
           action: "retry",
+          icon: "retry",
           title: "Retry download",
           subtitle: `Couldn’t download ${String(failed)} of ${String(total)}`,
         },
@@ -61,15 +68,21 @@ export const downloadRows = (
       downloaded: ({ bytes }): ReadonlyArray<DownloadRowLabel> => [
         {
           action: "remove",
+          icon: "remove",
           title: "Remove download",
           subtitle: `Frees ${formatBytes(bytes)} on this iPhone`,
         },
       ],
       unavailable: (): ReadonlyArray<DownloadRowLabel> => [
-        { action: "remove", title: "Remove download", subtitle: "No longer available" },
+        {
+          action: "remove",
+          icon: "remove",
+          title: "Remove download",
+          subtitle: "No longer available",
+        },
       ],
       included: ({ by }): ReadonlyArray<DownloadRowLabel> => [
-        { action: "none", title: "Downloaded", subtitle: `With ${by.title}` },
+        { action: "none", icon: "downloaded", title: "Downloaded", subtitle: `With ${by.title}` },
       ],
     }),
   );
