@@ -4,6 +4,14 @@
  * what a device does about it, fetches finished files, and keeps the device's vault in line.
  * Only this entry point is public.
  */
+export { DownloadResult, fetchFinishedFile, FetchOutcome } from "./finished-file";
+
+export type { DownloadRequest, FinishedFileRequest, Transfer } from "./finished-file";
+
+export { offlineLibrary } from "./library";
+
+export type { OfflineAlbum, OfflineLibrary, OfflinePlaylist } from "./library";
+
 export { planSync, SyncStep, targetKey } from "./plan";
 
 export type {
@@ -15,3 +23,22 @@ export type {
   SyncPolicy,
   VaultView,
 } from "./plan";
+
+export { canToggleDownload, downloadStatus, trackDownloadState } from "./status";
+
+export type { DownloadStatus } from "./status";
+
+export { DownloadSync } from "./sync";
+
+export type {
+  DownloadsSnapshot,
+  DownloadSyncOptions,
+  DownloadUsage,
+  LocalCopy,
+  PinView,
+  TrackDownloadState,
+} from "./sync";
+
+export { VaultChange } from "./vault";
+
+export type { VaultStore } from "./vault";
