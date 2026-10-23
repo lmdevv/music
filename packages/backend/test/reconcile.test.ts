@@ -1,4 +1,4 @@
-import { DeviceId, TrackId } from "@music/commands/ids";
+import { DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
 import type { LibraryId } from "@music/commands/ids";
 import type { OfflinePlay, OfflineResume } from "@music/commands/models";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -78,16 +78,22 @@ const reconcile = (
   deviceId: DeviceId = PHONE,
 ) => user.music.run("devices.reconcile", { deviceId, plays, resume });
 
+/** A device's queue of `songs`, all of them entries it made, with autoplay off as in `setup`. */
 const resumeOf = (
   songs: ReadonlyArray<TrackId>,
   overrides: Partial<OfflineResume> = {},
 ): OfflineResume => ({
-  trackIds: songs,
+  items: songs.map((trackId, position) => ({
+    trackId,
+    itemId: QueueItemId.make(`local-${position + 1}`),
+  })),
   index: 0,
   positionMs: 0,
   playing: false,
   shuffle: false,
   repeat: "off",
+  volume: 1,
+  autoplay: false,
   ...overrides,
 });
 
@@ -363,6 +369,95 @@ describe("handing the queue back", () => {
       at(rock, 3),
       at(rock, 2),
     ]);
+  });
+});
+
+describe("what the device changed", () => {
+  it("keeps the entries the server still holds, so their IDs still name them", async () => {
+    const { listener, rock } = await setup();
+    await listener.music.run("playback.play", { trackIds: [...rock], deviceId: PHONE });
+    const before = (await listener.music.read("queue.list", {})).queue;
+    const second = before[1];
+    const third = before[2];
+
+    if (second === undefined || third === undefined) throw new Error("The queue is too short");
+
+    await reconcile(
+      listener,
+      [],
+      resumeOf([], {
+        items: [
+          { trackId: second.id, itemId: second.itemId },
+          { trackId: at(rock, 4), itemId: QueueItemId.make("local-1") },
+          { trackId: third.id, itemId: third.itemId },
+        ],
+      }),
+    );
+
+    const after = (await listener.music.read("queue.list", {})).queue;
+
+    expect(after.map((entry) => entry.id)).toEqual([second.id, at(rock, 4), third.id]);
+    expect([after[0]?.itemId, after[2]?.itemId]).toEqual([second.itemId, third.itemId]);
+    expect(before.map((entry) => entry.itemId)).not.toContain(after[1]?.itemId);
+
+    await listener.music.run("queue.remove", { itemId: third.itemId });
+    expect(await queueIds(listener)).toEqual([second.id, at(rock, 4)]);
+  });
+
+  it("takes the device's volume and autoplay setting", async () => {
+    const { listener, rock } = await setup();
+    await listener.music.run("playback.play", { trackIds: [...rock], deviceId: PHONE });
+
+    await reconcile(listener, [], resumeOf(rock.slice(0, 3), { volume: 0.25, autoplay: true }));
+    const state = await listener.music.read("playback.state", {});
+
+    expect({ volume: state.volume, autoplay: state.autoplay }).toEqual({
+      volume: 0.25,
+      autoplay: true,
+    });
+  });
+
+  it("starts the next song from its start when the one that played can't play here", async () => {
+    const { listener, rock, secret } = await setup();
+    await listener.music.run("playback.play", { trackIds: [...rock], deviceId: PHONE });
+
+    await reconcile(
+      listener,
+      [],
+      resumeOf([at(rock, 0), at(secret, 0), at(rock, 2)], {
+        index: 1,
+        positionMs: 90_000,
+        playing: true,
+      }),
+    );
+
+    const state = await listener.music.read("playback.state", {});
+
+    expect({ index: state.index, positionMs: state.positionMs }).toEqual({
+      index: 1,
+      positionMs: 0,
+    });
+
+    await listener.music.run("playback.report", {
+      deviceId: PHONE,
+      index: 1,
+      trackId: at(rock, 2),
+      positionMs: 100,
+      playing: true,
+    });
+
+    expect((await history(listener)).map((play) => play.trackId)).toEqual([at(rock, 2)]);
+  });
+
+  it("empties the server's queue when the device emptied its own", async () => {
+    const { listener, rock } = await setup();
+    await listener.music.run("playback.play", { trackIds: [...rock], deviceId: PHONE });
+
+    expect(await reconcile(listener, [], resumeOf([]))).toEqual({ adopted: true });
+
+    const state = await listener.music.read("playback.state", {});
+
+    expect({ queue: state.queue, playing: state.playing }).toEqual({ queue: [], playing: false });
   });
 });
 

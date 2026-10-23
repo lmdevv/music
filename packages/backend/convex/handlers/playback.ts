@@ -1,8 +1,14 @@
-import type { OfflinePlay, PlaybackPosition, PlaybackQueue } from "@music/commands/models";
+import type {
+  OfflinePlay,
+  OfflineResume,
+  PlaybackPosition,
+  PlaybackQueue,
+} from "@music/commands/models";
 import {
   MAX_QUEUE,
   addedOrder,
   isNewPlay,
+  isStaleReport,
   keptOrder,
   movedInOrder,
   nextIndex,
@@ -46,9 +52,6 @@ import { canRead } from "../lib/viewer";
 import type { ReadCtx, Viewer } from "../lib/viewer";
 import type { MutationHandlers, QueryHandlers } from "./types";
 import { ok } from "./types";
-
-/** How long after a command moves the queue a report naming another song counts as stale. */
-const MOVE_GRACE_MS = 3000;
 
 const GONE_MESSAGE = "That song is no longer in the queue";
 
@@ -563,31 +566,65 @@ const recordOfflinePlays = async (
   );
 };
 
+/** A device's offline queue as the server's entries, and where it stands in them. */
+interface ResumedQueue {
+  readonly items: ReadonlyArray<QueueItem>;
+  readonly index: number;
+  readonly nextItemId: number;
+  /** The entry that played on the device is still in the queue; otherwise `index` is the next. */
+  readonly current: boolean;
+}
+
 /**
- * The songs of a device's queue the viewer can play, in order: IDs that name no song, songs they
- * can't read, and songs whose file is missing drop out. `index` moves to the same song, or to the
- * next one kept. Null when none is left.
+ * A device's offline queue as server entries. Songs that name nothing, that the viewer can't
+ * read, or whose file is missing drop out, and `index` moves to the same entry or the next one
+ * kept. An entry the stored queue still holds under the same ID and song stays as it is, with who
+ * added it and whether autoplay did; the others become new entries the viewer added.
  */
-const resumableTracks = async (
+const resumedQueue = async (
   ctx: ReadCtx,
   viewer: Viewer,
-  ids: ReadonlyArray<string>,
-  index: number,
-): Promise<{ readonly ids: Array<Id<"tracks">>; readonly index: number } | null> => {
-  const readable = await readableById(ctx, viewer, ids);
+  stored: StoredQueue,
+  resume: OfflineResume,
+): Promise<ResumedQueue> => {
+  const readable = await readableById(
+    ctx,
+    viewer,
+    resume.items.map((entry) => entry.trackId),
+  );
 
-  const kept = ids.map((id) => {
-    const track = readable.get(id);
+  const held = new Map(stored.items.map((item) => [item.id, item]));
+  const items: Array<QueueItem> = [];
+  const kept: Array<boolean> = [];
+  let nextItemId = stored.nextItemId;
 
-    return track === undefined || track.missing ? null : track._id;
-  });
+  for (const entry of resume.items) {
+    const track = readable.get(entry.trackId);
+    const same = held.get(entry.itemId);
 
-  const playable = kept.filter((id) => id !== null);
+    kept.push(track !== undefined && !track.missing);
 
-  if (playable.length === 0) return null;
-  const before = kept.slice(0, index).filter((id) => id !== null).length;
+    if (track === undefined || track.missing) continue;
 
-  return { ids: playable, index: Math.min(before, playable.length - 1) };
+    if (same?.trackId === track._id) {
+      items.push(same);
+      // An ID the device lists twice names one entry; the second becomes a new one.
+      held.delete(same.id);
+      continue;
+    }
+
+    items.push({ id: String(nextItemId), trackId: track._id, addedBy: viewer.id, autoplay: false });
+    nextItemId += 1;
+  }
+
+  const before = kept.slice(0, resume.index).filter(Boolean).length;
+
+  return {
+    items,
+    index: Math.min(before, Math.max(0, items.length - 1)),
+    nextItemId,
+    current: kept[resume.index] === true,
+  };
 };
 
 export const playbackQueries = {
@@ -889,15 +926,7 @@ export const playbackMutations = {
     const { queue, index, track } = located;
     const now = Date.now();
 
-    // A report sent before the player saw a skip or jump would move the queue back to the old
-    // song; the player reports again once it plays the new one.
-    if (
-      index !== queue.index &&
-      session.movedAt !== undefined &&
-      now - session.movedAt < MOVE_GRACE_MS
-    ) {
-      return ok;
-    }
+    if (isStaleReport(index, queue.index, session.movedAt ?? null, now)) return ok;
 
     const newPlay = isNewPlay(
       { trackId: track._id, positionMs: args.positionMs, playing: args.playing },
@@ -1133,31 +1162,39 @@ export const playbackMutations = {
     // When another device took over meanwhile, a paused device leaves playback there; a playing
     // one takes it back.
     if (session.activeDeviceId !== args.deviceId && !resume.playing) return { adopted: false };
-    const playable = await resumableTracks(ctx, viewer, resume.trackIds, resume.index);
-
-    if (playable === null) return { adopted: false };
     const stored = await storedQueue(ctx, viewer.id);
-    const created = newItems(stored, playable.ids, { kind: "person", userId: viewer.id });
-    const order = playOrder(created.items, playable.index, false, Math.random);
+    const resumed = await resumedQueue(ctx, viewer, stored, resume);
+
+    // A queue none of whose songs can play here is not handed back; one emptied there is.
+    if (resumed.items.length === 0 && resume.items.length > 0) return { adopted: false };
+    const order = playOrder(resumed.items, resumed.index, false, Math.random);
+
+    // While shuffled, the entries the server knew keep their order from before shuffle.
+    const known = resume.shuffle ? keptOrder(stored.unshuffled ?? [], order.items) : [];
+    const listed = new Set(known);
 
     await saveTopped(ctx, viewer, {
       ...stored,
       ...order,
+      unshuffled: resume.shuffle
+        ? [...known, ...order.items.flatMap((item) => (listed.has(item.id) ? [] : [item.id]))]
+        : undefined,
       shuffle: resume.shuffle,
       repeat: resume.repeat,
-      // The device sends only its play order, so turning shuffle off later keeps that order.
-      unshuffled: undefined,
-      nextItemId: created.nextItemId,
-      // The device counted the current song's play offline, so its next report must not.
-      reportedTrackId: order.items[order.index]?.trackId,
+      autoplay: resume.autoplay,
+      nextItemId: resumed.nextItemId,
+      // The device counted the current song's play offline; a song that took its place has not
+      // played yet.
+      reportedTrackId: resumed.current ? order.items[order.index]?.trackId : undefined,
     });
 
     const now = Date.now();
 
     await ctx.db.patch(session._id, {
       activeDeviceId: args.deviceId,
-      positionMs: resume.positionMs,
-      playing: resume.playing,
+      positionMs: resumed.current ? resume.positionMs : 0,
+      playing: resume.playing && order.items.length > 0,
+      volume: resume.volume,
       updatedAt: now,
       movedAt: now,
     });

@@ -19,6 +19,7 @@ import {
   MAX_QUEUE,
   addedOrder,
   isNewPlay,
+  isStaleReport,
   keptOrder,
   movedInOrder,
   nextIndex,
@@ -68,6 +69,13 @@ export const LocalSessionState = Schema.Struct({
   nextItem: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   /** The song whose play was counted last; another report of it is the same play. */
   reportedTrackId: Schema.NullOr(TrackId),
+  /** When a command last moved the session to another entry, for `isStaleReport`. */
+  movedAt: Schema.NullOr(Timestamp),
+  /**
+   * A command ran here since the session left the server. Until one does, the server's session
+   * stands, and only the plays go back.
+   */
+  changed: Schema.Boolean,
   /** Plays to hand to the server's history, in the order they started. */
   plays: Schema.Array(OfflinePlay),
 });
@@ -147,23 +155,21 @@ type LocalHandlers = {
 
 const ok = { ok: true } as const;
 
-/** Where the session is at `now`, worked out as the server works out its own session's. */
 const live = (state: LocalSessionState, now: number): number =>
   state.playing ? state.positionMs + Math.max(0, now - state.updatedAt) : state.positionMs;
 
 const isPlayable = (entry: LocalEntry | undefined, context: LocalContext): boolean =>
   entry !== undefined && context.playable(entry.track.id) !== null;
 
-/** The session on entry `index`, from the start of its song, which counts as a new play. */
 const movedTo = (state: LocalSessionState, index: number, now: number): LocalSessionState => ({
   ...state,
   index,
   positionMs: 0,
   updatedAt: now,
+  movedAt: now,
   reportedTrackId: null,
 });
 
-/** New entries for songs added on this device, numbered on from the session's counter. */
 const newEntries = (
   state: LocalSessionState,
   tracks: ReadonlyArray<PlayableTrack>,
@@ -175,11 +181,7 @@ const newEntries = (
     track: { ...track, liked: false },
   }));
 
-/**
- * The songs among `trackIds` this device can play, in order, and where `index` lands among them:
- * the same song, or the next one kept. Songs without a copy drop out, as the server drops songs
- * whose file is missing.
- */
+/** Songs without a copy drop out, as the server drops songs whose file is missing. */
 const playableSongs = (trackIds: ReadonlyArray<TrackId>, index: number, context: LocalContext) => {
   const found = trackIds.map((trackId) => context.playable(trackId));
   const tracks = found.filter((track) => track !== null);
@@ -188,7 +190,6 @@ const playableSongs = (trackIds: ReadonlyArray<TrackId>, index: number, context:
   return { tracks, index: Math.min(before, Math.max(0, tracks.length - 1)) };
 };
 
-/** The entry `next` lands on: the next one this device can play, or null when none is left. */
 const nextPlayable = (state: LocalSessionState, context: LocalContext): number | null => {
   let index = nextIndex(state.index, state.items.length, state.repeat);
 
@@ -200,11 +201,6 @@ const nextPlayable = (state: LocalSessionState, context: LocalContext): number |
   return null;
 };
 
-/**
- * The entry `previous` lands on: the current one again once it has played past the restart
- * threshold, otherwise the nearest one before it this device can play, or the current one again
- * when there is none.
- */
 const previousPlayable = (state: LocalSessionState, context: LocalContext): number => {
   const { length } = state.items;
   let index = previousIndex(live(state, context.now), state.index, length, state.repeat);
@@ -262,7 +258,7 @@ const localHandlers: LocalHandlers = {
   "playback.next": (state, _args, context) => {
     const index = nextPlayable(state, context);
 
-    // The queue ran out: the server would try autoplay, which needs the server, so playback stops.
+    // Autoplay needs the server, so a queue that runs out here stops.
     return index === null
       ? step({ ...movedTo(state, state.index, context.now), playing: false }, ok)
       : step(movedTo(state, index, context.now), ok);
@@ -296,7 +292,6 @@ const localHandlers: LocalHandlers = {
 
   "playback.volume": (state, args) => step({ ...state, volume: args.volume }, ok),
 
-  // The session already plays here; moving it anywhere else needs the server.
   "playback.transfer": (state, args, context) =>
     args.deviceId === context.device.id ? step(state, ok) : Result.fail(LocalRefusal.Offline()),
 
@@ -310,7 +305,11 @@ const localHandlers: LocalHandlers = {
 
     const entry = state.items[index];
 
-    if (entry === undefined || (args.trackId !== undefined && args.trackId !== entry.track.id)) {
+    if (
+      entry === undefined ||
+      (args.trackId !== undefined && args.trackId !== entry.track.id) ||
+      isStaleReport(index, state.index, state.movedAt, context.now)
+    ) {
       return step(state, ok);
     }
 
@@ -404,7 +403,6 @@ const localHandlers: LocalHandlers = {
         ? -1
         : rest.findIndex((entry) => entry.id === args.afterItemId);
 
-    // The entry it should follow was removed meanwhile; moving anyway would guess the place.
     if (after === -1 && args.afterItemId !== undefined) return Result.fail(LocalRefusal.Gone());
     const items = [...rest.slice(0, after + 1), moving, ...rest.slice(after + 1)];
     const current = state.items[state.index];
@@ -457,7 +455,17 @@ export const stepLocal = <Name extends SessionMutation>(
 ): Result.Result<LocalStep<Name>, LocalRefusal> => {
   const handler: LocalHandlers[Name] = localHandlers[name];
 
-  return handler(state, args, context);
+  return Result.map(handler(state, args, context), (stepped) => ({
+    state: { ...stepped.state, changed: true },
+    result: stepped.result,
+  }));
+};
+
+/** The number in an entry ID made here (`local-<n>`), or 0 for any other ID. */
+const localNumber = (itemId: string): number => {
+  const match = /^local-(\d+)$/.exec(itemId);
+
+  return match?.[1] === undefined ? 0 : Number(match[1]);
 };
 
 const entryOf = (entry: QueueEntry): LocalEntry => ({
@@ -484,9 +492,12 @@ export const seedLocal = (server: PlaybackState, device: DeviceId): LocalSession
   updatedAt: server.updatedAt,
   playing: server.activeDevice?.id === device && server.playing,
   volume: server.volume,
-  nextItem: 1,
+  // The view may already hold entries made here, if the session left the server again quickly.
+  nextItem: 1 + Math.max(0, ...server.queue.map((entry) => localNumber(entry.itemId))),
   // The server counted the current song when it started; counting it again would double it.
   reportedTrackId: server.queue[server.index]?.id ?? null,
+  movedAt: null,
+  changed: false,
   plays: [],
 });
 
@@ -504,6 +515,8 @@ export const emptyLocal = (now: number): LocalSessionState => ({
   volume: 1,
   nextItem: 1,
   reportedTrackId: null,
+  movedAt: null,
+  changed: false,
   plays: [],
 });
 
@@ -534,15 +547,20 @@ export const localView = (state: LocalSessionState, device: LocalDevice): Playba
   autoplay: state.autoplay,
 });
 
-/** Where the session stands at `now`, as `devices.reconcile` takes it; null with nothing queued. */
+/**
+ * Where the session stands at `now`, as `devices.reconcile` takes it; null while no command ran
+ * here, so the server's session stands.
+ */
 export const offlineResume = (state: LocalSessionState, now: number): OfflineResume | null =>
-  state.items.length === 0
-    ? null
-    : {
-        trackIds: state.items.map((entry) => entry.track.id),
+  state.changed
+    ? {
+        items: state.items.map((entry) => ({ trackId: entry.track.id, itemId: entry.id })),
         index: state.index,
         positionMs: Math.round(live(state, now)),
         playing: state.playing,
         shuffle: state.shuffle,
         repeat: state.repeat,
-      };
+        volume: state.volume,
+        autoplay: state.autoplay,
+      }
+    : null;

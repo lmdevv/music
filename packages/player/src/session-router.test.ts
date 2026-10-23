@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { planEngine, sessionView } from "./engine-plan";
 import { seedLocal } from "./local-session";
 import { ACK_DEADLINE_MS, SessionRouter } from "./session-router";
-import type { StoredSessions } from "./session-router";
+import type { SessionStore, StoredSessions } from "./session-router";
 import {
   holding,
   laptop,
@@ -20,6 +20,7 @@ import {
 const setup = (
   options: {
     readonly stored?: StoredSessions;
+    readonly store?: SessionStore;
     readonly downloaded?: Iterable<string>;
     readonly ackDeadlineMs?: number;
     readonly connected?: boolean;
@@ -32,7 +33,7 @@ const setup = (
   const router = new SessionRouter({
     client: server.client,
     connection: server.connection,
-    store: memory.store,
+    store: options.store ?? memory.store,
     device: phone,
     playable: holding(options.downloaded ?? songIds),
     clock,
@@ -91,7 +92,12 @@ describe("taking the session over", () => {
     expect(memory.local()?.items.map((entry) => entry.track.id)).toEqual(["a", "b", "c"]);
   });
 
-  it("leaves the session with the server while another device plays it or this one follows", () => {
+  it("leaves the session with the server while it plays elsewhere, nowhere, or this one follows", () => {
+    const idle = setup();
+
+    idle.router.offerServer(sessionOf(["a"], { activeDevice: null, playing: false }));
+    idle.server.setConnected(false);
+
     const elsewhere = setup();
 
     elsewhere.router.offerServer(
@@ -106,7 +112,11 @@ describe("taking the session over", () => {
     following.router.offerServer(sessionOf(["a"], { following: true }));
     following.server.setConnected(false);
 
-    expect([elsewhere.router.mode(), following.router.mode()]).toEqual(["server", "server"]);
+    expect([idle.router.mode(), elsewhere.router.mode(), following.router.mode()]).toEqual([
+      "server",
+      "server",
+      "server",
+    ]);
   });
 });
 
@@ -169,23 +179,44 @@ describe("a command the server doesn't answer", () => {
     expect(server.names()).toEqual(["playback.transfer"]);
   });
 
-  it("applies here a command answered after the session moved here, and hands it back with it", async () => {
+  it("runs here, in the order sent, the commands still out when the connection drops", async () => {
     const { router, server } = setup();
 
     router.offerServer(sessionOf(["a", "b", "c"]));
     server.hold();
-    const next = router.run("playback.next", {});
+    const seek = router.run("playback.seek", { positionMs: 10_000 });
+    const transfer = router.run("playback.transfer", { deviceId: laptop });
 
     server.setConnected(false);
-    expect(router.getSnapshot().state?.index).toBe(0);
+    await expect(seek).resolves.toEqual({ ok: true });
+    expect(await shownFailure(transfer)).toBe("Not available offline");
+    expect(router.getSnapshot().state?.positionMs).toBe(10_000);
+
+    await router.run("playback.seek", { positionMs: 60_000 });
+    server.setConnected(true);
+    server.release();
+    await vi.waitFor(() => expect(router.mode()).toBe("server"));
+
+    // The server runs the old commands first; the hand-back after them carries the new seek.
+    expect(server.names()).toEqual(["playback.seek", "playback.transfer", "devices.reconcile"]);
+    expect(server.ran[2]?.args).toMatchObject({ resume: { positionMs: 60_000 } });
+  });
+
+  it("leaves the play of a report still out with the server to the server", async () => {
+    const { router, server } = setup();
+
+    router.offerServer(sessionOf(["a", "b"]));
+    server.hold();
+    const sent = router.run("playback.report", report(1, 0));
+
+    server.setConnected(false);
+    await sent;
+    expect(router.getSnapshot().state?.index).toBe(1);
 
     server.setConnected(true);
     server.release();
-    await expect(next).resolves.toEqual({ ok: true });
     await vi.waitFor(() => expect(router.mode()).toBe("server"));
-
-    expect(server.names()).toEqual(["playback.next", "devices.reconcile"]);
-    expect(server.ran[1]?.args).toMatchObject({ resume: { index: 1 } });
+    expect(server.ran[1]?.args).toMatchObject({ plays: [], resume: { index: 1 } });
   });
 });
 
@@ -209,12 +240,18 @@ describe("handing the session back", () => {
           deviceId: "phone",
           plays: [{ trackId: "b", playedAt: 1_010_000 }],
           resume: {
-            trackIds: ["a", "b", "c"],
+            items: [
+              { trackId: "a", itemId: "1" },
+              { trackId: "b", itemId: "2" },
+              { trackId: "c", itemId: "3" },
+            ],
             index: 1,
             positionMs: 4000,
             playing: true,
             shuffle: false,
             repeat: "off",
+            volume: 1,
+            autoplay: true,
           },
         },
       },
@@ -236,16 +273,15 @@ describe("handing the session back", () => {
       playedAt: 900_000 + n,
     }));
 
-    const { server } = setup({
-      stored: { local: { ...seedLocal(sessionOf(["a"]), phone.id), plays }, server: null },
-    });
+    const played = { ...seedLocal(sessionOf(["a"]), phone.id), plays, changed: true };
+    const { server } = setup({ stored: { local: played, server: null } });
 
     await vi.waitFor(() => expect(server.names()).toHaveLength(3));
 
     expect(server.ran.map(({ args }) => args)).toMatchObject([
       { plays: plays.slice(0, 200), resume: null },
       { plays: plays.slice(200, 400), resume: null },
-      { plays: plays.slice(400), resume: { trackIds: ["a"], index: 0 } },
+      { plays: plays.slice(400), resume: { items: [{ trackId: "a" }], index: 0 } },
     ]);
   });
 
@@ -297,16 +333,63 @@ describe("handing the session back", () => {
     server.release();
     await vi.waitFor(() => expect(router.mode()).toBe("server"));
 
+    // Nothing ran here when the first went out, so it handed back only plays.
     expect(server.ran.map(({ args }) => args)).toMatchObject([
-      { resume: { index: 0 } },
+      { resume: null },
       { resume: { index: 1 } },
+    ]);
+  });
+
+  it("shows the adopted session from a snapshot that came before the hand-back's answer", async () => {
+    const { router, server } = setup();
+
+    router.offerServer(sessionOf(["a", "b", "c"]));
+    server.setConnected(false);
+    await router.run("playback.next", {});
+    server.hold();
+    server.setConnected(true);
+    await settle();
+
+    // Convex shows a mutation's effect before it answers the mutation.
+    const adopted = sessionOf(["a", "b", "c"], { index: 1 });
+
+    router.offerServer(adopted);
+    server.release();
+    await vi.waitFor(() => expect(router.mode()).toBe("server"));
+    expect(router.getSnapshot().state).toBe(adopted);
+  });
+
+  it("keeps the plays of a session stored at launch when the store answers during a hand-back", async () => {
+    const earlier = { trackId: TrackId.make("a"), playedAt: 990_000 };
+    const stored = { ...seedLocal(sessionOf(["a"]), phone.id), plays: [earlier], changed: true };
+    const loaded = Promise.withResolvers<StoredSessions>();
+
+    const store: SessionStore = {
+      load: () => loaded.promise,
+      saveLocal: async () => {},
+      saveServer: async () => {},
+    };
+
+    const { router, server } = setup({ store });
+
+    router.offerServer(sessionOf(["a", "b"]));
+    server.setConnected(false);
+    await router.run("playback.report", report(1, 0));
+    server.setConnected(true);
+    await settle();
+    expect(server.names()).toEqual([]);
+
+    loaded.resolve({ local: stored, server: null });
+    await vi.waitFor(() => expect(router.mode()).toBe("server"));
+    expect(server.ran.map(({ args }) => args)).toMatchObject([
+      { plays: [earlier, { trackId: "b" }] },
     ]);
   });
 });
 
 describe("launching", () => {
   it("resumes a session played offline and never handed back, paused, and hands it back", async () => {
-    const played = { ...seedLocal(sessionOf(["a", "b"], { index: 1 }), phone.id), plays: [] };
+    const played = { ...seedLocal(sessionOf(["a", "b"], { index: 1 }), phone.id), changed: true };
 
     const stored = {
       local: { ...played, plays: [{ trackId: TrackId.make("a"), playedAt: 990_000 }] },

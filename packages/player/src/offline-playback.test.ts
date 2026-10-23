@@ -219,7 +219,11 @@ describe("playing without a connection", () => {
     expect(handedBack).toHaveLength(1);
     expect(handedBack[0]?.args).toMatchObject({
       plays: [{ trackId: "b" }],
-      resume: { trackIds: ["a", "b", "c"], index: 1, playing: true },
+      resume: {
+        items: [{ trackId: "a" }, { trackId: "b" }, { trackId: "c" }],
+        index: 1,
+        playing: true,
+      },
     });
     stop();
   });

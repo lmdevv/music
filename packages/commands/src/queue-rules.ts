@@ -17,6 +17,9 @@ const RESTART_THRESHOLD_MS = 3000;
  */
 const REPLAY_GAP_MS = 10_000;
 
+/** How long after a command moves the queue a report naming another entry counts as stale. */
+const MOVE_GRACE_MS = 3000;
+
 /** One queue entry as the rules see it: its own ID, and whether autoplay added it. */
 export interface QueueSlot {
   readonly id: string;
@@ -82,6 +85,18 @@ export const isNewPlay = (
 
   return report.playing && (report.trackId !== last.trackId || startedAgain);
 };
+
+/**
+ * Whether a position report naming the entry at `reported` was sent before the player saw a skip
+ * or jump that moved the session to `index` at `movedAt`. It is ignored: it would move the queue
+ * back, and the player reports again once it plays the new entry.
+ */
+export const isStaleReport = (
+  reported: number,
+  index: number,
+  movedAt: number | null,
+  now: number,
+): boolean => reported !== index && movedAt !== null && now - movedAt < MOVE_GRACE_MS;
 
 /**
  * Where songs added "to the end" go: after the entries people queued, before the first upcoming

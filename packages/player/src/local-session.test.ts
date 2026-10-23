@@ -245,23 +245,84 @@ describe("taking over and handing back", () => {
     expect(state.playing).toBe(false);
   });
 
-  it("hands back the queue in play order and where it stands", () => {
-    const state = run(
+  it("hands back the queue in play order, where it stands, and its settings", () => {
+    const skipped = run(
       "playback.next",
       seedLocal(server(["a", "b", "c"], { shuffle: true, repeat: "all" }), phone.id),
       {},
       contextOf(new Set(["a", "c"]), 50_000),
     );
 
+    const state = run("playback.volume", skipped, { volume: 0.4 }, contextOf(["a", "c"], 50_000));
+
     expect(offlineResume(state, 52_000)).toEqual({
-      trackIds: ["a", "b", "c"],
+      items: [
+        { trackId: "a", itemId: "1" },
+        { trackId: "b", itemId: "2" },
+        { trackId: "c", itemId: "3" },
+      ],
       index: 2,
       positionMs: 2000,
       playing: true,
       shuffle: true,
       repeat: "all",
+      volume: 0.4,
+      autoplay: true,
     });
-    expect(offlineResume({ ...state, items: [], index: 0 }, 52_000)).toBeNull();
+  });
+
+  it("hands back only plays until a command runs here, and an emptied queue as empty", () => {
+    const seeded = seedLocal(server(["a"]), phone.id);
+
+    const emptied = run(
+      "queue.remove",
+      seeded,
+      { itemId: QueueItemId.make("1") },
+      contextOf(["a"]),
+    );
+
+    expect(offlineResume(seeded, 52_000)).toBeNull();
+    expect(offlineResume(emptied, 52_000)).toMatchObject({ items: [], playing: false });
+  });
+
+  it("numbers new entries past the ones made here before the session last went back", () => {
+    const before = run(
+      "queue.add",
+      seedLocal(server(["a"]), phone.id),
+      { trackIds: [TrackId.make("b"), TrackId.make("c")] },
+      contextOf(songIds),
+    );
+
+    const again = seedLocal(localView(before, phone), phone.id);
+    const after = run("queue.add", again, { trackIds: [TrackId.make("d")] }, contextOf(songIds));
+
+    expect(after.items.map((entry) => entry.id)).toEqual(["1", "local-1", "local-2", "local-3"]);
+  });
+
+  it("ignores a report of the entry before a skip, sent before the player saw the skip", () => {
+    const skipped = run(
+      "playback.next",
+      seedLocal(server(["a", "b"]), phone.id),
+      {},
+      contextOf(songIds),
+    );
+
+    const early = run(
+      "playback.report",
+      skipped,
+      report(skipped, 0, 9000),
+      contextOf(songIds, 52_000),
+    );
+
+    const late = run(
+      "playback.report",
+      skipped,
+      report(skipped, 0, 9000),
+      contextOf(songIds, 53_001),
+    );
+
+    expect(early.index).toBe(1);
+    expect(late.index).toBe(0);
   });
 });
 
