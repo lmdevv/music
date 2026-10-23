@@ -2,8 +2,9 @@
  * The server is out of reach (D11 to D14; G04 on a phone with nothing downloaded). A tab root shows
  * the card under its title, a pushed page the one-line bar over its content; neither blocks, since
  * what is on screen and what was downloaded keep working. Convex reconnects on its own, and the
- * notice goes once it does.
+ * notice goes once it does. Playlists and Search, which hold nothing offline, show `OfflineState`.
  */
+import { router } from "expo-router";
 import { WifiOff } from "lucide-react-native";
 import { useEffect } from "react";
 import { Pressable, View } from "react-native";
@@ -20,6 +21,8 @@ import Animated, {
 } from "react-native-reanimated";
 import Svg, { Circle } from "react-native-svg";
 
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Icon } from "@/components/ui/icon";
 import { Text } from "@/components/ui/text";
 import { useHasDownloads } from "@/downloads";
@@ -175,5 +178,28 @@ export function OfflineNotice({ variant, className }: OfflineNoticeProps) {
         </View>
       )}
     </Animated.View>
+  );
+}
+
+/**
+ * A tab that shows nothing without the server, on a launch that never reached it: where to find
+ * the downloads instead, and Try again under the same rule as the notice. Nothing otherwise.
+ * Paper draws no artboard for it; it follows page 19's empty state.
+ */
+export function OfflineState({ body }: { readonly body: string }) {
+  const { notice, retry } = useOfflineNotice();
+
+  if (notice?.kind !== "offline") return null;
+
+  return (
+    <EmptyState
+      icon={WifiOff}
+      title={notice.title}
+      body={body}
+      primary={<Button label="Downloaded" onPress={() => router.push("/downloaded")} />}
+      secondary={
+        notice.retry ? <Button label="Try again" variant="secondary" onPress={retry} /> : undefined
+      }
+    />
   );
 }
