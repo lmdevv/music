@@ -3,10 +3,20 @@
  * platform implements `VaultStore`; `DownloadSync` is its one writer.
  */
 import type { DownloadPinId, TrackId } from "@music/commands/ids";
-import type { StreamProfile } from "@music/commands/models";
+import type { DownloadTarget, StreamProfile } from "@music/commands/models";
 import { Data } from "effect";
 
 import type { StoredArt, StoredCopy, StoredPin, VaultView } from "./plan";
+
+/** Everything the vault holds: what the planner reads, and the removals still to confirm. */
+export interface VaultRows extends VaultView {
+  /**
+   * Downloads this device removed while the server still listed them, by `targetKey`. Kept
+   * across restarts and sent to the server again at each start, so a removal made offline isn't
+   * undone by the next `downloads.list`.
+   */
+  readonly removals: ReadonlyMap<string, DownloadTarget>;
+}
 
 /** One change to the vault's rows, applied in one transaction. */
 export type VaultChange = Data.TaggedEnum<{
@@ -18,6 +28,8 @@ export type VaultChange = Data.TaggedEnum<{
   DeleteCopy: { readonly trackId: TrackId; readonly file: string };
   PutArt: { readonly art: StoredArt };
   DeleteArt: { readonly hash: string };
+  PutRemoval: { readonly key: string; readonly target: DownloadTarget };
+  DeleteRemoval: { readonly key: string };
 }>;
 
 /** Constructors and matchers for `VaultChange`. */
@@ -26,7 +38,7 @@ export const VaultChange = Data.taggedEnum<VaultChange>();
 /** A device's durable store for its downloads. Rows reach `DownloadSync` parsed. */
 export interface VaultStore {
   /** Every row. */
-  readonly load: () => Promise<VaultView>;
+  readonly load: () => Promise<VaultRows>;
   /** Applies one change in one transaction. */
   readonly commit: (change: VaultChange) => Promise<void>;
   /** Every file in the vault, relative to it, for the sweep at start. */
@@ -40,7 +52,7 @@ export interface VaultStore {
 }
 
 /** The view after `change`: what `DownloadSync` keeps in memory once the change committed. */
-export const applyChange = (view: VaultView, change: VaultChange): VaultView =>
+export const applyChange = (view: VaultRows, change: VaultChange): VaultRows =>
   VaultChange.$match(change, {
     PutPin: ({ pin }) => ({ ...view, pins: new Map(view.pins).set(pin.pin.id, pin) }),
     DeletePin: ({ pinId }) => {
@@ -64,10 +76,25 @@ export const applyChange = (view: VaultView, change: VaultChange): VaultView =>
 
       return { ...view, art };
     },
+    PutRemoval: ({ key, target }) => ({
+      ...view,
+      removals: new Map(view.removals).set(key, target),
+    }),
+    DeleteRemoval: ({ key }) => {
+      const removals = new Map(view.removals);
+      removals.delete(key);
+
+      return { ...view, removals };
+    },
   });
 
 /** Nothing held: a new vault. */
-export const emptyVault: VaultView = { copies: new Map(), pins: new Map(), art: new Map() };
+export const emptyVault: VaultRows = {
+  copies: new Map(),
+  pins: new Map(),
+  art: new Map(),
+  removals: new Map(),
+};
 
 /**
  * The file extension the platform's player needs for each type the media service sends. A

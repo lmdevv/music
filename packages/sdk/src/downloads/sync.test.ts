@@ -14,21 +14,20 @@ import type { DownloadManifest, DownloadPin, OfflineTrack } from "@music/command
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { makeMusicClient } from "../client";
-import type { CommandTransport } from "../client";
 import { FakeMedia, recordingTransport } from "./fake-media";
 import type { Mutation } from "./fake-media";
 import { DownloadResult } from "./finished-file";
 import type { Transfer } from "./finished-file";
 import { nodeTransfer } from "./node-transfer";
-import type { StoredCopy, VaultView } from "./plan";
+import type { StoredCopy } from "./plan";
 import { downloadStatus, trackDownloadState } from "./status";
 import { DownloadSync } from "./sync";
 import { applyChange, emptyVault, VaultChange } from "./vault";
-import type { VaultStore } from "./vault";
+import type { VaultRows, VaultStore } from "./vault";
 
 /** A vault whose rows live in memory and whose files live in a real directory. */
 class DirectoryVault implements VaultStore {
-  view: VaultView;
+  view: VaultRows;
   free: number | null = 64 * 1024 ** 3;
   /** Loads that fail before one works, as an unreadable database would. */
   failingLoads = 0;
@@ -36,12 +35,12 @@ class DirectoryVault implements VaultStore {
   failingCopies = 0;
   readonly #dir: string;
 
-  constructor(dir: string, view: VaultView = emptyVault) {
+  constructor(dir: string, view: VaultRows = emptyVault) {
     this.#dir = dir;
     this.view = view;
   }
 
-  load = (): Promise<VaultView> => {
+  load = (): Promise<VaultRows> => {
     if (this.failingLoads > 0) {
       this.failingLoads -= 1;
 
@@ -152,17 +151,17 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-const transport = (): CommandTransport => recordingTransport(mutations);
-
 /** What a test changes about the sync it starts. */
 interface SyncSetup {
   readonly transfer?: Transfer;
   readonly now?: () => number;
+  /** Mutations the server never answers, as while offline. */
+  readonly unanswered?: ReadonlySet<string>;
 }
 
 const started = (vault: VaultStore, setup: SyncSetup = {}): DownloadSync => {
   const sync = new DownloadSync({
-    client: makeMusicClient(transport()),
+    client: makeMusicClient(recordingTransport(mutations, setup.unanswered)),
     vault,
     transfer: setup.transfer ?? nodeTransfer,
     deviceId: DeviceId.make("phone"),
@@ -286,7 +285,7 @@ describe("DownloadSync", () => {
       expect(trackDownloadState(sync.getSnapshot(), UNFINISHED.id)).toBe("downloaded");
     }, SETTLE);
 
-    sync.remove(ALBUM.target);
+    await sync.remove(ALBUM.target);
 
     await vi.waitFor(async () => {
       expect(await exists("audio/t1.r1.aac-320.m4a")).toBe(false);
@@ -304,6 +303,54 @@ describe("DownloadSync", () => {
 
     await vi.waitFor(() => {
       expect(vault.view.pins.size).toBe(0);
+    }, SETTLE);
+  });
+
+  it("keeps a removal made offline across a restart, until the server stops listing it", async () => {
+    const vault = new DirectoryVault(dir);
+    const offline = started(vault, { unanswered: new Set(["downloads.remove"]) });
+    offline.setOnline(true);
+    offline.offerPins([ALBUM]);
+    offline.offerManifest(ALBUM.id, MANIFEST);
+
+    await vi.waitFor(() => {
+      expect(downloadStatus(offline.getSnapshot(), ALBUM.target)).toMatchObject({
+        kind: "downloaded",
+      });
+    }, SETTLE);
+
+    await offline.remove(ALBUM.target);
+
+    await vi.waitFor(async () => {
+      expect(await exists("audio/t1.r1.aac-320.m4a")).toBe(false);
+    }, SETTLE);
+
+    // iOS kills the app before the server ever heard of the removal.
+    stops.pop()?.();
+    const fetched = fetchesOf("t1");
+    mutations.length = 0;
+    const relaunched = started(vault);
+    relaunched.setOnline(true);
+    relaunched.offerPins([ALBUM]);
+    relaunched.offerManifest(ALBUM.id, MANIFEST);
+
+    await vi.waitFor(() => {
+      expect(mutations).toContainEqual({
+        name: "downloads.remove",
+        args: { deviceId: "phone", kind: "album", id: "blue-lines" },
+      });
+    }, SETTLE);
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 200);
+    });
+
+    expect(fetchesOf("t1")).toBe(fetched);
+    expect(downloadStatus(relaunched.getSnapshot(), ALBUM.target)).toEqual({ kind: "none" });
+    relaunched.offerPins([]);
+
+    await vi.waitFor(() => {
+      expect(vault.view.removals.size).toBe(0);
     }, SETTLE);
   });
 

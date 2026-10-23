@@ -41,4 +41,4 @@ export type {
 
 export { VaultChange } from "./vault";
 
-export type { VaultStore } from "./vault";
+export type { VaultRows, VaultStore } from "./vault";

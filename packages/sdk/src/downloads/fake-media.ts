@@ -122,9 +122,13 @@ export interface Mutation {
 
 /**
  * The server, at the Convex transport: `stream.url` signs a relative URL for the media service,
- * and every mutation is recorded in `mutations` and succeeds.
+ * and every mutation is recorded in `mutations` and succeeds. Mutations named in `unanswered` are
+ * recorded and never answered, as a Convex client queues them while offline.
  */
-export const recordingTransport = (mutations: Array<Mutation>): CommandTransport => ({
+export const recordingTransport = (
+  mutations: Array<Mutation>,
+  unanswered: ReadonlySet<string> = new Set(),
+): CommandTransport => ({
   query: (_reference, { args }) => {
     const { trackId, profile } = decodeStreamArgs(args);
 
@@ -137,6 +141,8 @@ export const recordingTransport = (mutations: Array<Mutation>): CommandTransport
   },
   mutation: (_reference, { name, args }) => {
     mutations.push({ name, args });
+
+    if (unanswered.has(name)) return new Promise(() => undefined);
 
     return Promise.resolve(name === "downloads.add" ? { pinId: "pin" } : { ok: true });
   },

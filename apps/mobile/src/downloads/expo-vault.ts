@@ -7,12 +7,13 @@ import { DownloadPinId, TrackId } from "@music/commands/ids";
 import type { UserId } from "@music/commands/ids";
 import {
   DownloadPin,
+  DownloadTarget,
   ManifestEntryState,
   OfflineTrack,
   StreamProfile,
 } from "@music/commands/models";
 import { VaultChange } from "@music/sdk/downloads";
-import type { StoredArt, StoredCopy, StoredPin, VaultStore, VaultView } from "@music/sdk/downloads";
+import type { StoredArt, StoredCopy, StoredPin, VaultRows, VaultStore } from "@music/sdk/downloads";
 import { Option, Schema } from "effect";
 import { requireNativeModule } from "expo";
 import { CryptoDigestAlgorithm, digestStringAsync, randomUUID } from "expo-crypto";
@@ -59,6 +60,10 @@ CREATE TABLE IF NOT EXISTS art (
   file TEXT NOT NULL,
   bytes INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS removals (
+  target_key TEXT PRIMARY KEY NOT NULL,
+  target TEXT NOT NULL
+);
 `;
 
 const CopyRow = Schema.Struct({
@@ -81,11 +86,20 @@ const PinRow = Schema.Struct({
 
 const ArtRow = Schema.Struct({ hash: Schema.String, file: Schema.String, bytes: Schema.Finite });
 
+const RemovalRow = Schema.Struct({
+  target_key: Schema.String,
+  target: Schema.fromJsonString(DownloadTarget),
+});
+
 const decodeCopy = Schema.decodeUnknownOption(CopyRow);
 
 const decodePin = Schema.decodeUnknownOption(PinRow);
 
 const decodeArt = Schema.decodeUnknownOption(ArtRow);
+
+const decodeRemoval = Schema.decodeUnknownOption(RemovalRow);
+
+const encodeRemoval = Schema.encodeSync(RemovalRow);
 
 const encodeCopy = Schema.encodeSync(CopyRow);
 
@@ -113,8 +127,8 @@ type SqlRow = Readonly<Record<string, string | number | null>>;
 /** Rows read with `decode`; a row that doesn't parse is deleted, and its file swept later. */
 const readRows = async <Row>(
   db: SQLiteDatabase,
-  table: "copies" | "pins" | "art",
-  key: "track_id" | "pin_id" | "hash",
+  table: "copies" | "pins" | "art" | "removals",
+  key: "track_id" | "pin_id" | "hash" | "target_key",
   decode: (row: SqlRow) => Option.Option<Row>,
 ): Promise<ReadonlyArray<Row>> => {
   const rows = await db.getAllAsync<SqlRow>(`SELECT * FROM ${table}`);
@@ -134,11 +148,12 @@ const readRows = async <Row>(
   return parsed;
 };
 
-const load = async (db: SQLiteDatabase): Promise<VaultView> => {
-  const [copies, pins, art] = await Promise.all([
+const load = async (db: SQLiteDatabase): Promise<VaultRows> => {
+  const [copies, pins, art, removals] = await Promise.all([
     readRows(db, "copies", "track_id", decodeCopy),
     readRows(db, "pins", "pin_id", decodePin),
     readRows(db, "art", "hash", decodeArt),
+    readRows(db, "removals", "target_key", decodeRemoval),
   ]);
 
   return {
@@ -162,6 +177,9 @@ const load = async (db: SQLiteDatabase): Promise<VaultView> => {
       ]),
     ),
     art: new Map(art.map((row): [string, StoredArt] => [row.hash, row])),
+    removals: new Map(
+      removals.map((row): [string, DownloadTarget] => [row.target_key, row.target]),
+    ),
   };
 };
 
@@ -202,6 +220,15 @@ const commit = async (db: SQLiteDatabase, change: VaultChange): Promise<void> =>
         art.bytes,
       ]),
     DeleteArt: ({ hash }) => db.runAsync("DELETE FROM art WHERE hash = ?", [hash]),
+    PutRemoval: ({ key, target }) => {
+      const row = encodeRemoval({ target_key: key, target });
+
+      return db.runAsync("INSERT OR REPLACE INTO removals (target_key, target) VALUES (?, ?)", [
+        row.target_key,
+        row.target,
+      ]);
+    },
+    DeleteRemoval: ({ key }) => db.runAsync("DELETE FROM removals WHERE target_key = ?", [key]),
   });
 };
 

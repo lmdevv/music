@@ -19,9 +19,9 @@ import type { MusicClient } from "../client";
 import { DownloadResult, fetchFinishedFile, FetchOutcome } from "./finished-file";
 import type { Transfer } from "./finished-file";
 import { planSync, SyncStep, targetKey } from "./plan";
-import type { StoredArt, StoredCopy, StoredMember, SyncPolicy, VaultView } from "./plan";
+import type { StoredArt, StoredCopy, StoredMember, SyncPolicy } from "./plan";
 import { applyChange, artFile, audioFile, emptyVault, VaultChange } from "./vault";
-import type { VaultStore } from "./vault";
+import type { VaultRows, VaultStore } from "./vault";
 
 /** Files fetched at once. Prepares on the server run one at a time anyway. */
 const MAX_TRANSFERS = 2;
@@ -171,15 +171,13 @@ const due = (failure: Failure | undefined, now: number): boolean =>
 export class DownloadSync {
   readonly #options: DownloadSyncOptions;
   readonly #sleep: (ms: number, signal: AbortSignal) => Promise<void>;
-  #view: VaultView = emptyVault;
+  #view: VaultRows = emptyVault;
   #ready = false;
   #stopped = false;
   #online = false;
   #lowSpace = false;
   #pins: Option.Option<ReadonlyArray<DownloadPin>> = Option.none();
   readonly #manifests = new Map<DownloadPinId, DownloadManifest>();
-  /** `targetKey`s this device removes; each goes once the server stops listing it. */
-  readonly #removing = new Set<string>();
   /** Copies that failed to play, no longer offered while their row is deleted. */
   readonly #discarded = new Set<TrackId>();
   readonly #fetching = new Map<TrackId, { readonly rev: string; readonly stop: AbortController }>();
@@ -214,9 +212,7 @@ export class DownloadSync {
   /** The device's downloads, as `downloads.list` answered for it. */
   offerPins(pins: ReadonlyArray<DownloadPin>): void {
     this.#pins = Option.some(pins);
-    const listed = new Set(pins.map((pin) => targetKey(pin.target)));
-
-    for (const key of this.#removing) if (!listed.has(key)) this.#removing.delete(key);
+    this.#clearConfirmedRemovals();
 
     for (const pinId of this.#manifests.keys()) {
       if (!pins.some((pin) => pin.id === pinId)) this.#manifests.delete(pinId);
@@ -251,34 +247,28 @@ export class DownloadSync {
       id: target.id,
     });
 
-    this.#removing.delete(targetKey(target));
+    const key = targetKey(target);
+
+    if (this.#view.removals.has(key)) await this.#commit(VaultChange.DeleteRemoval({ key }));
     this.#plan();
   }
 
   /**
-   * Removes `target` from this device: its files go at once, also offline, and the server is
-   * told when it answers. If the server refuses, the download comes back.
+   * Removes `target` from this device: its files go at once, also offline. The removal is kept in
+   * the vault and sent to the server until the server stops listing the download, also across
+   * restarts. If the server refuses it, the download comes back.
+   *
+   * @throws When the vault can't record the removal; nothing was removed then.
    */
-  remove(target: DownloadTarget): void {
-    const key = targetKey(target);
-    this.#removing.add(key);
+  async remove(target: DownloadTarget): Promise<void> {
+    await this.#commit(VaultChange.PutRemoval({ key: targetKey(target), target }));
     this.#plan();
-
-    this.#options.client
-      .run("downloads.remove", {
-        deviceId: this.#options.deviceId,
-        kind: target.kind,
-        id: target.id,
-      })
-      .catch(() => {
-        this.#removing.delete(key);
-        this.#plan();
-      });
+    this.#sendRemoval(target);
   }
 
   /** Removes every download from this device. */
-  removeAll(): void {
-    for (const { pin } of this.#snapshot.pins) this.remove(pin.target);
+  async removeAll(): Promise<void> {
+    await Promise.all(this.#snapshot.pins.map(({ pin }) => this.remove(pin.target)));
   }
 
   /** Tries the failed songs of `target` again now. */
@@ -359,7 +349,49 @@ export class DownloadSync {
 
     if (this.#stopped) return;
     this.#ready = true;
+    this.#clearConfirmedRemovals();
+
+    // Removals the app was killed before the server heard of: tell it again.
+    for (const target of this.#view.removals.values()) this.#sendRemoval(target);
     this.#plan();
+  }
+
+  /** Tells the server this device no longer keeps `target`; a refusal brings the download back. */
+  #sendRemoval(target: DownloadTarget): void {
+    const key = targetKey(target);
+
+    const send = async (): Promise<void> => {
+      try {
+        await this.#options.client.run("downloads.remove", {
+          deviceId: this.#options.deviceId,
+          kind: target.kind,
+          id: target.id,
+        });
+      } catch {
+        await this.#commit(VaultChange.DeleteRemoval({ key }));
+        this.#plan();
+      }
+    };
+
+    void send().catch(() => undefined);
+  }
+
+  /** Forgets removals the server confirmed by no longer listing their download. */
+  #clearConfirmedRemovals(): void {
+    if (!this.#ready) return;
+
+    const listed = Option.match(this.#pins, {
+      onNone: () => null,
+      onSome: (pins) => new Set(pins.map((pin) => targetKey(pin.target))),
+    });
+
+    if (listed === null) return;
+
+    for (const key of this.#view.removals.keys()) {
+      if (!listed.has(key)) {
+        void this.#commit(VaultChange.DeleteRemoval({ key })).catch(() => undefined);
+      }
+    }
   }
 
   /** Opens the vault, and tries again later when it can't be read (a full disk, say). */
@@ -412,7 +444,11 @@ export class DownloadSync {
   /** Plans once: applies the cheap steps together, then starts the fetches there is room for. */
   async #planOnce(): Promise<void> {
     const steps = planSync(
-      { pins: this.#pins, manifests: this.#manifests, removing: this.#removing },
+      {
+        pins: this.#pins,
+        manifests: this.#manifests,
+        removing: new Set(this.#view.removals.keys()),
+      },
       this.#view,
       this.#options.policy(),
     );
@@ -696,7 +732,7 @@ export class DownloadSync {
     );
 
     return listed.flatMap((listedPin) => {
-      if (this.#removing.has(targetKey(listedPin.target))) return [];
+      if (this.#view.removals.has(targetKey(listedPin.target))) return [];
       const manifest = this.#manifests.get(listedPin.id);
       const stored = this.#view.pins.get(listedPin.id);
 

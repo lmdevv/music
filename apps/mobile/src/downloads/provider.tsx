@@ -237,8 +237,7 @@ export const useDownload = (target: DownloadTarget): DownloadView => {
     toggle: async () => {
       if (sync === null || !canToggle) return;
 
-      if (status.kind === "none") await sync.request(target);
-      else sync.remove(target);
+      await (status.kind === "none" ? sync.request(target) : sync.remove(target));
     },
     retry: () => {
       sync?.retry(target);
