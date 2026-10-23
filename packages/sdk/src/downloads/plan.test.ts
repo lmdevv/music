@@ -18,7 +18,7 @@ const TRACKS = ["t1", "t2", "t3", "t4", "t5"].map((id) => TrackId.make(id));
 
 const PINS = ["p1", "p2", "p3"].map((id) => DownloadPinId.make(id));
 
-const track = (id: TrackId, title = "Song"): OfflineTrack => ({
+const track = (id: TrackId, title = "Song", artUrl: string | null = null): OfflineTrack => ({
   id,
   title,
   artist: "Massive Attack",
@@ -33,7 +33,7 @@ const track = (id: TrackId, title = "Song"): OfflineTrack => ({
   bitrate: null,
   sampleRate: null,
   bitDepth: null,
-  artUrl: null,
+  artUrl,
 });
 
 const pin = (id: DownloadPinId, available = true): DownloadPin =>
@@ -189,6 +189,26 @@ describe("planSync", () => {
     expect(steps).toContainEqual(
       SyncStep.Refresh({ copy: { ...copy(renamed, "r1"), track: track(renamed, "New title") } }),
     );
+  });
+
+  it("leaves a copy alone when only its cover's signed URL rotated", () => {
+    const album = pin(DownloadPinId.make("p1"));
+    const song = TrackId.make("t1");
+
+    const resigned: ManifestEntry = {
+      track: track(song, "Song", "/media/art/x?sig=new"),
+      rev: "r1",
+      artHash: null,
+      state: "fetchable",
+    };
+
+    const steps = planSync(
+      desiredOf([album], [manifest(album, [resigned])]),
+      vaultOf([copy(song, "r1")], [storedPin(album, [resigned])]),
+      policy,
+    );
+
+    expect(songSteps(steps)).toEqual([]);
   });
 
   it("keeps a playlist song whose file went missing, and fetches nothing for it", () => {

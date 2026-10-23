@@ -16,7 +16,7 @@ import type {
   OfflineTrack,
   StreamProfile,
 } from "@music/commands/models";
-import { Data, Equal, Option } from "effect";
+import { Data, Equal, Option, Struct } from "effect";
 
 /** A song this device holds: one file of one revision of the server's file, in one profile. */
 export interface StoredCopy {
@@ -104,6 +104,13 @@ export const SyncStep = Data.taggedEnum<SyncStep>();
 
 /** A download's song, album, or playlist as one string, for sets and maps. */
 export const targetKey = (target: DownloadTarget): string => `${target.kind}:${target.id}`;
+
+/**
+ * Whether two versions of a song's details match, leaving out the cover's URL: its signature
+ * rotates weekly, while `artHash` says whether the cover itself changed.
+ */
+const sameDetails = (left: OfflineTrack, right: OfflineTrack): boolean =>
+  Equal.equals(Struct.omit(left, ["artUrl"]), Struct.omit(right, ["artUrl"]));
 
 /** The members a manifest gives its pin. */
 const membersOf = (manifest: DownloadManifest): ReadonlyArray<StoredMember> =>
@@ -205,7 +212,7 @@ export const planSync = (
 
     cover(entry.artHash, entry.track.artUrl);
 
-    if (!Equal.equals(entry.track, copy.track) || entry.artHash !== copy.artHash) {
+    if (!sameDetails(entry.track, copy.track) || entry.artHash !== copy.artHash) {
       refreshes.push(
         SyncStep.Refresh({ copy: { ...copy, track: entry.track, artHash: entry.artHash } }),
       );
