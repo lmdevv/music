@@ -32,7 +32,7 @@ import { displayHost } from "@/lib/server";
 import { useThemeColor } from "@/lib/theme-color";
 import { useNowPlaying } from "@/player";
 import { useConnection } from "@/session/connection";
-import { useServerReach } from "@/session/server-reach";
+import { useNoticeReach } from "@/session/server-reach";
 
 /** Player states in which music is coming out of this phone, or about to. */
 const SOUNDING = new Set(["loading", "playing", "buffering"]);
@@ -50,7 +50,7 @@ interface OfflineNoticeView {
 
 /** Where the app stands with its server, as the notice words it. */
 const useOfflineNotice = (): OfflineNoticeView => {
-  const reach = useServerReach();
+  const reach = useNoticeReach();
   const hasDownloads = useHasDownloads();
   const { origin, reconnect } = useConnection();
   const { role, status } = useNowPlaying();

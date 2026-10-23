@@ -3,9 +3,11 @@
  * while it is out of reach (D11 to D14).
  */
 import { useConvexConnectionState } from "convex/react";
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
+import { reachOf } from "@/lib/server-reach";
+import type { Reach, ServerReach } from "@/lib/server-reach";
 import type { SettledPhase } from "@/lib/session-phase";
 
 /** How long a remembered server may stay silent at launch before G05 offers a way out. */
@@ -41,17 +43,8 @@ export const useSilentServer = (afterMs: number = SILENT_AFTER_MS): boolean => {
  */
 const RECONNECTING_AFTER_MS = 5000;
 
-/**
- * Whether the connection has been down, or a request waiting, for `RECONNECTING_AFTER_MS` after it
- * was up. A server that stops answering without closing the socket only shows as a closed socket
- * after Convex's 60 second silence check, so a request left waiting counts too: the player sends
- * one at least every 30 seconds.
- */
-const useReconnecting = (): boolean => {
-  const { isWebSocketConnected, hasEverConnected, hasInflightRequests } =
-    useConvexConnectionState();
-
-  const waiting = !isWebSocketConnected || hasInflightRequests;
+/** Whether `waiting` has held for `RECONNECTING_AFTER_MS`. */
+const useLate = (waiting: boolean): boolean => {
   const [late, setLate] = useState(false);
 
   useEffect(() => {
@@ -64,18 +57,10 @@ const useReconnecting = (): boolean => {
     return () => clearTimeout(timer);
   }, [waiting]);
 
-  return late && hasEverConnected;
+  return late;
 };
 
-/** How the app stands with its server. */
-export type ServerReach =
-  | "online"
-  /** The server hasn't answered since launch: the app opened on the downloads (D11). */
-  | "offline"
-  /** The server answered this launch, then went away; Convex calls it again on its own (G04, D14). */
-  | "reconnecting";
-
-const ServerReachContext = createContext<ServerReach | null>(null);
+const ServerReachContext = createContext<Reach | null>(null);
 
 /**
  * Works out, once for every screen below it, whether the server answers: `phase` is the phase on
@@ -88,23 +73,41 @@ export function ServerReachProvider({
   readonly phase: SettledPhase["kind"];
   readonly children: ReactNode;
 }) {
-  const reconnecting = useReconnecting();
+  const { isWebSocketConnected, hasEverConnected, hasInflightRequests } =
+    useConvexConnectionState();
 
-  const reach: ServerReach =
-    phase === "offline" ? "offline" : reconnecting ? "reconnecting" : "online";
+  const socketLost = useLate(!isWebSocketConnected) && hasEverConnected;
+  const stalled = useLate(!isWebSocketConnected || hasInflightRequests) && hasEverConnected;
+  const offlinePhase = phase === "offline";
 
-  return <ServerReachContext value={reach}>{children}</ServerReachContext>;
+  const value = useMemo(
+    () => reachOf({ offlinePhase, socketLost, stalled }),
+    [offlinePhase, socketLost, stalled],
+  );
+
+  return <ServerReachContext value={value}>{children}</ServerReachContext>;
 }
 
-/**
- * Whether the server answers, for the screens that change while it doesn't.
- *
- * @throws When used outside `ServerReachProvider`, a programming error.
- */
-export const useServerReach = (): ServerReach => {
+const useReach = (hook: string): Reach => {
   const reach = useContext(ServerReachContext);
 
-  if (reach === null) throw new Error("useServerReach needs ServerReachProvider above it");
+  if (reach === null) throw new Error(`${hook} needs ServerReachProvider above it`);
 
   return reach;
 };
+
+/**
+ * Whether the server answers, for the screens that change while it doesn't. A slow request alone
+ * doesn't count: a busy server, such as one mid-scan, still answers.
+ *
+ * @throws When used outside `ServerReachProvider`, a programming error.
+ */
+export const useServerReach = (): ServerReach => useReach("useServerReach").reach;
+
+/**
+ * Whether the server answers, as the notice says it: also reconnecting once a request has waited
+ * past the grace, which is how a dead server with an open socket shows first.
+ *
+ * @throws When used outside `ServerReachProvider`, a programming error.
+ */
+export const useNoticeReach = (): ServerReach => useReach("useNoticeReach").notice;

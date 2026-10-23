@@ -3,7 +3,7 @@
  * root's title (Paper's D11, D14, and G04 on a phone with nothing downloaded) and the one-line bar
  * on a pushed page (D12, D13).
  */
-import type { ServerReach } from "../session/server-reach";
+import type { ServerReach } from "./server-reach";
 
 /** What the notice says, and whether it offers Try again. */
 export interface OfflineNotice {
