@@ -443,6 +443,9 @@ describe("queue changes that ask for lyrics", () => {
     const alphaSong = tracks.find((track) => track.title === "Alpha song 0");
 
     if (alphaSong === undefined) throw new Error("No Alpha song 0");
+    // Off until the Jam starts, so only the Jam can have asked for the song it moves on to: the
+    // Jam picks its autoplay songs afresh, and may pick the one that was next before it.
+    await owner.music.run("server.update", { remoteLyrics: false });
     await play(host, [alphaSong.id]);
 
     const deltaEntries = (await host.music.read("queue.list", {})).queue.filter(
@@ -453,7 +456,8 @@ describe("queue changes that ask for lyrics", () => {
 
     if (last === undefined) throw new Error("Autoplay picked nothing from Delta");
     await host.music.run("playback.jump", { itemId: last.itemId });
-    const before = await lookupTitles(backend);
+    await owner.music.run("server.update", { remoteLyrics: true });
+    expect(await lookups(backend)).toEqual([]);
 
     await host.music.run("jam.start", {});
 
@@ -461,7 +465,6 @@ describe("queue changes that ask for lyrics", () => {
     const playing = state.queue[state.index]?.title;
 
     expect(playing?.startsWith("Alpha")).toBe(true);
-    expect(before).not.toContain(playing);
     expect(await lookupTitles(backend)).toContain(playing);
   });
 
