@@ -272,13 +272,16 @@ describe("LyricsWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       Effect.gen(function* () {
         let calls = 0;
 
-        const { control, lrclib } = yield* start(() => {
-          calls += 1;
+        const { control, lrclib } = yield* start(
+          () => {
+            calls += 1;
 
-          return calls === 1
-            ? json(429, { message: "slow down" }, { "retry-after": "1" })
-            : found(5);
-        });
+            return calls === 1
+              ? json(429, { message: "slow down" }, { "retry-after": "1" })
+              : found(5);
+          },
+          { maxFailurePause: Duration.seconds(2) },
+        );
 
         const first = yield* control.queueLookup(SYMPATHY);
         const second = yield* control.queueLookup({ ...SYMPATHY, title: "Safe from Harm" });
@@ -484,13 +487,16 @@ describe("LyricsWorker", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       Effect.gen(function* () {
         let calls = 0;
 
-        const { control, lrclib } = yield* start(() => {
-          calls += 1;
+        const { control, lrclib } = yield* start(
+          () => {
+            calls += 1;
 
-          return calls === 1
-            ? json(429, { message: "slow down" }, { "retry-after": "1" })
-            : found(calls);
-        });
+            return calls === 1
+              ? json(429, { message: "slow down" }, { "retry-after": "1" })
+              : found(calls);
+          },
+          { maxFailurePause: Duration.seconds(2) },
+        );
 
         yield* control.queueLookup(SYMPATHY);
         yield* control.queueLookup({ ...SYMPATHY, title: "Safe from Harm" });

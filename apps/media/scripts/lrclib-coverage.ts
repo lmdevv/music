@@ -8,16 +8,18 @@
  *
  *   scripts/lrclib-coverage.sh [--sample 100] [--seed 1]
  *
- * `MUSIC_CLI` names another CLI command; `LRCLIB_URL` points at a stand-in.
+ * `--sample` and `--seed` take positive whole numbers. `MUSIC_CLI` names another CLI command;
+ * `LRCLIB_URL` points at a stand-in, read as the media service reads it.
  */
 import { parseArgs } from "node:util";
 
 import { canLookUp, LyricBody } from "@music/commands/lyrics";
 import { Effect, Option, Predicate, Schema } from "effect";
 
-import { LrclibClient, make, productionOptions, USER_AGENT } from "../src/lrclib-client.ts";
+import { make, productionOptions, USER_AGENT } from "../src/lrclib-client.ts";
 import { LrclibLyrics } from "../src/lyrics/lrclib.ts";
 import type { LookupQuery } from "../src/media-backend.ts";
+import { lrclibUrlConfig } from "../src/media-config.ts";
 import { runProcess } from "../src/platform/node-process.ts";
 
 const { values } = parseArgs({
@@ -26,6 +28,19 @@ const { values } = parseArgs({
     seed: { type: "string", default: "1" },
   },
 });
+
+const PositiveCount = Schema.FiniteFromString.check(Schema.isInt(), Schema.isGreaterThan(0));
+
+const Options = Schema.Struct({ sample: PositiveCount, seed: PositiveCount });
+
+/** `--sample` or `--seed` is not a positive whole number. */
+class BadOption extends Schema.TaggedError<BadOption>()("BadOption", {
+  cause: Schema.Defect(),
+}) {
+  override get message(): string {
+    return `Bad option: --sample and --seed take positive whole numbers (${String(this.cause)})`;
+  }
+}
 
 const TrackPage = Schema.Struct({
   items: Schema.Array(
@@ -50,7 +65,16 @@ class CliFailed extends Schema.TaggedError<CliFailed>()("CliFailed", {
   }
 }
 
-const decodePage = Schema.decodeUnknownSync(Schema.fromJsonString(TrackPage));
+/** The `music` CLI listed songs, but its output was not a page of them. */
+class CliOutputUnreadable extends Schema.TaggedError<CliOutputUnreadable>()("CliOutputUnreadable", {
+  cause: Schema.Defect(),
+}) {
+  override get message(): string {
+    return `The music CLI's song list could not be read: ${String(this.cause)}`;
+  }
+}
+
+const decodePage = Schema.decodeUnknownEffect(Schema.fromJsonString(TrackPage));
 
 type Song = (typeof TrackPage.Type)["items"][number];
 
@@ -78,14 +102,18 @@ const songPage = (cursor: string | null) =>
       (result) => result.exitCode === 0,
       (result) => new CliFailed({ stderr: result.stderr, cause: null }),
     ),
-    Effect.map((result) => decodePage(result.stdout)),
+    Effect.flatMap((result) =>
+      decodePage(result.stdout).pipe(
+        Effect.mapError((cause) => new CliOutputUnreadable({ cause })),
+      ),
+    ),
   );
 
 /** Every song the CLI's login can read. */
 const allSongs = (
   cursor: string | null,
   seen: ReadonlyArray<Song>,
-): Effect.Effect<ReadonlyArray<Song>, CliFailed> =>
+): Effect.Effect<ReadonlyArray<Song>, CliFailed | CliOutputUnreadable> =>
   songPage(cursor).pipe(
     Effect.flatMap((page) =>
       page.done
@@ -152,9 +180,14 @@ const outcomeOf = (lyrics: Option.Option<LrclibLyrics>): Outcome =>
   });
 
 const program = Effect.gen(function* () {
+  const options = yield* Schema.decodeEffect(Options)(values).pipe(
+    Effect.mapError((cause) => new BadOption({ cause })),
+  );
+
   const songs = yield* allSongs(null, []);
-  const sample = sampleOf(songs, Number(values.sample), seeded(Number(values.seed)));
-  const lrclib = yield* LrclibClient;
+  const sample = sampleOf(songs, options.sample, seeded(options.seed));
+  const baseUrl = yield* lrclibUrlConfig;
+  const lrclib = yield* make(productionOptions(baseUrl));
 
   const outcomes = yield* Effect.forEach(sample, (song) => {
     const query = queryOf(song);
@@ -182,7 +215,8 @@ const program = Effect.gen(function* () {
   const found = count("synced") + count("plain") + count("instrumental");
 
   const lines = [
-    `LRCLIB coverage of ${sample.length} songs sampled from ${songs.length} (seed ${values.seed})`,
+    `LRCLIB coverage of ${sample.length} songs sampled from ${songs.length} (seed ${options.seed})`,
+    `LRCLIB: ${baseUrl}`,
     `User-Agent: ${USER_AGENT}`,
     "",
     ...OUTCOMES.map(
@@ -214,11 +248,4 @@ const program = Effect.gen(function* () {
   });
 });
 
-await Effect.runPromise(
-  program.pipe(
-    Effect.provideServiceEffect(
-      LrclibClient,
-      make(productionOptions(process.env["LRCLIB_URL"] ?? "https://lrclib.net")),
-    ),
-  ),
-);
+await Effect.runPromise(program);

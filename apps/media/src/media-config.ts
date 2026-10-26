@@ -39,6 +39,12 @@ const MEGABYTE = 1024 * 1024;
 
 const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
 
+/** `LRCLIB_URL` without a trailing slash: LRCLIB itself when the variable is unset or empty. */
+export const lrclibUrlConfig: Config.Config<string> = Config.URL("LRCLIB_URL").pipe(
+  Config.withDefault(new URL("https://lrclib.net")),
+  Config.map((url) => url.origin + url.pathname.replace(/\/+$/, "")),
+);
+
 /** Reads `MediaConfig` from environment variables. */
 export const layer: Layer.Layer<MediaConfig, Config.ConfigError> = Layer.effect(
   MediaConfig,
@@ -65,10 +71,7 @@ export const layer: Layer.Layer<MediaConfig, Config.ConfigError> = Layer.effect(
       Config.withDefault("ffprobe"),
     );
 
-    const lrclibUrl = yield* Config.URL("LRCLIB_URL").pipe(
-      Config.withDefault(new URL("https://lrclib.net")),
-    );
-
+    const lrclibUrl = yield* lrclibUrlConfig;
     const roots = yield* Config.String("MUSIC_ROOTS").pipe(Config.withDefault(""));
 
     const musicRoots = roots
@@ -88,7 +91,7 @@ export const layer: Layer.Layer<MediaConfig, Config.ConfigError> = Layer.effect(
       ffmpegPath,
       ffprobePath,
       musicRoots: musicRoots.length === 0 ? null : musicRoots,
-      lrclibUrl: lrclibUrl.origin + lrclibUrl.pathname.replace(/\/+$/, ""),
+      lrclibUrl,
     });
   }),
 );

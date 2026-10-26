@@ -49,10 +49,10 @@ describe("LrclibClient", { timeout: MEDIA_TEST_TIMEOUT }, () => {
   it("pauses for Retry-After as soon as a 429 arrives, without waiting for its body", () =>
     runScoped(
       Effect.gen(function* () {
-        const { client: lrclib } = yield* client(() => ({
-          ...json(429, { message: "slow down" }, { "retry-after": "60" }),
-          stall: true,
-        }));
+        const { client: lrclib } = yield* client(
+          () => ({ ...json(429, { message: "slow down" }, { "retry-after": "60" }), stall: true }),
+          { maxFailurePause: Duration.minutes(5) },
+        );
 
         const { result, ms } = yield* timed(lrclib.lookup(QUERY));
 
@@ -61,6 +61,23 @@ describe("LrclibClient", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           _tag: "Failure",
           failure: { _tag: "LrclibUnavailable", reason: "rate_limited", pauseMs: 60_000 },
         });
+      }),
+    ));
+
+  it("pauses no longer than its longest pause, whatever Retry-After asks", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const yearAhead = new Date(Date.now() + 365 * 24 * 3600 * 1000).toUTCString();
+
+        for (const retryAfter of ["86400", yearAhead]) {
+          const { client: lrclib } = yield* client(() =>
+            json(429, { message: "slow down" }, { "retry-after": retryAfter }),
+          );
+
+          expect(yield* Effect.result(lrclib.lookup(QUERY))).toMatchObject({
+            failure: { _tag: "LrclibUnavailable", reason: "rate_limited", pauseMs: 1000 },
+          });
+        }
       }),
     ));
 

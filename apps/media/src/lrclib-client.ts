@@ -6,8 +6,8 @@
  *
  * Failures come in two kinds. LRCLIB being unavailable (no connection, a timeout, a 5xx, a 429,
  * or any other refusal but 404) is no fault of the song: it pauses every request, for as long as
- * `Retry-After` says or for a backoff that doubles with each failure in a row. A record LRCLIB
- * returned that cannot be read is that song's failure alone.
+ * `Retry-After` says or for a backoff that doubles with each failure in a row, up to an hour in
+ * production. A record LRCLIB returned that cannot be read is that song's failure alone.
  */
 import { Buffer } from "node:buffer";
 
@@ -69,7 +69,11 @@ export interface Options {
   readonly timeout: Duration.Duration;
   /** The pause after LRCLIB was unavailable once, without a `Retry-After`; doubles each time. */
   readonly failurePause: Duration.Duration;
-  /** The longest pause the doubling reaches. */
+  /**
+   * The longest pause, from the doubling or a `Retry-After`. A longer `Retry-After` would stop
+   * every lookup for as long as the answer says; past this, LRCLIB is asked again, and a refusal
+   * then pauses once more.
+   */
   readonly maxFailurePause: Duration.Duration;
   /** The largest answer read; a larger one counts as unreadable. */
   readonly maxBodyBytes: number;
@@ -287,12 +291,12 @@ export const make = (options: Options) =>
         const inARow = yield* Ref.updateAndGet(failures, (count) => count + 1);
         const retryAfterMs = retryAfter === null ? null : retryAfterOf(retryAfter, now);
 
-        const backoff = Math.min(
-          Duration.toMillis(options.failurePause) * 2 ** (inARow - 1),
-          Duration.toMillis(options.maxFailurePause),
-        );
+        const backoff = Duration.toMillis(options.failurePause) * 2 ** (inARow - 1);
 
-        const pauseMs = Math.max(Duration.toMillis(options.gap), retryAfterMs ?? backoff);
+        const pauseMs = Math.max(
+          Duration.toMillis(options.gap),
+          Math.min(retryAfterMs ?? backoff, Duration.toMillis(options.maxFailurePause)),
+        );
 
         yield* holdFor(pauseMs);
 

@@ -189,7 +189,8 @@ music lyrics get --track-id "$id" --json | jq -r '.main.body.lines[].text'
 
 Look up lyrics for the whole library ahead of time, or turn LRCLIB lookups off (admin). Lookups
 send each song's title, artist, album, and length to lrclib.net, one about every third of a
-second; songs already answered are not asked again:
+second. Lyrics found are kept and never asked for again; a song LRCLIB lacked is asked again only
+after 30 days:
 
 ```sh
 music lyrics backfill               # {"libraries": 2}: every library you can read, in the background
