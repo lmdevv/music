@@ -26,6 +26,8 @@ export interface Interface {
    * and /dev, as in development; the container image sets `/music`.
    */
   readonly musicRoots: ReadonlyArray<string> | null;
+  /** Where lyrics are looked up (`LRCLIB_URL`): LRCLIB itself unless pointed at a stand-in. */
+  readonly lrclibUrl: string;
 }
 
 /** The media service configuration. */
@@ -63,6 +65,10 @@ export const layer: Layer.Layer<MediaConfig, Config.ConfigError> = Layer.effect(
       Config.withDefault("ffprobe"),
     );
 
+    const lrclibUrl = yield* Config.URL("LRCLIB_URL").pipe(
+      Config.withDefault(new URL("https://lrclib.net")),
+    );
+
     const roots = yield* Config.String("MUSIC_ROOTS").pipe(Config.withDefault(""));
 
     const musicRoots = roots
@@ -82,6 +88,7 @@ export const layer: Layer.Layer<MediaConfig, Config.ConfigError> = Layer.effect(
       ffmpegPath,
       ffprobePath,
       musicRoots: musicRoots.length === 0 ? null : musicRoots,
+      lrclibUrl: lrclibUrl.origin + lrclibUrl.pathname.replace(/\/+$/, ""),
     });
   }),
 );
