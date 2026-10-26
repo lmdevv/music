@@ -459,8 +459,18 @@ const originLabel = LyricOrigin.match({
 });
 
 const bodyLines = LyricBody.match({
+  // A subtitle cue with several rows is one line with `\n` between them: one row per output line.
   Synced: ({ lines }) =>
-    lines.map((line) => `${lyricStamp(line.startMs)} ${escapeControlCharacters(line.text)}`),
+    lines.flatMap((line) => {
+      const stamp = lyricStamp(line.startMs);
+
+      return line.text
+        .split("\n")
+        .map(
+          (row, index) =>
+            `${index === 0 ? stamp : " ".repeat(stamp.length)} ${escapeControlCharacters(row)}`,
+        );
+    }),
   Plain: ({ text }) => text.split("\n").map(escapeControlCharacters),
 });
 

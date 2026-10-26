@@ -214,6 +214,32 @@ describe("renderResult for lyrics", () => {
     ]);
   });
 
+  it("prints each row of a multi-row subtitle cue on its own line, under the cue's time", () => {
+    const cue = {
+      _tag: "Synced",
+      source: "file",
+      main: {
+        kind: "main",
+        lang: null,
+        origin: { _tag: "Sidecar", fileName: "Song.vtt", format: "vtt" },
+        body: {
+          _tag: "Synced",
+          lines: [
+            { text: "Top row\nBottom row", startMs: 1000, endMs: 3000, words: null, voice: null },
+          ],
+        },
+      },
+      extras: [],
+    };
+
+    expect(renderResult(lyrics, cue).split("\n")).toEqual([
+      "SYNCED LYRICS · FROM FILE (Song.vtt)",
+      "",
+      "[00:01.00] Top row",
+      "           Bottom row",
+    ]);
+  });
+
   it("prints plain lyrics as their text, and says when there are none", () => {
     const plain = {
       _tag: "Plain",
