@@ -7,7 +7,8 @@ import { Array as Arr, Result } from "effect";
 
 import {
   consistentLine,
-  type LyricsParseError,
+  LyricsParseError,
+  MAX_LYRIC_LINES,
   mainSet,
   type ParsedLyricSet,
   plainBody,
@@ -38,46 +39,78 @@ const stampMs = (minutes: string, seconds: string, fraction: string | undefined)
 /** Whether text holds LRC stamps, as lyrics pasted into a plain lyrics tag often do. */
 const looksLikeLrc = (text: string): boolean => STAMPED_LINE.test(text);
 
+/** Most word stamps one line may carry; a line with more is not lyrics, so the set is not read. */
+const MAX_LINE_WORDS = 500;
+
+/** An A2 line's text split at its `<stamp>`s: text before the first, then each stamp's text. */
+interface LineWords {
+  readonly lead: string;
+  readonly timed: Arr.NonEmptyReadonlyArray<{ readonly text: string; readonly atMs: number }>;
+}
+
 /**
- * The words of an A2 line. Each `<stamp>` starts the text after it and ends the word before it;
- * text before the first stamp starts with the line. A trailing stamp only ends the last word.
+ * Splits an A2 line at its word stamps, once per source line: a line stamped many times would
+ * otherwise be split again for every repeat.
+ *
+ * @returns The line's words, null without word stamps, or `too-long` past `MAX_LINE_WORDS`.
+ */
+const lineWordsOf = (text: string): Result.Result<LineWords | null, LyricsParseError> => {
+  const stamps: Array<RegExpExecArray> = [];
+
+  for (const stamp of text.matchAll(WORD_STAMP)) {
+    if (stamps.length === MAX_LINE_WORDS) {
+      return Result.fail(
+        new LyricsParseError({
+          reason: "too-long",
+          detail: `more than ${MAX_LINE_WORDS} word stamps on one line`,
+        }),
+      );
+    }
+
+    stamps.push(stamp);
+  }
+
+  const timed = stamps.map((stamp, index) => ({
+    text: text.slice(stamp.index + stamp[0].length, stamps[index + 1]?.index ?? text.length),
+    atMs: stampMs(stamp[1] ?? "0", stamp[2] ?? "0", stamp[3]),
+  }));
+
+  if (!Arr.isReadonlyArrayNonEmpty(timed)) return Result.succeed(null);
+
+  return Result.succeed({ lead: text.slice(0, stamps[0]?.index), timed });
+};
+
+/**
+ * The words of an A2 line. Each stamp starts the text after it and ends the word before it; text
+ * before the first stamp starts with the line. A trailing stamp only ends the last word.
  */
 const wordsOf = (
-  text: string,
+  { lead, timed }: LineWords,
   lineStartMs: number,
   shift: (ms: number) => number,
 ): Arr.NonEmptyReadonlyArray<LyricWord> | null => {
-  const stamps = [...text.matchAll(WORD_STAMP)];
-
-  if (stamps.length === 0) return null;
-
   const segments = [
-    { startMs: lineStartMs, from: 0, to: stamps[0]?.index ?? 0 },
-    ...stamps.map((stamp, index) => ({
-      startMs: shift(stampMs(stamp[1] ?? "0", stamp[2] ?? "0", stamp[3])),
-      from: stamp.index + stamp[0].length,
-      to: stamps[index + 1]?.index ?? text.length,
-    })),
+    { text: lead, startMs: lineStartMs },
+    ...timed.map(({ text, atMs }) => ({ text, startMs: shift(atMs) })),
   ];
 
   const words: Array<LyricWord> = [];
 
   for (const [index, segment] of segments.entries()) {
-    const word = text.slice(segment.from, segment.to);
     const last = words.at(-1);
 
-    if (word.trim() === "") {
+    if (segment.text.trim() === "") {
       // Space timed on its own belongs to the word before it; before the first word it is dropped.
       if (last !== undefined) {
         words[words.length - 1] = {
-          text: last.text + word,
+          text: last.text + segment.text,
           startMs: last.startMs,
           endMs: last.endMs,
         };
       }
     } else {
       words.push({
-        text: word,
+        text: segment.text,
         startMs: segment.startMs,
         endMs: segments[index + 1]?.startMs ?? null,
       });
@@ -193,12 +226,13 @@ const withEndMarkers = (lines: ReadonlyArray<LyricLine>): ReadonlyArray<LyricLin
   });
 
 /**
- * Reads LRC text. Lines with several stamps repeat at each; lines sort by time; `[offset:+n]`
- * moves every stamp n ms earlier. An empty stamped line ends the line before it. Text without
- * any stamp reads as plain lyrics, and stamps that are all the same carry no timing, so their
- * lines read as plain lyrics too. ID tags (`[ar:]`, `[ti:]`, `[by:]`) are not lyrics. Different
- * lines at the same stamp stack into one, except when every stamp holds exactly two: the second
- * of each pair is then a translation, returned as a second set with no language.
+ * Reads LRC text. Lines with several stamps repeat at each, with any word timing on the repeat
+ * its word stamps fall in; lines sort by time; `[offset:+n]` moves every stamp n ms earlier. An
+ * empty stamped line ends the line before it. Text without any stamp reads as plain lyrics, and
+ * stamps that are all the same carry no timing, so their lines read as plain lyrics too. ID tags
+ * (`[ar:]`, `[ti:]`, `[by:]`) are not lyrics. Different lines at the same stamp stack into one,
+ * except when every stamp holds exactly two: the second of each pair is then a translation,
+ * returned as a second set with no language.
  *
  * @returns The main set in `lang`, then any translation, or `LyricsParseError`.
  */
@@ -208,11 +242,13 @@ export const parseLrc = (
 ): Result.Result<Arr.NonEmptyReadonlyArray<ParsedLyricSet>, LyricsParseError> => {
   let offsetMs = 0;
   let voice: string | null = null;
+  let lyricLines = 0;
   const untimed: Array<string> = [];
 
   const stamped: Array<{
     readonly at: number;
-    readonly rest: string;
+    readonly text: string;
+    readonly words: LineWords | null;
     readonly voice: string | null;
   }> = [];
 
@@ -244,7 +280,35 @@ export const parseLrc = (
       rest = rest.slice(prefix[0].length);
     }
 
-    for (const at of stamps) stamped.push({ at, rest, voice });
+    const lineWords = lineWordsOf(rest);
+
+    if (Result.isFailure(lineWords)) return Result.fail(lineWords.failure);
+    const lineText = rest.replaceAll(WORD_STAMP, "");
+
+    // Checked before any words are built, so a line stamped thousands of times fails at once.
+    if (lineText.trim() !== "") lyricLines += stamps.length;
+
+    if (lyricLines > MAX_LYRIC_LINES) {
+      return Result.fail(
+        new LyricsParseError({ reason: "too-long", detail: `over ${MAX_LYRIC_LINES} lines` }),
+      );
+    }
+
+    // Word stamps are absolute, so they fall in one repeat: the last to start at or before them.
+    const firstWordMs = lineWords.success?.timed[0].atMs ?? -1;
+
+    const carrier = stamps.indexOf(
+      stamps.reduce((best, at) => (at <= firstWordMs && at > best ? at : best), -1),
+    );
+
+    for (const [index, at] of stamps.entries()) {
+      stamped.push({
+        at,
+        text: lineText,
+        words: index === carrier ? lineWords.success : null,
+        voice,
+      });
+    }
   }
 
   if (stamped.length === 0) return Result.map(plainBody(untimed.join("\n")), mainSet(lang));
@@ -253,13 +317,13 @@ export const parseLrc = (
 
   const lines = distinctLines(
     stamped
-      .map(({ at, rest, voice: lineVoice }): LyricLine => {
+      .map(({ at, text: lineText, words: lineWords, voice: lineVoice }): LyricLine => {
         const startMs = shift(at);
-        const words = wordsOf(rest, startMs, shift);
+        const words = lineWords === null ? null : wordsOf(lineWords, startMs, shift);
 
         return consistentLine({
           startMs,
-          text: rest.replaceAll(WORD_STAMP, ""),
+          text: lineText,
           words,
           endMs: words === null ? null : Arr.lastNonEmpty(words).endMs,
           voice: lineVoice,

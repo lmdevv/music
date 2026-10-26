@@ -60,6 +60,40 @@ describe("lyricsSidecarMatcher", () => {
     );
   });
 
+  it("reads a language, script, and region from a name, and no other subtag", () => {
+    const named = [
+      "en-GB",
+      "zh-Hant",
+      "pt_br",
+      "zh-Hant-TW",
+      "es-419",
+      "en-live",
+      "en-notes",
+      "no-lyrics",
+      "en-XX",
+    ].map((suffix) => walked(`Album/Song.${suffix}.lrc`));
+
+    expect(
+      lyricsSidecarMatcher([walked("Album/Song.flac"), ...named])("Album/Song.flac").map(
+        ({ lang }) => lang,
+      ),
+    ).toEqual(["en-GB", "es-419", "pt-BR", "zh-Hant-TW", "zh-Hant"]);
+  });
+
+  it("matches a flat folder of 10,000 songs without comparing each song to every file", () => {
+    const names = Array.from({ length: 10_000 }, (_, index) => `Flat/${index} Track`);
+
+    const matchFlat = lyricsSidecarMatcher(
+      names.flatMap((name) => [walked(`${name}.mp3`), walked(`${name}.lrc`)]),
+    );
+
+    const start = performance.now();
+    const found = names.map((name) => matchFlat(`${name}.mp3`));
+
+    expect(found.every((sidecars) => sidecars.length === 1)).toBe(true);
+    expect(performance.now() - start).toBeLessThan(1000);
+  });
+
   it("gives a name that is another song's exact name to that song, not a language", () => {
     expect(matched("Album/01 Song.en.flac")).toEqual([["Album/01 Song.en.lrc", "lrc", null]]);
   });

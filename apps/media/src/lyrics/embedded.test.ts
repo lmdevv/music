@@ -2,7 +2,13 @@ import { join } from "node:path";
 
 import { LyricBody } from "@music/commands/lyrics";
 import { Effect } from "effect";
-import { parseFile } from "music-metadata";
+import {
+  type IAudioMetadata,
+  type ILyricsTag,
+  LyricsContentType,
+  parseFile,
+  TimestampFormat,
+} from "music-metadata";
 import { describe, expect, it } from "vitest";
 
 import { runTool } from "../ffmpeg.ts";
@@ -358,4 +364,107 @@ describe("embeddedLyrics", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(yield* lyricsOf(blank)).toEqual([]);
       }),
     ));
+});
+
+/** What `music-metadata` reports for a tag format it maps only to common `lyrics`, such as APE. */
+const commonOnly = (lyrics: Array<ILyricsTag>, native: IAudioMetadata["native"] = {}) =>
+  embeddedLyrics({
+    common: {
+      track: { no: null, of: null },
+      disk: { no: null, of: null },
+      movementIndex: { no: null, of: null },
+      lyrics,
+    },
+    native,
+  });
+
+describe("embeddedLyrics: common lyrics", () => {
+  const apeTitle = { APEv2: [{ id: "Title", value: "Song" }] };
+
+  it("reads synchronized lyrics timed in milliseconds as timed lyrics", () => {
+    const sets = commonOnly(
+      [
+        {
+          contentType: LyricsContentType.lyrics,
+          timeStampFormat: TimestampFormat.milliseconds,
+          language: "eng",
+          text: "Hello\nWorld",
+          syncText: [
+            { text: "Hello", timestamp: 1000 },
+            { text: "World", timestamp: 2500 },
+          ],
+        },
+      ],
+      apeTitle,
+    );
+
+    expect(sets).toEqual([
+      {
+        kind: "main",
+        lang: "en",
+        origin: { _tag: "Embedded", tag: "other" },
+        body: {
+          _tag: "Synced",
+          lines: [
+            { text: "Hello", startMs: 1000, endMs: null, words: null, voice: null },
+            { text: "World", startMs: 2500, endMs: null, words: null, voice: null },
+          ],
+        },
+      },
+    ]);
+  });
+
+  it("reads lyrics timed in MPEG frames as plain text", () => {
+    const frames = {
+      contentType: LyricsContentType.text,
+      timeStampFormat: TimestampFormat.mpegFrameNumber,
+      syncText: [
+        { text: "Hello", timestamp: 38 },
+        { text: "World", timestamp: 96 },
+      ],
+    };
+
+    expect(commonOnly([frames]).map((set) => set.body)).toEqual([
+      { _tag: "Plain", text: "Hello\nWorld" },
+    ]);
+    expect(commonOnly([{ ...frames, text: "Whole text" }]).map((set) => set.body)).toEqual([
+      { _tag: "Plain", text: "Whole text" },
+    ]);
+  });
+
+  it("skips chords, events, and other text that is not lyrics", () => {
+    expect(
+      commonOnly([
+        {
+          contentType: LyricsContentType.chord,
+          timeStampFormat: TimestampFormat.milliseconds,
+          syncText: [{ text: "Am", timestamp: 1000 }],
+        },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("is not read when a native tag holds lyrics", () => {
+    const common: ILyricsTag = {
+      contentType: LyricsContentType.lyrics,
+      timeStampFormat: TimestampFormat.notSynchronized,
+      text: "Common words",
+      syncText: [],
+    };
+
+    expect(commonOnly([common], apeTitle).map((set) => set.body)).toEqual([
+      { _tag: "Plain", text: "Common words" },
+    ]);
+    expect(
+      commonOnly([common], { vorbis: [{ id: "LYRICS", value: "Native words" }] }).map((set) => [
+        set.origin,
+        set.body,
+      ]),
+    ).toEqual([
+      [
+        { _tag: "Embedded", tag: "vorbis:LYRICS" },
+        { _tag: "Plain", text: "Native words" },
+      ],
+    ]);
+  });
 });

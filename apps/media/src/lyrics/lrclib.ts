@@ -14,9 +14,10 @@ import { parseLyricsfile } from "./lyricsfile.ts";
 
 const LrclibRecord = Schema.Struct({
   id: LrclibRecordId,
-  instrumental: Schema.optionalKey(Schema.Boolean),
-  plainLyrics: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  syncedLyrics: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  instrumental: Schema.Boolean,
+  plainLyrics: Schema.NullOr(Schema.String),
+  syncedLyrics: Schema.NullOr(Schema.String),
+  // Newer than the rest of the record: an LRCLIB that predates it leaves the key out.
   lyricsfile: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 
@@ -51,7 +52,7 @@ const readRecord = (json: string): Result.Result<LrclibLyrics, LyricsParseError>
     onSuccess: (record) => {
       const recordId = record.id;
 
-      if (record.instrumental === true) {
+      if (record.instrumental) {
         return Result.succeed(LrclibLyrics.Instrumental({ recordId }));
       }
 

@@ -134,5 +134,25 @@ describe("parseLrclibRecord", () => {
     for (const body of ["<html>busy</html>", "{}", JSON.stringify({ id: -1 })]) {
       expect(Result.isFailure(parseLrclibRecord(body))).toBe(true);
     }
+
+    expect(failureOf(JSON.stringify({ id: 1 }))).toBe("malformed");
+    expect(failureOf(JSON.stringify({ id: 1, instrumental: false, plainLyrics: "Line" }))).toBe(
+      "malformed",
+    );
+  });
+
+  it("reads a record from an LRCLIB that predates Lyricsfile", () => {
+    const older = JSON.stringify({
+      id: 3396226,
+      trackName: "Song",
+      artistName: "Artist",
+      albumName: "Album",
+      duration: 233,
+      instrumental: false,
+      plainLyrics: "Line",
+      syncedLyrics: null,
+    });
+
+    expect(lyricsOf(older)).toMatchObject({ recordId: 3396226 });
   });
 });

@@ -120,6 +120,13 @@ describe("parseLyricsFile: LRC", () => {
         { text: "End", startMs: 14_000 },
       ],
     });
+
+    expect(bodyOf("elrc", "[00:01.00][00:02.00]<00:03.00>Hi<00:04.00>")).toMatchObject({
+      lines: [
+        { text: "Hi", startMs: 1000, endMs: null, words: null },
+        { text: "Hi", startMs: 2000, endMs: 4000, words: [{ startMs: 3000, endMs: 4000 }] },
+      ],
+    });
   });
 
   it("reads a translation paired under every line as its own set", () => {
@@ -351,6 +358,25 @@ describe("parseLyricsFile: LRC", () => {
     );
 
     expect(failureOf("lrc", text.join("\n"))).toBe("too-long");
+  });
+
+  it("fails fast for one line stamped past 2,000 times, before reading its words", () => {
+    const half = 128 * 1024;
+    const line = "[0:0]".repeat(half / 5) + "<0:0>a".repeat(half / 6);
+
+    expect(failureOf("elrc", line)).toBe("too-long");
+  });
+
+  it("fails for a line with more than 500 word stamps", () => {
+    const stamps = Array.from(
+      { length: 2000 },
+      (_, index) => `[${Math.floor(index / 60)}:${index % 60}]`,
+    );
+
+    const words = "<59:59>a".repeat(501);
+
+    expect(failureOf("elrc", stamps.join("") + words)).toBe("too-long");
+    expect(failureOf("elrc", `[0:01]${"<0:02>a".repeat(500)}`)).toBeUndefined();
   });
 });
 

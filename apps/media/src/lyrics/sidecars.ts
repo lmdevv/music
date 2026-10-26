@@ -46,11 +46,32 @@ const ISO_639_1 = new Set(
   ).split(" "),
 );
 
-/** The language a lyric file's name carries after the song's name (`de`, `pt-BR`), or null. */
+/** A language with an optional script and region, as canonical BCP 47 spells them. */
+const NAME_LANG = /^[a-z]{2}(?:-([A-Z][a-z]{3}))?(?:-([A-Z]{2}|\d{3}))?$/u;
+
+const SCRIPTS = new Intl.DisplayNames(["en"], { type: "script", fallback: "none" });
+
+const REGIONS = new Intl.DisplayNames(["en"], { type: "region", fallback: "none" });
+
+/**
+ * The language a lyric file's name carries after the song's name (`de`, `zh-Hant`, `pt-BR`), or
+ * null. Only a known script and region may follow the language, so `en-live`, `en-notes`, and
+ * `no-lyrics` name versions of the lyrics, not languages.
+ */
 const nameLang = (suffix: string): Lang | null => {
   const [primary = ""] = suffix.split(/[-_]/u);
 
-  return ISO_639_1.has(primary.toLowerCase()) ? parseLang(suffix) : null;
+  if (!ISO_639_1.has(primary.toLowerCase())) return null;
+  const lang = parseLang(suffix);
+  const subtags = lang === null ? null : NAME_LANG.exec(lang);
+
+  if (subtags === null) return null;
+  const [, script, region] = subtags;
+
+  return (script === undefined || SCRIPTS.of(script) !== undefined) &&
+    (region === undefined || REGIONS.of(region) !== undefined)
+    ? lang
+    : null;
 };
 
 /** True when a file name has a lyric file extension. */
@@ -86,37 +107,45 @@ export const lyricsSidecarMatcher = (
 ): ((audioPath: string) => ReadonlyArray<LyricsSidecar>) => {
   const songs = new Set<string>();
 
+  /**
+   * Lyric files under `folder/prefix` for every dot-separated prefix of their stem, so a song
+   * reads only the files named after it: `Song.de.lrc` is under `Song` and `Song.de`.
+   */
   const sidecars = new Map<
     string,
-    Array<{ readonly file: WalkedFile; readonly format: LyricsFormat }>
+    Array<{ readonly file: WalkedFile; readonly format: LyricsFormat; readonly stem: string }>
   >();
 
   for (const file of walked) {
     const name = basename(file.relativePath);
+    const folder = dirname(file.relativePath);
     const format = FORMATS.get(extensionOf(name));
 
-    if (isAudioFile(name)) songs.add(`${dirname(file.relativePath)}/${withoutExtension(name)}`);
+    if (isAudioFile(name)) songs.add(`${folder}/${withoutExtension(name)}`);
 
     if (format === undefined) continue;
-    const folder = dirname(file.relativePath);
+    const stem = stemOf(name, format);
 
-    const inFolder = sidecars.get(folder) ?? [];
+    for (let end = stem.indexOf("."); ; end = stem.indexOf(".", end + 1)) {
+      const key = `${folder}/${end === -1 ? stem : stem.slice(0, end)}`;
+      const named = sidecars.get(key) ?? [];
 
-    inFolder.push({ file, format });
-    sidecars.set(folder, inFolder);
+      named.push({ file, format, stem });
+      sidecars.set(key, named);
+
+      if (end === -1) break;
+    }
   }
 
   return (audioPath) => {
     const folder = dirname(audioPath);
     const song = withoutExtension(basename(audioPath));
 
-    return (sidecars.get(folder) ?? [])
-      .flatMap(({ file, format }): ReadonlyArray<LyricsSidecar> => {
-        const stem = stemOf(basename(file.relativePath), format);
-
+    return (sidecars.get(`${folder}/${song}`) ?? [])
+      .flatMap(({ file, format, stem }): ReadonlyArray<LyricsSidecar> => {
         if (stem === song) return [{ file, format, lang: null }];
 
-        if (!stem.startsWith(`${song}.`) || songs.has(`${folder}/${stem}`)) return [];
+        if (songs.has(`${folder}/${stem}`)) return [];
         const lang = nameLang(stem.slice(song.length + 1));
 
         return lang === null ? [] : [{ file, format, lang }];

@@ -12,12 +12,13 @@ import { Array as Arr, Data, Result, Schema } from "effect";
 const MAX_LYRICS_SIZE = 256 * 1024;
 
 /** Most lines one lyric set keeps; a longer source is not read. */
-const MAX_LYRIC_LINES = 2000;
+export const MAX_LYRIC_LINES = 2000;
 
 /** Lyrics could not be read from a file, a tag, or an LRCLIB record. */
 export class LyricsParseError extends Data.TaggedError("LyricsParseError")<{
   /**
-   * `too-large`: past `MAX_LYRICS_SIZE`. `too-long`: more than 2,000 lines in one set.
+   * `too-large`: past `MAX_LYRICS_SIZE`. `too-long`: more than 2,000 lines in one set, or more
+   * than 500 word stamps on one LRC line.
    * `not-text`: binary data. `empty`: no lyric text at all. `malformed`: the format's structure
    * is broken, or a time is too large to represent.
    */
