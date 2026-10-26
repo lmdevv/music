@@ -81,7 +81,7 @@ describe("lyricsButton", () => {
       loading: false,
     });
     expect(lyricsButton("loading", false)).toStrictEqual({
-      label: "Lyrics (looking for them)",
+      label: "Loading lyrics",
       disabled: false,
       loading: true,
     });

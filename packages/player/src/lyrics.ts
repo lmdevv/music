@@ -58,7 +58,7 @@ export interface LyricsButton {
 
 const CLOSED_LABEL: Readonly<Record<LyricsOffer, string>> = {
   ready: "Lyrics",
-  loading: "Lyrics (looking for them)",
+  loading: "Loading lyrics",
   failed: "Lyrics (couldn't load them)",
   none: "No lyrics for this song",
   instrumental: "Instrumental, no lyrics",
