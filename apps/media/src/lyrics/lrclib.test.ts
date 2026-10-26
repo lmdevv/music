@@ -127,6 +127,7 @@ describe("parseLrclibRecord", () => {
     expect(failureOf(record({ lyricsfile: "version: [" }))).toBe("malformed");
     expect(failureOf(record({ syncedLyrics: tooLong }))).toBe("too-long");
     expect(failureOf(record({ plainLyrics: "x".repeat(256 * 1024 + 1) }))).toBe("too-large");
+    expect(failureOf(record({ syncedLyrics: `[${"9".repeat(310)}:01]Line` }))).toBe("malformed");
   });
 
   it("fails for a body that is not an LRCLIB record", () => {

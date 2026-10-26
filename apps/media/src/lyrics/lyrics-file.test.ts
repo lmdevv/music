@@ -881,3 +881,29 @@ describe("parseLyricsFile: Lyricsfile", () => {
     );
   });
 });
+
+describe("parseLyricsFile: times too large to represent", () => {
+  const huge = "9".repeat(310);
+
+  it.each([
+    ["lrc", `[${huge}:01]Line`],
+    ["lrc", `[00:01]<${huge}:01>Word`],
+    ["lrc", `[offset:-${huge}]\n[00:01]Line\n[00:02]Next`],
+    ["vtt", `WEBVTT\n\n${huge}:00:01.000 --> ${huge}:00:02.000\nLine`],
+    ["srt", `1\n${huge}:00:01,000 --> ${huge}:00:02,000\nLine`],
+    [
+      "ttml",
+      `<tt xmlns="http://www.w3.org/ns/ttml"><body><div><p begin="${huge}s">Line</p></div></body></tt>`,
+    ],
+    [
+      "ttml",
+      `<tt xmlns="http://www.w3.org/ns/ttml"><body><div><p begin="${huge}:00:01">Line</p></div></body></tt>`,
+    ],
+    [
+      "lyricsfile",
+      `version: '1.0'\nmetadata: {title: a, artist: b}\nlines:\n  - text: Line\n    start_ms: ${huge}\n`,
+    ],
+  ] satisfies ReadonlyArray<readonly [LyricsFormat, string]>)("fails for %s", (format, text) => {
+    expect(failureOf(format, text)).toBe("malformed");
+  });
+});

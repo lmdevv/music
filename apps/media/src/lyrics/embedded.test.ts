@@ -311,6 +311,25 @@ describe("embeddedLyrics", { timeout: MEDIA_TEST_TIMEOUT }, () => {
       }),
     ));
 
+  it("skips a lyrics tag whose stamps are too large to represent, and reads the others", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const dir = yield* temporaryDirectory("lyrics");
+
+        const path = yield* encode(dir, "song.flac", "flac", [
+          `LYRICS=[${"9".repeat(310)}:01]Broken`,
+          "UNSYNCEDLYRICS=Plain words",
+        ]);
+
+        expect((yield* lyricsOf(path)).map((set) => [set.origin, set.body])).toEqual([
+          [
+            { _tag: "Embedded", tag: "vorbis:UNSYNCEDLYRICS" },
+            { _tag: "Plain", text: "Plain words" },
+          ],
+        ]);
+      }),
+    ));
+
   it("reads MP4 ©lyr", () =>
     runScoped(
       Effect.gen(function* () {

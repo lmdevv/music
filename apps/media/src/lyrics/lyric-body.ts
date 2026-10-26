@@ -3,10 +3,10 @@ import {
   type Lang,
   LyricBody,
   type LyricKind,
-  type LyricLine,
+  LyricLine,
   type LyricWord,
 } from "@music/commands/lyrics";
-import { Array as Arr, Data, Result } from "effect";
+import { Array as Arr, Data, Result, Schema } from "effect";
 
 /** Largest lyric source read, in bytes of a file or characters of a tag or LRCLIB record. */
 const MAX_LYRICS_SIZE = 256 * 1024;
@@ -19,7 +19,7 @@ export class LyricsParseError extends Data.TaggedError("LyricsParseError")<{
   /**
    * `too-large`: past `MAX_LYRICS_SIZE`. `too-long`: more than 2,000 lines in one set.
    * `not-text`: binary data. `empty`: no lyric text at all. `malformed`: the format's structure
-   * is broken.
+   * is broken, or a time is too large to represent.
    */
   readonly reason: "too-large" | "too-long" | "not-text" | "empty" | "malformed";
   readonly detail: string;
@@ -130,6 +130,8 @@ export const consistentLine = (line: LyricLine): LyricLine => {
   };
 };
 
+const isLyricLine = Schema.is(LyricLine);
+
 const carriesTiming = (line: LyricLine): boolean =>
   line.words !== null || (line.endMs !== null && line.endMs > line.startMs);
 
@@ -137,7 +139,8 @@ const carriesTiming = (line: LyricLine): boolean =>
  * Timed lyrics from lines in any order, sorted by start (keeping source order for equal starts),
  * each made consistent by `consistentLine`. When two or more lines all start at the same time and
  * none has word timing or an end of its own, the stamps carry no timing, as when a tagger writes
- * `[00:00.00]` before each line, so the lines become plain text.
+ * `[00:00.00]` before each line, so the lines become plain text. Every timed format ends here,
+ * so a stamp whose digits overflow fails here as `malformed` whichever format spelled it.
  */
 export const timedBody = (
   lines: ReadonlyArray<LyricLine>,
@@ -147,6 +150,12 @@ export const timedBody = (
 
     return consistent.text === "" ? [] : [consistent];
   });
+
+  if (!kept.every(isLyricLine)) {
+    return Result.fail(
+      new LyricsParseError({ reason: "malformed", detail: "a timestamp too large to represent" }),
+    );
+  }
 
   if (kept.length > MAX_LYRIC_LINES) {
     return Result.fail(
