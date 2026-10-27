@@ -138,7 +138,7 @@ function Picker({ detail }: { readonly detail: PlaylistDetail }) {
                     ? `${track.title}, ${track.artist}, added`
                     : `Add ${track.title}, ${track.artist}`
                 }
-                onPress={() => void addTrack(track)}
+                onPress={added ? undefined : () => void addTrack(track)}
                 trailing={added ? <RowCheck /> : <Icon icon={Plus} tone="muted" size="inline" />}
               />
             </View>
