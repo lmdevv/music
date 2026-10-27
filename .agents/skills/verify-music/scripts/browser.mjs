@@ -89,6 +89,7 @@ async function send(state, name, args, options) {
   try {
     response = await fetch(`http://127.0.0.1:${port}/`, {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
   } catch (error) {
@@ -210,24 +211,36 @@ async function serve(state, base) {
     ], { stdio: ["pipe", "ignore", "pipe"] });
     let errors = "";
     ffmpeg.stderr.on("data", (chunk) => (errors += chunk));
-    const done = new Promise((resolveDone, rejectDone) =>
+    // A missing ffmpeg or one that exits early must fail this recording, not crash the host and
+    // lose every signed-in page. Its exit code reports a broken pipe, so stdin errors are dropped.
+    ffmpeg.stdin.on("error", () => {});
+    const done = new Promise((resolveDone, rejectDone) => {
+      ffmpeg.on("error", (error) => rejectDone(new Error(`ffmpeg failed to start: ${error.message}`)));
       ffmpeg.on("close", (code) =>
         code === 0 ? resolveDone() : rejectDone(new Error(`ffmpeg exited ${code}: ${errors}`)),
-      ),
-    );
-    const actions = options["show-actions"] ? await entry.page.screencast.showActions() : null;
-    const recording = { path, ffmpeg, done, actions, last: null, started: 0, written: 0, timer: null };
-    recording.timer = setInterval(() => pump(recording), 1000 / FPS);
-    await entry.page.screencast.start({
-      size: entry.viewport,
-      quality: 90,
-      onFrame: ({ data }) => {
-        // The clip starts at the first frame; each later frame replaces the one being held.
-        if (!recording.last) recording.started = performance.now();
-        pump(recording);
-        recording.last = data;
-      },
+      );
     });
+    done.catch(() => {});
+    const recording = { path, ffmpeg, done, actions: null, last: null, started: 0, written: 0, timer: null };
+    try {
+      if (options["show-actions"]) recording.actions = await entry.page.screencast.showActions();
+      recording.timer = setInterval(() => pump(recording), 1000 / FPS);
+      await entry.page.screencast.start({
+        size: entry.viewport,
+        quality: 90,
+        onFrame: ({ data }) => {
+          // The clip starts at the first frame; each later frame replaces the one being held.
+          if (!recording.last) recording.started = performance.now();
+          pump(recording);
+          recording.last = data;
+        },
+      });
+    } catch (error) {
+      clearInterval(recording.timer);
+      await recording.actions?.[Symbol.asyncDispose]?.();
+      ffmpeg.kill();
+      throw error;
+    }
     entry.recording = recording;
     return `recording to ${path}`;
   };
@@ -392,6 +405,12 @@ async function serve(state, base) {
   };
 
   const server = createServer((request, response) => {
+    // A JSON content type makes a browser preflight a cross-origin request, which this host never
+    // answers, so a web page open elsewhere can't drive the signed-in verification pages.
+    if (request.method !== "POST" || request.headers["content-type"] !== "application/json") {
+      response.writeHead(415).end();
+      return;
+    }
     let body = "";
     request.on("data", (chunk) => (body += chunk));
     request.on("end", async () => {

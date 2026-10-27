@@ -4,9 +4,10 @@
 //
 //   evidence.mjs add --label <text> [--before <file>] [--after <file>]
 //   evidence.mjs list
+//   evidence.mjs clear
 //   evidence.mjs publish --pr <number> [--dry-run]
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { extname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
@@ -143,6 +144,7 @@ const publish = () => {
     const type = kind(row.before ?? row.after);
     const prepare = (file, side) => {
       if (!file) return null;
+      if (!existsSync(join(root, file))) fail(`${file} from "${row.label}" no longer exists; run \`evidence clear\` and add again`);
       return type === "video" ? toMp4(file, index, side) : checkImage(file);
     };
     return { label: row.label, kind: type, before: prepare(row.before, "before"), after: prepare(row.after, "after") };
@@ -189,8 +191,16 @@ const publish = () => {
   console.log(gh(["pr", "view", flags.pr, "--json", "url", "--jq", ".url"]).trim());
 };
 
+// The manifest outlives `down`, and a run is named for its checkout, so a later PR from the same
+// worktree starts from the last one's pairs until they're cleared. The captured files stay.
+const clear = () => {
+  rmSync(manifest, { force: true });
+  console.log(`cleared ${relative(root, manifest)}`);
+};
+
 const command = positionals[0];
 if (command === "add") add();
 else if (command === "list") list();
 else if (command === "publish") publish();
-else fail("usage: evidence <add|list|publish>");
+else if (command === "clear") clear();
+else fail("usage: evidence <add|list|clear|publish>");

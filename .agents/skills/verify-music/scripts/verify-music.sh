@@ -7,7 +7,7 @@
 #   verify-music.sh cli [--side S] -- <music args>
 #   verify-music.sh logs [--side S] [lines]
 #   verify-music.sh ios <up|doctor|tap|type|swipe|describe|wait|shot|record|appearance|remote|down> [--side S] ...
-#   verify-music.sh evidence <add|list|publish> ...
+#   verify-music.sh evidence <add|list|clear|publish> ...
 #   verify-music.sh status
 #   verify-music.sh down [--side S] [--purge]
 #
@@ -58,11 +58,14 @@ free_port() {
 }
 
 # HEAD plus a hash of uncommitted changes, so doctor can tell when the checkout moved after `up`.
+# The revision of what the image is built from. `.dockerignore` leaves out `.agents` and `.claude`,
+# so a commit that only edits a skill keeps the revision and the after side stays current.
 checkout_rev() {
-  local head dirty
-  head="$(git -C "$root" rev-parse HEAD)"
-  dirty="$(git -C "$root" status --porcelain --untracked-files=normal -- . ':!captures' | sha1sum | cut -c1-12)"
-  echo "$head+$dirty"
+  local tree dirty
+  tree="$(git -C "$root" ls-tree HEAD | grep -vE $'\t\\.(agents|claude)$' | sha1sum | cut -c1-12)"
+  dirty="$(git -C "$root" status --porcelain --untracked-files=normal -- . ':!captures' ':!.agents' ':!.claude' \
+    | sha1sum | cut -c1-12)"
+  echo "$tree+$dirty"
 }
 
 chromium_path() {
@@ -149,7 +152,7 @@ cmd_up() {
   fi
   library="$(cd "$library" && pwd)"
   # The media service runs unprivileged in the container and must read every folder and file.
-  if [[ -n "$(find "$library" \( -type d \! -perm -o+rx \) -o \( -type f \! -perm -o+r \) -print -quit)" ]]; then
+  if [[ -n "$(find "$library" \( \( -type d \! -perm -o+rx \) -o \( -type f \! -perm -o+r \) \) -print -quit)" ]]; then
     if [[ "$library" == "$state/library" ]]; then chmod -R a+rX "$library"
     else die "$library is not readable by others; run chmod -R a+rX on it"; fi
   fi
@@ -199,7 +202,7 @@ cmd_doctor() {
   fi
   if [[ "$(read_state built)" == 1 ]]; then
     if [[ "$(read_state rev)" == "$(checkout_rev)" ]]; then echo "ok    image matches the checkout"
-    else echo "warn  the checkout changed since up; run \`down --side $side\` and \`up --side $side\` to test it"; fi
+    else echo "FAIL  the checkout changed since up; run \`down --side $side\` and \`up --side $side\` to test it"; failed=1; fi
   fi
   echo "info  version $(docker exec "$name" node -p 'require("/app/backend/package.json").version' 2>/dev/null), build $(docker exec "$name" cat /app/build-id 2>/dev/null), image $(read_state image)"
   return "$failed"
@@ -211,8 +214,14 @@ cmd_browser() {
   take_side "$@"
   [[ -s "$state/browser.port" ]] || die "no browser host on the $side side; run \`up --side $side\`"
   if [[ "${args[0]:-}" == restart ]]; then
-    kill "$(read_state browser.pid)" 2>/dev/null || true
-    sleep 1
+    local pid tries=0
+    pid="$(read_state browser.pid)"
+    kill "$pid" 2>/dev/null || true
+    # The old host removes browser.port as it exits, so wait for it before the new host writes one.
+    while kill -0 "$pid" 2>/dev/null; do
+      (( ++tries <= 300 )) || die "the browser host $pid did not stop"
+      sleep 0.1
+    done
     start_browser
     [[ -n "$(read_state key)" ]] && browser sign-in >/dev/null
     echo "browser host restarted; page main is signed in again"

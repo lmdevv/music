@@ -226,9 +226,11 @@ Proof standards:
 
 A PR that changes what a user sees ships before and after screenshots of each changed screen, at
 desktop and phone size for the web, and a short video of the changed flow. A new screen has only an
-after. Add each pair to the run's manifest, then publish:
+after. Add each pair to the run's manifest, then publish. The manifest outlives `down`, so start
+each PR with `evidence clear`, which empties it and keeps the files:
 
 ```sh
+$S evidence clear
 $S evidence add --label "Album page, desktop" --before captures/verify/<run>/before/album.png --after captures/verify/<run>/after/album.png
 $S evidence add --label "Play an album on a phone" --after captures/verify/<run>/after/play.mp4
 $S evidence list
