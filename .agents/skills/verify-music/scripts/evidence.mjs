@@ -121,10 +121,12 @@ const block = (items) => {
   }
   for (const item of videos) {
     lines.push(`**${item.label}**`, "");
-    // A video's local path stands on its own line: `gh --attach` swaps it for the uploaded
-    // asset, and GitHub renders an asset URL on its own line as a player.
-    if (item.before) lines.push("Before:", "", `./${item.before}`, "");
-    if (item.after) lines.push("After:", "", `./${item.after}`, "");
+    // `gh --attach` rewrites only a reference such as `![alt](./file)`; it appends an asset whose
+    // bare path it doesn't recognize to the end of the description. So a video goes in as a
+    // reference on its own line, and `publish` then turns the uploaded reference into a bare
+    // asset URL, which GitHub renders as a player.
+    if (item.before) lines.push("Before:", "", ref(item.before, `Before: ${item.label}`), "");
+    if (item.after) lines.push("After:", "", ref(item.after, `After: ${item.label}`), "");
   }
   lines.push(END);
   return lines.join("\n");
