@@ -138,29 +138,28 @@ export function Row({
     accessibilityLabel ??
     [title, subtitle, detail?.text].filter((part) => part !== undefined && part !== "").join(", ");
 
+  const pressable = onPress !== undefined || onLongPress !== undefined;
+
   const target = `min-w-0 flex-1 flex-row items-center gap-3 py-2 ${action === undefined ? "" : "pr-3"}`;
 
   return (
     <View
       className={`min-h-row-touch flex-row border-b border-border ${dimmed ? "opacity-disabled" : ""}`}
     >
-      {onPress === undefined && onLongPress === undefined ? (
-        <View className={target} accessible accessibilityLabel={label}>
-          {content}
-        </View>
-      ) : (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={label}
-          onPress={onPress}
-          onLongPress={onLongPress}
-          className={`${target} active:opacity-60`}
-        >
-          {content}
-        </Pressable>
-      )}
+      {/* One element whether or not the row presses, so gaining or losing a handler doesn't remount
+          it and drop VoiceOver focus; an inert row lets touches through to its parent. */}
+      <Pressable
+        accessibilityRole={pressable ? "button" : "none"}
+        accessibilityLabel={label}
+        pointerEvents={pressable ? "auto" : "box-none"}
+        onPress={onPress}
+        onLongPress={onLongPress}
+        className={pressable ? `${target} active:opacity-60` : target}
+      >
+        {content}
+      </Pressable>
       {action === undefined ? null : (
-        <View className="w-8 shrink-0 items-center justify-center">{action}</View>
+        <View className="w-8 shrink-0 items-center justify-center py-2">{action}</View>
       )}
     </View>
   );
