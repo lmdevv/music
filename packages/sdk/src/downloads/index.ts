@@ -8,7 +8,7 @@ export { DownloadResult, fetchFinishedFile, FetchOutcome } from "./finished-file
 
 export type { DownloadRequest, FinishedFileRequest, Transfer } from "./finished-file";
 
-export { offlineLibrary } from "./library";
+export { freedBytesOf, offlineLibrary } from "./library";
 
 export type {
   DownloadedCollection,

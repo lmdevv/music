@@ -40,7 +40,6 @@ import {
 import type { DownloadedFilter } from "@/lib/downloaded";
 import { useNowPlaying } from "@/player";
 
-/** One row of the list: a download or the Songs row, or under the Songs chip, one song here. */
 type Cell =
   | DownloadedEntry
   | { readonly kind: "song"; readonly copy: LocalCopy; readonly index: number };
@@ -54,7 +53,6 @@ const cellKey = (cell: Cell): string =>
     }),
   );
 
-/** An album or playlist download; it opens its page. */
 function CollectionRow({ item }: { readonly item: DownloadedCollection }) {
   const { target } = item;
 

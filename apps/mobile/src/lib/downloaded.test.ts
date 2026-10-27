@@ -235,7 +235,7 @@ describe("Downloaded's Songs row", () => {
       phone([ownSong(t3), pinOf(blueLines, [t1])], [copyOf(t1, 100), copyOf(t3, 50)]),
     );
 
-    expect(rows(entriesFor("all", library.entries))).toEqual(["Songs", "Blue Lines"]);
+    expect(rows(entriesFor("all", library.entries))).toEqual(["Blue Lines", "Songs"]);
     expect(rows(entriesFor("albums", library.entries))).toEqual(["Blue Lines"]);
     expect(rows(entriesFor("playlists", library.entries))).toEqual([]);
   });

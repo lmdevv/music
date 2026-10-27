@@ -30,10 +30,14 @@ const cancel = (subtitle: string | null): DownloadRowLabel => ({
   subtitle,
 });
 
-/** The rows for a download in `status`; `canToggle` is false while adding needs the server. */
+/**
+ * The rows for a download in `status`; `canToggle` is false while adding needs the server, and
+ * `freedBytes` is the space removing it frees, less the songs another download keeps.
+ */
 export const downloadRows = (
   status: DownloadStatus,
   canToggle: boolean,
+  freedBytes: number,
 ): ReadonlyArray<DownloadRowLabel> =>
   Match.value(status).pipe(
     Match.discriminatorsExhaustive("kind")({
@@ -65,12 +69,15 @@ export const downloadRows = (
         },
         cancel(null),
       ],
-      downloaded: ({ bytes }): ReadonlyArray<DownloadRowLabel> => [
+      downloaded: (): ReadonlyArray<DownloadRowLabel> => [
         {
           action: "remove",
           icon: "remove",
           title: "Remove download",
-          subtitle: `Frees ${formatBytes(bytes)} on this iPhone`,
+          subtitle:
+            freedBytes > 0
+              ? `Frees ${formatBytes(freedBytes)} on this iPhone`
+              : "Stays on this iPhone with your other downloads",
         },
       ],
       unavailable: (): ReadonlyArray<DownloadRowLabel> => [

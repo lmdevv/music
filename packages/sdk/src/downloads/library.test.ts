@@ -9,7 +9,7 @@ import {
 import type { DownloadPin, DownloadTarget, OfflineTrack } from "@music/commands/models";
 import { describe, expect, it } from "vitest";
 
-import { offlineLibrary } from "./library";
+import { freedBytesOf, offlineLibrary } from "./library";
 import { EMPTY_DOWNLOADS } from "./sync";
 import type { DownloadsSnapshot, LocalCopy, PinView, TrackDownloadState } from "./sync";
 
@@ -188,7 +188,7 @@ describe("offlineLibrary songs downloaded on their own", () => {
     expect(library.ownSongs.status).toEqual({ kind: "downloaded", bytes: 100 });
   });
 
-  it("groups every song of its own into one row, where the first of them was", () => {
+  it("groups every song of its own into one row after the albums and playlists", () => {
     const library = offlineLibrary(
       snapshot(
         [ownSong(t3), { pin: pin(playlist), members: [fetchable(t1)] }, ownSong(t2)],
@@ -198,7 +198,7 @@ describe("offlineLibrary songs downloaded on their own", () => {
 
     expect(
       library.entries.map((entry) => (entry.kind === "songs" ? "songs" : entry.item.target.kind)),
-    ).toEqual(["songs", "playlist"]);
+    ).toEqual(["playlist", "songs"]);
     expect(library.ownSongs).toMatchObject({ bytes: 250, artUri: "file:///vault/art/b.jpg" });
     expect(library.ownSongs.items.map(({ target }) => target.id)).toEqual([t3, t2]);
   });
@@ -216,6 +216,17 @@ describe("offlineLibrary songs downloaded on their own", () => {
     const alone = offlineLibrary(snapshot([ownSong(t1)], [copy(t1, 100)]));
 
     expect(alone.downloads[0]?.freedBytes).toBe(100);
+  });
+
+  it("counts a song as kept only by downloads that list it, as syncing does", () => {
+    const view = snapshot(
+      [{ pin: pin({ kind: "track", id: t1 }), members: null }, albumOf(t1, t2)],
+      [copy(t1, 100), copy(t2, 200)],
+    );
+
+    expect(offlineLibrary(view).downloads.map(({ freedBytes }) => freedBytes)).toEqual([0, 300]);
+    expect(freedBytesOf(view, album)).toBe(300);
+    expect(freedBytesOf(view, { kind: "track", id: t2 })).toBe(0);
   });
 
   it("says the group failed once every song still to come failed", () => {

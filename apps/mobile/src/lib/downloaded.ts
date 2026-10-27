@@ -92,10 +92,6 @@ export interface DownloadedLine {
 
 const KINDS = { track: "Song", album: "Album", playlist: "Playlist" } as const;
 
-/**
- * The line for a download in `status`: `settled` once it stands still, else where it stands, each
- * followed by `who` when there is one.
- */
 const statusLine = (
   status: DownloadStatus,
   settled: string | null,
@@ -133,7 +129,6 @@ export const downloadedLine = (item: DownloadedItem): DownloadedLine =>
   statusLine(
     item.status,
     KINDS[item.target.kind],
-    // A playlist names its songs, as D10 draws it; an album or song names its artist.
     item.target.kind === "playlist" && item.songs !== null
       ? countOf(item.songs, "song")
       : item.subtitle,
@@ -202,6 +197,9 @@ export const ownSongsQueue = (
 
   return {
     trackIds: here.map((item) => item.target.id),
-    index: Math.max(0, here.indexOf(tapped)),
+    index: Math.max(
+      0,
+      here.findIndex((item) => item.target.id === tapped.target.id),
+    ),
   };
 };

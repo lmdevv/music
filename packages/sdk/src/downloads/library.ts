@@ -5,6 +5,7 @@
 import type { AlbumId, TrackId } from "@music/commands/ids";
 import type { DownloadPin, DownloadTarget } from "@music/commands/models";
 
+import { targetKey } from "./plan";
 import { downloadStatus, holdersOf, progressOf } from "./status";
 import type { DownloadStatus } from "./status";
 import type { DownloadsSnapshot, DownloadUsage, LocalCopy, PinView } from "./sync";
@@ -78,8 +79,8 @@ export interface OfflineLibrary {
    */
   readonly downloads: ReadonlyArray<DownloadedItem>;
   /**
-   * Every download as one list shows it: each album and playlist, and `ownSongs` as one row where
-   * its first song's download sits, while it holds any.
+   * Every download as one list shows it: each album and playlist, then `ownSongs` as one row
+   * while it holds any.
    */
   readonly entries: ReadonlyArray<DownloadedEntry>;
   readonly ownSongs: DownloadedSongs;
@@ -96,14 +97,54 @@ const byDiscAndNumber = (left: LocalCopy, right: LocalCopy): number =>
   (left.track.trackNumber ?? Infinity) - (right.track.trackNumber ?? Infinity) ||
   left.track.title.localeCompare(right.track.title);
 
-/** The songs a download keeps: a song itself, or its members. */
 const keptTracks = ({ pin, members }: PinView): ReadonlyArray<TrackId> =>
   pin.target.kind === "track" ? [pin.target.id] : (members ?? []).map((member) => member.trackId);
+
+/** The songs a download lists, which syncing keeps for it; none until its first manifest. */
+const listed = ({ members }: PinView): ReadonlySet<TrackId> =>
+  new Set((members ?? []).map((member) => member.trackId));
+
+const keeperCounts = (snapshot: DownloadsSnapshot): ReadonlyMap<TrackId, number> => {
+  const keepers = new Map<TrackId, number>();
+
+  for (const view of snapshot.pins) {
+    for (const trackId of listed(view)) keepers.set(trackId, (keepers.get(trackId) ?? 0) + 1);
+  }
+
+  return keepers;
+};
+
+const heldCopies = (snapshot: DownloadsSnapshot, view: PinView): ReadonlyArray<LocalCopy> =>
+  [...new Set(keptTracks(view))].flatMap((trackId) => {
+    const copy = snapshot.copies.get(trackId);
+
+    return copy === undefined ? [] : [copy];
+  });
 
 const sizeOf = (held: ReadonlyArray<{ readonly bytes: number }>): number =>
   held.reduce((total, { bytes }) => total + bytes, 0);
 
-/** A download this device keeps, with the songs it lists. */
+/** The space of `held` that leaves with `view`: the songs no other download lists. */
+const freedBy = (
+  view: PinView,
+  held: ReadonlyArray<LocalCopy>,
+  keepers: ReadonlyMap<TrackId, number>,
+): number => {
+  const own = listed(view);
+
+  return sizeOf(
+    held.filter(({ track }) => (keepers.get(track.id) ?? 0) - (own.has(track.id) ? 1 : 0) === 0),
+  );
+};
+
+/** Space removing the download of `target` frees: its songs here that no other download keeps. */
+export const freedBytesOf = (snapshot: DownloadsSnapshot, target: DownloadTarget): number => {
+  const key = targetKey(target);
+  const view = snapshot.pins.find(({ pin }) => targetKey(pin.target) === key);
+
+  return view === undefined ? 0 : freedBy(view, heldCopies(snapshot, view), keeperCounts(snapshot));
+};
+
 interface Kept {
   readonly item: DownloadedItem;
   readonly members: PinView["members"];
@@ -111,25 +152,14 @@ interface Kept {
 
 /** Each download a snapshot keeps, with where it stands and what it holds here. */
 const keptDownloads = (snapshot: DownloadsSnapshot): ReadonlyArray<Kept> => {
-  const keepers = new Map<TrackId, number>();
-
-  for (const view of snapshot.pins) {
-    for (const trackId of new Set(keptTracks(view))) {
-      keepers.set(trackId, (keepers.get(trackId) ?? 0) + 1);
-    }
-  }
+  const keepers = keeperCounts(snapshot);
 
   return snapshot.pins.flatMap((view): ReadonlyArray<Kept> => {
     const { pin, members } = view;
 
     if (!pin.available) return [];
 
-    const held = [...new Set(keptTracks(view))].flatMap((trackId) => {
-      const copy = snapshot.copies.get(trackId);
-
-      return copy === undefined ? [] : [copy];
-    });
-
+    const held = heldCopies(snapshot, view);
     const songArt = held.find((copy) => copy.artUri !== null)?.artUri ?? null;
 
     const item: DownloadedItem = {
@@ -138,7 +168,7 @@ const keptDownloads = (snapshot: DownloadsSnapshot): ReadonlyArray<Kept> => {
       subtitle: pin.subtitle,
       songs: pin.target.kind === "track" ? 1 : (members?.length ?? null),
       bytes: sizeOf(held),
-      freedBytes: sizeOf(held.filter((copy) => keepers.get(copy.track.id) === 1)),
+      freedBytes: freedBy(view, held, keepers),
       artUri: pin.target.kind === "playlist" ? (pin.artUrl ?? songArt) : (songArt ?? pin.artUrl),
       status: downloadStatus(snapshot, pin.target),
     };
@@ -147,7 +177,6 @@ const keptDownloads = (snapshot: DownloadsSnapshot): ReadonlyArray<Kept> => {
   });
 };
 
-/** The songs of `kept` downloaded on their own that no album or playlist download holds. */
 const ownSongsOf = (snapshot: DownloadsSnapshot, kept: ReadonlyArray<Kept>): DownloadedSongs => {
   const holders = holdersOf(snapshot);
 
@@ -223,15 +252,14 @@ export const offlineLibrary = (snapshot: DownloadsSnapshot): OfflineLibrary => {
   const kept = keptDownloads(snapshot);
   const downloads = kept.map(({ item }) => item);
   const ownSongs = ownSongsOf(snapshot, kept);
-  const first = ownSongs.items[0]?.target.id;
 
   const entries = downloads.flatMap((item): ReadonlyArray<DownloadedEntry> => {
     const { target } = item;
 
-    if (target.kind !== "track") return [{ kind: "download", item: { ...item, target } }];
-
-    return target.id === first ? [{ kind: "songs", songs: ownSongs }] : [];
+    return target.kind === "track" ? [] : [{ kind: "download", item: { ...item, target } }];
   });
+
+  if (ownSongs.items.length > 0) entries.push({ kind: "songs", songs: ownSongs });
 
   return { downloads, entries, ownSongs, albums, playlists, songs, usage: snapshot.usage };
 };
