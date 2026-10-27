@@ -40,7 +40,8 @@ Preconditions:
   `$S browser wait-audio --advance 1`. The player bar shows `Doppelgänger`.
 - **CLI control.** With audio playing, run `$S cli -- pause`. `$S browser audio` prints
   `"playing":false`. Run `$S cli -- resume`, then `$S browser wait-audio --advance 1`.
-  `$S cli -- now --json` names the song and the browser as the active device.
+  `$S cli -- now --json` shows `"playing": true`, the song as `queue[index].title`, and the
+  browser (kind `web`) as `activeDevice`.
 - **Phone and Now Playing.** Run `$S browser sign-in --page phone --device "iPhone 15" --dark`,
   then the same album steps with `--page phone`. Then
   `$S browser click --page phone --role button --name "Open Now Playing"` and
