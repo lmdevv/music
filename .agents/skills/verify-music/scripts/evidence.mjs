@@ -133,6 +133,9 @@ const block = (items) => {
 };
 
 const gh = (args, input) => execFileSync("gh", args, { cwd: root, encoding: "utf8", input });
+// `--jq` ends its output with a newline. Writing that back would grow the description by a line on
+// every publish, so bodies are read and written without trailing whitespace.
+const readBody = () => gh(["pr", "view", flags.pr, "--json", "body", "--jq", ".body"]).trimEnd();
 
 const publish = () => {
   if (!flags.pr) fail("publish needs --pr");
@@ -148,7 +151,7 @@ const publish = () => {
   const files = items.flatMap((item) => [item.before, item.after]).filter(Boolean);
   if (files.length > 50) fail(`gh attaches at most 50 files per edit; this run has ${files.length}`);
 
-  const current = gh(["pr", "view", flags.pr, "--json", "body", "--jq", ".body"]).replace(/\n$/, "");
+  const current = readBody();
   const ours = block(items);
   const start = current.indexOf(START);
   const end = current.indexOf(END);
@@ -158,7 +161,7 @@ const publish = () => {
       : `${current}\n\n${ours}`;
   const bodyFile = join(flags.evidence, "pr", "body.md");
   mkdirSync(join(flags.evidence, "pr"), { recursive: true });
-  writeFileSync(bodyFile, `${body}\n`);
+  writeFileSync(bodyFile, `${body.trimEnd()}\n`);
   if (flags["dry-run"]) {
     console.log(ours);
     console.log(`\ndry run: would attach ${files.length} files to PR ${flags.pr}; body in ${relative(root, bodyFile)}`);
@@ -169,7 +172,7 @@ const publish = () => {
 
   // Read the body back: every local reference must now be an uploaded asset, and a video must be
   // a bare URL on its own line, which is the form GitHub plays inline.
-  let published = gh(["pr", "view", flags.pr, "--json", "body", "--jq", ".body"]);
+  let published = readBody();
   const videoImages = /!\[[^\]]*\]\((https:\/\/github\.com\/user-attachments\/assets\/[^)\s]+)\)/g;
   const section = published.slice(published.indexOf(START), published.indexOf(END));
   const fixed = section.replace(videoImages, (match, url, offset) => {
@@ -178,8 +181,8 @@ const publish = () => {
   });
   if (fixed !== section) {
     published = published.replace(section, fixed);
-    gh(["pr", "edit", flags.pr, "--body-file", "-"], published);
-    published = gh(["pr", "view", flags.pr, "--json", "body", "--jq", ".body"]);
+    gh(["pr", "edit", flags.pr, "--body-file", "-"], `${published}\n`);
+    published = readBody();
   }
   const left = published.match(/\.\/captures\/\S+/g) ?? [];
   if (left.length > 0) fail(`these references were not uploaded: ${left.join(", ")}`);
