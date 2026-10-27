@@ -24,7 +24,7 @@ const SETTLE = { duration: 220, dampingRatio: 1 } as const;
 const SLOP = 10;
 
 /** What a swipeable row's own press, hold, and VoiceOver action call. */
-export interface SwipeControls {
+interface SwipeControls {
   /** Closes an open row and returns true, so the press does nothing else; false when closed. */
   readonly settle: () => boolean;
   /** Closes the row and removes it, as the uncovered Remove does. */
