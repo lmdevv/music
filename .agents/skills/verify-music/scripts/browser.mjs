@@ -57,6 +57,7 @@ const FLAGS = {
   email: { type: "string" },
   password: { type: "string" },
   music: { type: "string" },
+  code: { type: "string" },
 };
 
 const { values: flags, positionals } = parseArgs({
@@ -259,6 +260,24 @@ async function serve(state, base) {
     return path;
   };
 
+  // Covers load lazily and decode off the main thread, so a screenshot taken right after a page
+  // renders shows their placeholder gradients. Wait until every image in view has loaded, decoded,
+  // and painted. Lazy images out of view never start, so they're left out.
+  const settleImages = async (page, options) => {
+    const inView = () =>
+      [...document.images].filter((image) => {
+        const box = image.getBoundingClientRect();
+        return box.bottom > 0 && box.top < innerHeight && box.width > 0;
+      });
+    await page.waitForFunction(`(${inView})().every((image) => image.complete)`, undefined, {
+      timeout: timeout(options),
+    });
+    await page.evaluate(
+      `Promise.all((${inView})().map((image) => image.decode().catch(() => {})))
+        .then(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))`,
+    );
+  };
+
   const navigation = (page) =>
     page
       .getByRole("navigation", { name: "Library" })
@@ -320,6 +339,7 @@ async function serve(state, base) {
     },
     async screenshot({ page }, options) {
       const path = output(options, options.path);
+      await settleImages(page, options);
       if (hasLocator(options)) await locate(page, options).screenshot({ path });
       else await page.screenshot({ path, fullPage: options.full });
       return path;
@@ -372,6 +392,19 @@ async function serve(state, base) {
       await page.getByRole("button", { name: "Open my library" }).click();
       await page.getByRole("heading", { name: "Recently added" }).waitFor();
       return `signed in as ${ADMIN.email}`;
+    },
+    async join({ page }, options) {
+      if (!options.code || !options.name || !options.email) throw new Error("join needs --code, --name, and --email");
+      await page.goto(`/invite/${options.code}`);
+      // An invite made for an address shows it read-only.
+      const email = page.getByLabel("Email");
+      await email.waitFor({ timeout: timeout(options) });
+      if (await email.isEditable()) await email.fill(options.email);
+      await page.getByLabel("Your name").fill(options.name);
+      await page.getByLabel("Choose a password").fill(options.password ?? ADMIN.password);
+      await page.getByRole("button", { name: "Join" }).click();
+      await navigation(page).waitFor({ timeout: timeout(options) });
+      return `joined as ${options.email}`;
     },
     async "create-key"({ page }) {
       await page.goto("/settings/keys");
