@@ -187,15 +187,25 @@ async function serve(state, base) {
       };
     });
 
-  // Screencast frames go straight to the system ffmpeg as H.264 MP4, the format GitHub plays in
-  // every browser. Frames arrive when the page changes; `fps=30` fills the gaps between them.
+  // Screencast frames go to the system ffmpeg as H.264 MP4, the format GitHub plays in every
+  // browser. Frames arrive only when the page changes, so the host paces them itself: it writes
+  // the latest frame at a constant FPS for the time that has passed, and a still page holds its
+  // last frame until the stop. ffmpeg's wallclock timestamps can't do this: they drop a still
+  // tail, its `fps` filter pads the last frame by the gap before it, and probing restamps small
+  // frames, so clips ran too short or too long.
+  const FPS = 30;
+  const pump = (recording) => {
+    if (!recording.last || recording.ffmpeg.stdin.destroyed) return;
+    const due = Math.floor(((performance.now() - recording.started) / 1000) * FPS) + 1;
+    for (; recording.written < due; recording.written += 1) recording.ffmpeg.stdin.write(recording.last);
+  };
+
   const startRecording = async (entry, options) => {
     if (entry.recording) throw new Error("this page is already recording");
     const path = output(options, options.path);
     const ffmpeg = spawn("ffmpeg", [
-      "-y", "-loglevel", "error", "-f", "image2pipe", "-c:v", "mjpeg",
-      "-use_wallclock_as_timestamps", "1", "-i", "-",
-      "-vf", "fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-preset", "veryfast",
+      "-y", "-loglevel", "error", "-f", "image2pipe", "-framerate", String(FPS), "-c:v", "mjpeg",
+      "-i", "-", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-preset", "veryfast",
       "-crf", "26", "-pix_fmt", "yuv420p", "-movflags", "+faststart", path,
     ], { stdio: ["pipe", "ignore", "pipe"] });
     let errors = "";
@@ -206,23 +216,31 @@ async function serve(state, base) {
       ),
     );
     const actions = options["show-actions"] ? await entry.page.screencast.showActions() : null;
+    const recording = { path, ffmpeg, done, actions, last: null, started: 0, written: 0, timer: null };
+    recording.timer = setInterval(() => pump(recording), 1000 / FPS);
     await entry.page.screencast.start({
       size: entry.viewport,
       quality: 90,
       onFrame: ({ data }) => {
-        if (!ffmpeg.stdin.destroyed) ffmpeg.stdin.write(data);
+        // The clip starts at the first frame; each later frame replaces the one being held.
+        if (!recording.last) recording.started = performance.now();
+        pump(recording);
+        recording.last = data;
       },
     });
-    entry.recording = { path, ffmpeg, done, actions };
+    entry.recording = recording;
     return `recording to ${path}`;
   };
 
   const stopRecording = async (entry) => {
     if (!entry.recording) throw new Error("this page is not recording");
-    const { path, ffmpeg, done, actions } = entry.recording;
+    const recording = entry.recording;
+    const { path, ffmpeg, done, actions } = recording;
     entry.recording = null;
     await entry.page.screencast.stop();
     await actions?.[Symbol.asyncDispose]?.();
+    clearInterval(recording.timer);
+    pump(recording);
     ffmpeg.stdin.end();
     await done;
     return path;
