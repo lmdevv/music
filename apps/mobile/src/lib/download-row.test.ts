@@ -73,6 +73,15 @@ describe("downloadRows", () => {
         subtitle: "Frees 358 MB on this iPhone",
       },
     ]);
+
+    expect(downloadRows({ kind: "downloaded", bytes: 0 }, true, 0)).toEqual([
+      {
+        action: "remove",
+        icon: "remove",
+        title: "Remove download",
+        subtitle: "Takes no space on this iPhone",
+      },
+    ]);
   });
 
   it("leaves a song its album keeps alone", () => {

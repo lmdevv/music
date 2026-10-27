@@ -15,7 +15,7 @@ import { OfflineNotice } from "@/components/states/offline-notice";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useDownloadsLibrary } from "@/downloads";
 import {
-  downloadedEmpty,
+  OWN_SONGS_EMPTY,
   OWN_SONGS_NOTE,
   ownSongLine,
   ownSongsQueue,
@@ -46,7 +46,7 @@ export default function DownloadedSongs() {
       }
       footer={
         ownSongs.items.length === 0 ? (
-          <EmptyState icon={CircleArrowDown} {...downloadedEmpty("songs", true)} />
+          <EmptyState icon={CircleArrowDown} {...OWN_SONGS_EMPTY} />
         ) : null
       }
       renderItem={({ item }) => (

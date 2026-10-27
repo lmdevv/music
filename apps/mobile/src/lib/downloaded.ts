@@ -177,6 +177,12 @@ export const ownSongsSummary = (songs: DownloadedSongs): string =>
 export const OWN_SONGS_NOTE =
   "Downloaded on their own. A song in a downloaded album or playlist is listed there.";
 
+/** D10c's empty state, which also shows once a downloaded album or playlist holds every song. */
+export const OWN_SONGS_EMPTY: EmptyCopy = {
+  title: "No songs downloaded on their own",
+  body: "Songs you download from their menu show here.\nA song in a downloaded album or playlist is listed there.",
+};
+
 /** What a tap on a song of D10c plays, and from where. */
 export interface OwnSongsQueue {
   readonly trackIds: ReadonlyArray<TrackId>;

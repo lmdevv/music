@@ -69,7 +69,7 @@ export const downloadRows = (
         },
         cancel(null),
       ],
-      downloaded: (): ReadonlyArray<DownloadRowLabel> => [
+      downloaded: ({ bytes }): ReadonlyArray<DownloadRowLabel> => [
         {
           action: "remove",
           icon: "remove",
@@ -77,7 +77,9 @@ export const downloadRows = (
           subtitle:
             freedBytes > 0
               ? `Frees ${formatBytes(freedBytes)} on this iPhone`
-              : "Stays on this iPhone with your other downloads",
+              : bytes > 0
+                ? "Stays on this iPhone with your other downloads"
+                : "Takes no space on this iPhone",
         },
       ],
       unavailable: (): ReadonlyArray<DownloadRowLabel> => [
