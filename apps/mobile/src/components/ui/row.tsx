@@ -2,6 +2,7 @@
  * Paper's list row (pages 12 · 04 and 13): at least 56pt tall (64pt with 48pt art), a fixed leading
  * lane (48pt art or a 32pt icon slot), title over subtitle, and a fixed 32pt trailing lane, with a
  * full-width hairline under every row. The lanes keep their width when empty, so columns line up across rows.
+ * The whole row is one touch target, except a `trailingAction`, which keeps its own press.
  */
 import { Check, ChevronRight, Ellipsis } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
@@ -25,8 +26,20 @@ type RowLeading =
       readonly filled?: boolean;
     };
 
+type RowTrailing =
+  | {
+      /** Decorative trailing content, such as `RowChevron` or `RowCheck`; a tap on it presses the row. */
+      readonly trailing?: ReactNode;
+      readonly trailingAction?: never;
+    }
+  | {
+      readonly trailing?: never;
+      /** An action with its own press, such as `RowMore` or a drag grip; VoiceOver reads it apart from the row. */
+      readonly trailingAction?: ReactNode;
+    };
+
 /** Props for `Row`. */
-export interface RowProps {
+export type RowProps = RowTrailing & {
   readonly title: string;
   readonly subtitle?: string;
   /** Muted by default; a failed download's subtitle is danger. */
@@ -34,12 +47,10 @@ export interface RowProps {
   /** A 12pt glyph before the subtitle, such as a song's download state. */
   readonly subtitleGlyph?: ReactNode;
   readonly leading?: RowLeading;
-  /** The trailing lane: `RowChevron`, `RowCheck`, `RowMore`, or nothing. */
-  readonly trailing?: ReactNode;
   /**
    * A muted figure before the trailing lane: a count at 14/20 (`callout`, D09) or a size in mono
-   * (D10). With a detail and no `trailing`, the row drops the empty lane and the figure meets the
-   * edge. VoiceOver skips it, so put it in `accessibilityLabel`.
+   * (D10). With a detail and no trailing content, the row drops the empty lane and the figure meets
+   * the edge. The row's default label reads it after the subtitle.
    */
   readonly detail?: { readonly text: string; readonly variant: "callout" | "mono" } | undefined;
   /** The playing row: accent title at semibold. */
@@ -48,9 +59,9 @@ export interface RowProps {
   readonly dimmed?: boolean;
   readonly onPress?: (() => void) | undefined;
   readonly onLongPress?: (() => void) | undefined;
-  /** Read instead of the title and subtitle, when they don't say enough. */
+  /** Read instead of the title, subtitle, and detail, when they don't say enough. */
   readonly accessibilityLabel?: string | undefined;
-}
+};
 
 function Leading({ leading }: { readonly leading: RowLeading }) {
   if (leading.kind === "art") {
@@ -78,6 +89,7 @@ export function Row({
   subtitleGlyph,
   leading,
   trailing,
+  trailingAction,
   detail,
   active = false,
   dimmed = false,
@@ -85,7 +97,9 @@ export function Row({
   onLongPress,
   accessibilityLabel,
 }: RowProps) {
-  const main = (
+  const action = trailingAction ?? undefined;
+
+  const content = (
     <>
       {leading === undefined ? null : <Leading leading={leading} />}
       <View className="min-w-0 flex-1">
@@ -109,21 +123,30 @@ export function Row({
           </View>
         )}
       </View>
+      {detail === undefined ? null : (
+        <Text variant={detail.variant} tone="muted" className="shrink-0">
+          {detail.text}
+        </Text>
+      )}
+      {action !== undefined || (detail !== undefined && trailing === undefined) ? null : (
+        <View className="w-8 shrink-0 items-center">{trailing}</View>
+      )}
     </>
   );
 
-  const label = accessibilityLabel ?? (subtitle === undefined ? title : `${title}, ${subtitle}`);
-  const lane = "min-w-0 flex-1 flex-row items-center gap-3";
+  const label =
+    accessibilityLabel ??
+    [title, subtitle, detail?.text].filter((part) => part !== undefined && part !== "").join(", ");
 
-  // The trailing lane sits beside the row's own target, not inside it, so VoiceOver reaches its
-  // action (an ellipsis menu) as a separate button.
+  const target = `min-w-0 flex-1 flex-row items-center gap-3 py-2 ${action === undefined ? "" : "pr-3"}`;
+
   return (
     <View
-      className={`min-h-row-touch flex-row items-center gap-3 border-b border-border py-2 ${dimmed ? "opacity-disabled" : ""}`}
+      className={`min-h-row-touch flex-row border-b border-border ${dimmed ? "opacity-disabled" : ""}`}
     >
       {onPress === undefined && onLongPress === undefined ? (
-        <View className={lane} accessible accessibilityLabel={label}>
-          {main}
+        <View className={target} accessible accessibilityLabel={label}>
+          {content}
         </View>
       ) : (
         <Pressable
@@ -131,25 +154,13 @@ export function Row({
           accessibilityLabel={label}
           onPress={onPress}
           onLongPress={onLongPress}
-          className={`${lane} active:opacity-60`}
+          className={`${target} active:opacity-60`}
         >
-          {main}
+          {content}
         </Pressable>
       )}
-      {detail === undefined ? null : (
-        // The row's label carries the figure, so VoiceOver doesn't stop on it twice.
-        <Text
-          variant={detail.variant}
-          tone="muted"
-          className="shrink-0"
-          accessibilityElementsHidden
-          importantForAccessibility="no"
-        >
-          {detail.text}
-        </Text>
-      )}
-      {detail !== undefined && trailing === undefined ? null : (
-        <View className="w-8 shrink-0 items-center">{trailing}</View>
+      {action === undefined ? null : (
+        <View className="w-8 shrink-0 items-center justify-center">{action}</View>
       )}
     </View>
   );
@@ -165,7 +176,7 @@ export function RowCheck() {
   return <Icon icon={Check} tone="accent" size="inline" />;
 }
 
-/** The trailing ellipsis that opens a row's actions, with a 44pt target over the 32pt lane. */
+/** The `trailingAction` ellipsis that opens a row's actions, with a 44pt target over the 32pt lane. */
 export function RowMore({
   label,
   onPress,
