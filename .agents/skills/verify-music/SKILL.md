@@ -241,9 +241,10 @@ and, on a free plan, for a video. It writes a `## Screenshots and video` block b
 `<!-- verify-music:start -->` and `<!-- verify-music:end -->` and leaves the rest of the PR
 description alone. It runs `gh pr edit --attach`, which uploads each file to
 `github.com/user-attachments` and rewrites its local path. It then reads the description back and
-fails if a `./captures/` path is left. The repo is public, so anyone with a link can open an
-upload. Never capture secrets: the `/settings/keys` screen right after creating a key, a reset
-link, or an invite code.
+fails if a `./captures/` path is left. Publishing again replaces the block. To check an upload,
+fetch it with `curl -sL`: the asset redirects to a signed S3 URL that answers `HEAD` with 403 and
+`GET` with 200. The repo is public, so anyone with a link can open an upload. Never capture
+secrets: the `/settings/keys` screen right after creating a key, a reset link, or an invite code.
 
 ## Cleanup
 
@@ -273,6 +274,9 @@ feature's file before you drive it, and add to the map when a change adds a feat
 
 - `--show-actions` draws a pointer and step titles on the page while a recording runs, and they
   also show in screenshots taken then. Take stills outside a recording.
+- A recording runs in real time, and scripted steps finish in about a second, too fast to follow.
+  Pause a second or two after each step's result (`sleep 2` between commands) and before
+  `record-stop`, so a reviewer sees each state. A still page holds its last frame.
 - A shortcut key such as `n` or `/` types into a focused field instead. Open a page where focus is
   outside fields, such as an album, before you press it.
 - The before side runs main's server with the CLI and dev client built from this checkout. If the
