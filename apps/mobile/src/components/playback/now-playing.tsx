@@ -9,7 +9,7 @@
  * sliders keep their own drags. With nothing queued it says so (G14).
  */
 import type { TrackId } from "@music/commands/ids";
-import { lyricsAnswer, lyricsOffer, offlineLyrics } from "@music/player/lyrics";
+import { lyricsAnswer, lyricsButton, lyricsOffer, offlineLyrics } from "@music/player/lyrics";
 import type { LyricsAnswer, LyricsOffer } from "@music/player/lyrics";
 import { useRead, useReadSettled, useRun } from "@music/sdk/react";
 import * as Haptics from "expo-haptics";
@@ -128,13 +128,17 @@ const COVER_TAP: Readonly<
     CoverTap,
     {
       readonly role: "button" | "image";
-      readonly label: (album: string) => string;
+      readonly label: (album: string, offer: LyricsOffer) => string;
       readonly hint?: string;
     }
   >
 > = {
   close: { role: "button", label: () => "Show the cover" },
-  lyrics: { role: "button", label: () => "Lyrics", hint: "Shows the lyrics" },
+  lyrics: {
+    role: "button",
+    label: (_album, offer) => lyricsButton(offer, false).label,
+    hint: "Shows the lyrics",
+  },
   none: { role: "image", label: (album) => `Cover of ${album}` },
 };
 
@@ -477,7 +481,8 @@ function Stage({
 }) {
   const { open } = view;
   const folds = foldsOf(view);
-  const chip = LYRICS_CHIP[lyricsOffer(lyrics)];
+  const offer = lyricsOffer(lyrics);
+  const chip = LYRICS_CHIP[offer];
   const tap = COVER_TAP[coverTap(open, chip)];
   const [box, setBox] = useState<LayoutRectangle | null>(null);
   const [titleHeight, setTitleHeight] = useState(0);
@@ -571,8 +576,9 @@ function Stage({
       <Animated.View style={cover} className="absolute overflow-hidden">
         <Pressable
           accessibilityRole={tap.role}
-          accessibilityLabel={tap.label(song.album)}
+          accessibilityLabel={tap.label(song.album, offer)}
           accessibilityHint={tap.hint}
+          accessibilityState={{ busy: !open && chip === "spinner" }}
           disabled={tap.role === "image"}
           onPress={open ? onClose : onOpenLyrics}
           className="size-full"
