@@ -30,7 +30,7 @@ function AlbumsPage() {
     <div className="flex flex-col gap-7 px-5 pt-safe-top lg:px-12 lg:pt-row">
       <PageHeader
         eyebrow={home === undefined ? null : plural(home.stats.albums, "album")}
-        title="Albums"
+        title="Your albums"
         actions={
           <span className="hidden font-sans text-sm/xs font-medium text-text-muted lg:block">
             Recently added
