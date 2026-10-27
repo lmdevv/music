@@ -88,7 +88,7 @@ touch `.agents/` don't count, since the image leaves them out.
 ### Demo data
 
 Every side starts from the same data, so evidence from any machine looks alike and shows nothing
-personal or copyrighted.
+personal or unlicensed.
 
 - **Music.** `ghcr.io/lmdevv/music-demo-library:v1` holds the five Creative Commons releases of
   `scripts/download-demo-music.sh` (28 songs, 520 MB, two FLAC EPs) and their `CREDITS.md`. It's a
@@ -312,6 +312,8 @@ feature's file before you drive it, and add to the map when a change adds a feat
 - A recording runs in real time, and scripted steps finish in about a second, too fast to follow.
   Pause a second or two after each step's result (`sleep 2` between commands) and before
   `record-stop`, so a reviewer sees each state. A still page holds its last frame.
+- The app scrolls inside its own panels, not the page, so `screenshot --full` captures only the
+  window. To show something below the fold, screenshot its element, which scrolls it into view.
 - A shortcut key such as `n` or `/` types into a focused field instead. Open a page where focus is
   outside fields, such as an album, before you press it.
 - The before side runs main's server with the CLI and dev client built from this checkout. If the

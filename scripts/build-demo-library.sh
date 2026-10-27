@@ -19,9 +19,14 @@ while (($#)); do
   esac
 done
 
-if ((push)) && docker buildx imagetools inspect "$image" >/dev/null 2>&1; then
-  echo "$image is already published; bump the version in deploy/demo-library/image to change it"
-  exit 0
+# Push only when the registry says the tag doesn't exist. Any other failure, such as the registry
+# being unreachable, stops here rather than risk replacing a published version.
+if ((push)); then
+  if found="$(docker buildx imagetools inspect "$image" 2>&1)"; then
+    echo "$image is already published; bump the version in deploy/demo-library/image to change it"
+    exit 0
+  fi
+  [[ "$found" == *": not found"* ]] || { echo "could not check $image: $found" >&2; exit 1; }
 fi
 
 work="$(mktemp -d)"

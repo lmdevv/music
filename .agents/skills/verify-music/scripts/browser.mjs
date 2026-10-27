@@ -261,21 +261,32 @@ async function serve(state, base) {
   };
 
   // Covers load lazily and decode off the main thread, so a screenshot taken right after a page
-  // renders shows their placeholder gradients. Wait until every image in view has loaded, decoded,
-  // and painted. Lazy images out of view never start, so they're left out.
+  // renders shows their placeholder gradients. Wait until every image the screenshot covers has
+  // loaded, decoded, and painted. For a full-page shot that's every image, so lazy ones below the
+  // fold are told to load now; otherwise it's the ones in view, since lazy ones elsewhere never start.
   const settleImages = async (page, options) => {
-    const inView = () =>
-      [...document.images].filter((image) => {
-        const box = image.getBoundingClientRect();
-        return box.bottom > 0 && box.top < innerHeight && box.width > 0;
-      });
-    await page.waitForFunction(`(${inView})().every((image) => image.complete)`, undefined, {
-      timeout: timeout(options),
-    });
-    await page.evaluate(
-      `Promise.all((${inView})().map((image) => image.decode().catch(() => {})))
-        .then(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))`,
+    // One function evaluated in the page: a string predicate, as `waitForFunction` polls it, needs
+    // the eval that the app's Content-Security-Policy blocks.
+    const settled = await page.evaluate(
+      async ([full, ms]) => {
+        const covered = () =>
+          [...document.images].filter((image) => {
+            if (full) image.loading = "eager";
+            const box = image.getBoundingClientRect();
+            return box.width > 0 && (full || (box.bottom > 0 && box.top < innerHeight));
+          });
+        const deadline = Date.now() + ms;
+        while (!covered().every((image) => image.complete)) {
+          if (Date.now() > deadline) return false;
+          await new Promise((done) => setTimeout(done, 100));
+        }
+        await Promise.all(covered().map((image) => image.decode().catch(() => {})));
+        await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+        return true;
+      },
+      [Boolean(options.full), timeout(options)],
     );
+    if (!settled) throw new Error("the images in the screenshot did not finish loading");
   };
 
   const navigation = (page) =>
@@ -339,6 +350,8 @@ async function serve(state, base) {
     },
     async screenshot({ page }, options) {
       const path = output(options, options.path);
+      // An element below the fold scrolls into view first, so its covers count as in view.
+      if (hasLocator(options)) await locate(page, options).scrollIntoViewIfNeeded();
       await settleImages(page, options);
       if (hasLocator(options)) await locate(page, options).screenshot({ path });
       else await page.screenshot({ path, fullPage: options.full });
