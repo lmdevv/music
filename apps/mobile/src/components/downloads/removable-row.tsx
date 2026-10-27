@@ -44,7 +44,7 @@ function SwipeableRow({
   const canvas = useThemeColor("--color-canvas");
 
   return (
-    <SwipeToRemove resetKey={resetKey} background={canvas} onRemove={onRemove}>
+    <SwipeToRemove swipeBack resetKey={resetKey} background={canvas} onRemove={onRemove}>
       {({ settle, remove }) => {
         const press = () => {
           if (!settle()) onPress();

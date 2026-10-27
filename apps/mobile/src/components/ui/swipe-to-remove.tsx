@@ -20,6 +20,9 @@ const FLICK_SPEED = 500;
 /** Paper's 220ms damped spring with no bounce (A17), for a row settling open or closed. */
 const SETTLE = { duration: 220, dampingRatio: 1 } as const;
 
+/** How far a drag moves, in points, before the row takes it, or lets a rightward one go. */
+const SLOP = 10;
+
 /** What a swipeable row's own press, hold, and VoiceOver action call. */
 export interface SwipeControls {
   /** Closes an open row and returns true, so the press does nothing else; false when closed. */
@@ -32,6 +35,11 @@ export interface SwipeControls {
 export interface SwipeToRemoveProps {
   /** Off for a copy of the row that can't be swiped, such as the queue's lifted row. */
   readonly enabled?: boolean;
+  /**
+   * On for a row on a screen that a rightward drag takes back: a closed row, which can't move
+   * right, leaves that drag to the screen. Off, a closed row takes it, so it never counts as a tap.
+   */
+  readonly swipeBack?: boolean;
   /** What the row shows; a recycled row starts closed when it changes. */
   readonly resetKey: string;
   /** The color under the row, so it covers Remove until it slides aside. */
@@ -44,6 +52,7 @@ export interface SwipeToRemoveProps {
 /** A row that uncovers Remove when swiped left. VoiceOver can't swipe: give the row an action. */
 export function SwipeToRemove({
   enabled = true,
+  swipeBack = false,
   resetKey,
   background,
   onRemove,
@@ -52,27 +61,35 @@ export function SwipeToRemove({
   const offset = useSharedValue(0);
   const start = useSharedValue(0);
   const speed = useSharedValue(0);
+  // How far right a drag goes before the row lets it go. Only a closed row with `swipeBack` lets
+  // go; an open row takes the drag to close.
+  const closedLetGo = swipeBack ? SLOP : Number.POSITIVE_INFINITY;
+  const letGoRight = useSharedValue(closedLetGo);
 
   useEffect(() => {
     offset.value = 0;
-  }, [offset, resetKey]);
+    letGoRight.value = closedLetGo;
+  }, [offset, letGoRight, closedLetGo, resetKey]);
 
   const remove = () => {
     offset.value = 0;
+    letGoRight.value = closedLetGo;
     onRemove();
   };
 
   const settle = (): boolean => {
     if (offset.value >= 0) return false;
     offset.value = withSpring(0, SETTLE);
+    letGoRight.value = closedLetGo;
 
     return true;
   };
 
   const swipe = usePanGesture({
     enabled,
-    activeOffsetX: [-10, 10],
-    failOffsetY: [-10, 10],
+    activeOffsetX: [-SLOP, SLOP],
+    failOffsetX: letGoRight,
+    failOffsetY: [-SLOP, SLOP],
     onBegin: () => {
       "worklet";
       start.value = offset.value;
@@ -91,6 +108,7 @@ export function SwipeToRemove({
 
       speed.value = 0;
       offset.value = withSpring(open ? -REMOVE_WIDTH : 0, SETTLE);
+      letGoRight.value = open ? Number.POSITIVE_INFINITY : closedLetGo;
     },
   });
 
