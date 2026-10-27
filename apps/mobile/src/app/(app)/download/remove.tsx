@@ -1,6 +1,7 @@
 /**
  * Remove download?: asked from a finished download's ring (Paper's D04, "same sheet as C12"). Its
- * files leave this iPhone at once; the server's library is untouched.
+ * files leave this iPhone at once, less the songs another download keeps; the server's library is
+ * untouched.
  */
 import { DownloadTarget } from "@music/commands/models";
 import { targetKey } from "@music/sdk/downloads";
@@ -28,7 +29,11 @@ function Confirm({
 
   // Worded once: the sheet must not change its words while it closes over the removal.
   const [copy] = useState(() =>
-    removeDownloadCopy(item?.title ?? title ?? "This download", item?.bytes ?? 0),
+    removeDownloadCopy(
+      item?.title ?? title ?? "This download",
+      target.kind,
+      item ?? { bytes: 0, freedBytes: 0 },
+    ),
   );
 
   return (
