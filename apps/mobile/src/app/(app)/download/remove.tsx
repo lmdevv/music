@@ -49,8 +49,15 @@ function Confirm({
       onConfirm={async () => {
         setFrozen(live);
 
-        // Toggling a download that is already gone would start it again.
-        if (download.status.kind !== "none") await download.toggle();
+        try {
+          // Toggling a download that is already gone would start it again.
+          if (download.status.kind !== "none") await download.toggle();
+        } catch (cause) {
+          // The sheet stays open to try again, so it follows the library again.
+          setFrozen(null);
+          throw cause;
+        }
+
         router.back();
       }}
     />
