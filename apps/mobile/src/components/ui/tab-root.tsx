@@ -47,7 +47,8 @@ function AccountButton() {
 /**
  * The sticky top bar, a constant status bar inset plus 44pt so the content never jumps: the avatar
  * alone until collapsed, then the page color with the title, fading out just below. The large
- * title row starts under it, beside the avatar.
+ * title row starts under it, beside the avatar. On an iPad the collapsed bar draws no title: the
+ * floating tab bar sits at the top center where it would go, and already names the tab.
  */
 function CompactBar({
   title,
@@ -86,7 +87,7 @@ function CompactBar({
           <Animated.View
             entering={FadeIn.duration(180)}
             exiting={FadeOut.duration(120)}
-            className="absolute inset-x-0 items-center"
+            className="absolute inset-x-0 items-center tablet:hidden"
             pointerEvents="none"
           >
             <Text variant="bodyStrong" numberOfLines={1} accessibilityRole="header">
