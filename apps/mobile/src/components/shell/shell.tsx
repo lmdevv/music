@@ -6,7 +6,8 @@
  *
  * `shellOf` says what the window gets. Pinned, the sidebar sits beside the pages until its button
  * hides it; at `tablet` it stays hidden behind a button on the page and opens over everything,
- * with a scrim that closes it, as does choosing anything in it.
+ * with a scrim that closes it, as does choosing anything in it. The Now Playing panel sits beside
+ * the pages as a pane, or above the bar as a sheet; the pages take what room it leaves.
  */
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
@@ -19,10 +20,12 @@ import { useThemeLength } from "@/lib/theme-color";
 import { useNowPlaying } from "@/player";
 
 import { ContentArea } from "./content-area";
+import { InspectorPane, InspectorSheet } from "./inspector";
 import { PlayerBar } from "./player-bar";
 import { Sidebar } from "./sidebar";
 import { SidebarControlContext } from "./sidebar-control";
 import type { SidebarControl } from "./sidebar-control";
+import { useInspector } from "./use-inspector";
 
 const noop = () => undefined;
 
@@ -87,6 +90,8 @@ export function Shell({
   const beside = layout.sidebar === "pinned" && !hidden;
   const framed = layout.sidebar !== "none";
   const hasBar = layout.player === "bar" && nowPlaying !== null;
+  const inspector = useInspector(layout.inspector, nowPlaying?.trackId ?? null);
+  const panelSong = inspector.open ? nowPlaying : null;
 
   const control = useMemo<SidebarControl | null>(() => {
     if (layout.sidebar === "none") return null;
@@ -120,8 +125,14 @@ export function Shell({
             </View>
           ) : null}
           <ContentArea framed={framed}>{children}</ContentArea>
+          {panelSong !== null && inspector.placement === "pane" ? (
+            <InspectorPane song={panelSong} inspector={inspector} />
+          ) : null}
         </View>
-        {hasBar ? <PlayerBar /> : null}
+        {panelSong !== null && inspector.placement === "sheet" ? (
+          <InspectorSheet song={panelSong} inspector={inspector} />
+        ) : null}
+        {hasBar ? <PlayerBar inspector={inspector} /> : null}
         {overlaid ? <SidebarOverlay onClose={() => setOverlaid(false)} /> : null}
       </SidebarControlContext>
     </View>
