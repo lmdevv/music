@@ -92,7 +92,7 @@ function Loaded({
   readonly canShare: boolean;
 }) {
   const { play } = usePlayerActions();
-  const tablet = useWindowLayout().widthClass !== "phone";
+  const { tablet } = useWindowLayout();
   const { playlist } = detail;
   const owner = playlist.access === "owner";
   const canEdit = canEditPlaylistItems(playlist.access);
@@ -128,12 +128,17 @@ function Loaded({
         owner ? (
           <>
             <OfflineNotice variant="bar" className="pb-4" />
-            <OwnerHeader playlist={playlist} canShare={canShare} trackIds={trackIds} />
+            <OwnerHeader
+              playlist={playlist}
+              canShare={canShare}
+              trackIds={trackIds}
+              tablet={tablet}
+            />
           </>
         ) : (
           <>
             <OfflineNotice variant="bar" className="pb-4" />
-            <SharedHeader playlist={playlist} trackIds={trackIds} />
+            <SharedHeader playlist={playlist} trackIds={trackIds} tablet={tablet} />
             {detail.items.length === 0 ? <Empty detail={detail} canEdit={canEdit} /> : null}
           </>
         )

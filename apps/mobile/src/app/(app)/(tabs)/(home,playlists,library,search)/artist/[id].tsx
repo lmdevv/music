@@ -24,7 +24,7 @@ import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AlbumRail } from "@/components/browse/album-rail";
-import { DetailHeader } from "@/components/browse/detail-header";
+import { DetailHeader, DetailHeaderPlaceholder } from "@/components/browse/detail-header";
 import { ListPage } from "@/components/browse/list-page";
 import { usePlayList } from "@/components/browse/play";
 import { PlayShuffle } from "@/components/browse/play-shuffle";
@@ -272,7 +272,7 @@ function Artist({ artistId }: { readonly artistId: ArtistId }) {
   const { playFrom, playAll } = usePlayList();
   const { playNext } = usePlayerActions();
   const insets = useSafeAreaInsets();
-  const tablet = useWindowLayout().widthClass !== "phone";
+  const { tablet } = useWindowLayout();
   const [collapsed, setCollapsed] = useState(false);
 
   if (state.kind === "unavailable" || state.kind === "failed") {
@@ -309,9 +309,11 @@ function Artist({ artistId }: { readonly artistId: ArtistId }) {
       />
     );
 
-  const top =
-    detail === undefined ? null : tablet ? (
-      <View className="px-page">
+  const top = tablet ? (
+    <View className="px-page">
+      {detail === undefined ? (
+        <DetailHeaderPlaceholder />
+      ) : (
         <DetailHeader
           art={{ url: detail.artist.artUrl, recyclingKey: detail.artist.id }}
           facts={statsOf(detail).toLocaleUpperCase("en-US")}
@@ -326,10 +328,13 @@ function Artist({ artistId }: { readonly artistId: ArtistId }) {
             )
           }
         />
-      </View>
-    ) : (
-      <Hero detail={detail} onPlay={(shuffle) => playAll(trackIds, shuffle)} />
-    );
+      )}
+    </View>
+  ) : detail === undefined ? (
+    <View className="h-ios-440 bg-art" />
+  ) : (
+    <Hero detail={detail} onPlay={(shuffle) => playAll(trackIds, shuffle)} />
+  );
 
   return (
     <View className="flex-1 bg-canvas">
@@ -338,22 +343,18 @@ function Artist({ artistId }: { readonly artistId: ArtistId }) {
         data={tracks}
         extraData={playingId}
         keyExtractor={(track) => track.id}
-        onScroll={onScroll}
-        scrollEventThrottle={16}
+        onScroll={tablet ? undefined : onScroll}
+        scrollEventThrottle={tablet ? undefined : 16}
         contentInsetAdjustmentBehavior={tablet ? undefined : "never"}
         header={
-          detail === undefined && !tablet ? (
-            <View className="h-ios-440 bg-art" />
-          ) : (
-            <>
-              {top}
-              {tracks.length === 0 ? null : (
-                <View className="px-page pt-1">
-                  <SectionHeader title="Top songs" />
-                </View>
-              )}
-            </>
-          )
+          <>
+            {top}
+            {tracks.length === 0 ? null : (
+              <View className="px-page pt-1">
+                <SectionHeader title="Top songs" />
+              </View>
+            )}
+          </>
         }
         footer={
           detail === undefined || detail.albums.length === 0 ? null : (

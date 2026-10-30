@@ -26,7 +26,6 @@ import {
   reachLabel,
   sharedByLine,
 } from "@/lib/playlist-format";
-import { useWindowLayout } from "@/lib/window-layout";
 
 import { PlayButtons } from "./play-buttons";
 import type { PlayButtonsProps } from "./play-buttons";
@@ -74,12 +73,14 @@ export function OwnerHeader({
   playlist,
   canShare,
   trackIds,
+  tablet,
 }: {
   readonly playlist: Playlist;
   readonly canShare: boolean;
   readonly trackIds: ReadonlyArray<TrackId>;
+  /** The iPad's header, which carries the name; the page leaves it out of the bar to match. */
+  readonly tablet: boolean;
 }) {
-  const tablet = useWindowLayout().widthClass !== "phone";
   const art = playlist.artUrls[0] ?? null;
   const meta = playlistMeta(playlist.trackCount, playlist.durationMs);
 
@@ -152,11 +153,13 @@ function AccessNotice({ playlist }: { readonly playlist: Playlist }) {
 export function SharedHeader({
   playlist,
   trackIds,
+  tablet,
 }: {
   readonly playlist: Playlist;
   readonly trackIds: ReadonlyArray<TrackId>;
+  /** The iPad's header, which carries the name; the page leaves it out of the bar to match. */
+  readonly tablet: boolean;
 }) {
-  const tablet = useWindowLayout().widthClass !== "phone";
   const art = playlist.artUrls[0] ?? null;
 
   const second: PlayButtonsProps["second"] = canEditPlaylistItems(playlist.access)

@@ -14,7 +14,7 @@ import { Text } from "@/components/ui/text";
 export interface DetailHeaderProps {
   readonly art: { readonly url: string | null; readonly recyclingKey?: string };
   /** The mono line over the title, such as `1991 · TRIP-HOP · 9 SONGS · 45 MIN`. */
-  readonly facts: string;
+  readonly facts?: string;
   readonly title: string;
   /** The lines under the title, such as the album's artist. */
   readonly children?: ReactNode;
@@ -33,16 +33,27 @@ export function DetailHeader({ art, facts, title, children, actions }: DetailHea
       />
       <View className="min-w-0 flex-1 gap-4">
         <View className="gap-1">
-          <Text variant="mono" tone="muted">
-            {facts}
-          </Text>
-          <Text variant="display" accessibilityRole="header">
+          {facts === undefined ? null : (
+            <Text variant="mono" tone="muted">
+              {facts}
+            </Text>
+          )}
+          <Text variant="display" accessibilityRole="header" numberOfLines={2}>
             {title}
           </Text>
           {children}
         </View>
         {actions}
       </View>
+    </View>
+  );
+}
+
+/** The header's room while its page loads: the art's block, so the list doesn't jump. */
+export function DetailHeaderPlaceholder() {
+  return (
+    <View className="pt-2 pb-6">
+      <View className="size-ios-240 rounded-lg bg-art" />
     </View>
   );
 }

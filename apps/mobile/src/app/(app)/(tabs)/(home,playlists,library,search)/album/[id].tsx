@@ -75,7 +75,7 @@ function Album({ albumId }: { readonly albumId: AlbumId }) {
   const playingId = useNowPlaying().nowPlaying?.trackId ?? null;
   const { playFrom, playAll } = usePlayList();
   const reach = useServerReach();
-  const tablet = useWindowLayout().widthClass !== "phone";
+  const { tablet } = useWindowLayout();
 
   if (state.kind === "loading" && reach !== "online") {
     return (
