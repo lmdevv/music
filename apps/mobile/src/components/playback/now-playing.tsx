@@ -733,8 +733,16 @@ function Stage({
     <View
       className="flex-1"
       onLayout={(event) => {
-        // Mounted with the lyrics already open, it takes the box it has, to show the cover at all.
-        if (!folds || box === null) setBox(event.nativeEvent.layout);
+        const next = event.nativeEvent.layout;
+
+        // While the lyrics fold the controls away the stage grows, so it keeps the height it had
+        // over the cover, but takes a new width, as when Split View narrows the window. Mounted
+        // with the lyrics already open, it takes the box it has, to show the cover at all.
+        setBox((held) => {
+          if (!folds || held === null) return next;
+
+          return held.width === next.width ? held : { ...held, x: next.x, width: next.width };
+        });
       }}
     >
       <Animated.View
