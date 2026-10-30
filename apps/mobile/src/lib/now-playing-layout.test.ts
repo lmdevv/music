@@ -1,7 +1,7 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { CLOSED, partsOf, presentationOf, pressedPanel, LAYOUT_OF } from "./now-playing-layout";
+import { CLOSED, layoutOf, partsOf, presentationOf, pressedPanel } from "./now-playing-layout";
 import type { Panel, StageView } from "./now-playing-layout";
 
 const open = (panel: Panel): StageView => ({ open: true, panel });
@@ -12,9 +12,17 @@ const panels = fc.constantFrom<Panel>("queue", "lyrics");
 
 const views = fc.oneof(fc.constant(CLOSED), panels.map(open), panels.map(closing));
 
-describe("LAYOUT_OF", () => {
-  it("keeps the phone sheet below tablet, one column on a tablet, and two panes when wide", () => {
-    expect(LAYOUT_OF).toEqual({ phone: "sheet", tablet: "column", wide: "split" });
+describe("layoutOf", () => {
+  it("keeps the phone sheet below tablet in either orientation", () => {
+    expect(layoutOf("phone", false)).toBe("sheet");
+    expect(layoutOf("phone", true)).toBe("sheet");
+  });
+
+  it("shows two panes only in a wide window on its side", () => {
+    expect(layoutOf("wide", true)).toBe("split");
+    expect(layoutOf("wide", false)).toBe("column");
+    expect(layoutOf("tablet", true)).toBe("column");
+    expect(layoutOf("tablet", false)).toBe("column");
   });
 });
 

@@ -15,7 +15,7 @@ import { SaveFailureProvider } from "@/components/states/save-failure";
 import { PlayerProvider } from "@/player";
 import { useConnection } from "@/session/connection";
 
-import { LAYOUT_OF, presentationOf } from "@/lib/now-playing-layout";
+import { layoutOf, presentationOf } from "@/lib/now-playing-layout";
 import type { NowPlayingPresentation } from "@/lib/now-playing-layout";
 import { useSheetOptions } from "@/lib/sheet";
 import { useThemeColor } from "@/lib/theme-color";
@@ -65,14 +65,17 @@ export default function AppLayout() {
   const sheet = useSheetOptions();
   const canvas = useThemeColor("--color-canvas");
   const { origin } = useConnection();
-  const { widthClass } = useWindowLayout();
+  const { widthClass, landscape } = useWindowLayout();
 
   return (
     <PlayerProvider origin={origin}>
       <SaveFailureProvider>
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: canvas } }}>
           <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="player" options={PLAYER[presentationOf(LAYOUT_OF[widthClass])]} />
+          <Stack.Screen
+            name="player"
+            options={PLAYER[presentationOf(layoutOf(widthClass, landscape))]}
+          />
           {SHEETS.map((name) => (
             <Stack.Screen key={name} name={name} options={sheet} />
           ))}

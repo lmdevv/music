@@ -1,7 +1,7 @@
 /**
  * What Now Playing shows at each window width (Paper page 25). On a phone (B01) and in the iPad's
- * single column (P07) the queue (B03) and the lyrics (B12) open in place of the cover. From `wide`
- * (P08, P09) the cover stays, and a side pane beside the player always holds one of the two: the
+ * single column (P07) the queue (B03) and the lyrics (B12) open in place of the cover. In a `wide`
+ * window on its side (P08, P09) the cover stays, and a side pane beside the player always holds one of the two: the
  * one the person opened, else the lyrics when the song has them, else the queue. One stage view
  * serves every width, so rotating keeps what the person opened.
  */
@@ -28,11 +28,14 @@ export const CLOSED: StageView = { open: false, panel: null };
  */
 export type NowPlayingLayout = "sheet" | "column" | "split";
 
-/** The layout each width class gets. */
-export const LAYOUT_OF: Readonly<Record<WidthClass, NowPlayingLayout>> = {
-  phone: "sheet",
-  tablet: "column",
-  wide: "split",
+/**
+ * The layout for a window: two panes only when it is `wide` and on its side, since a 13-inch iPad
+ * in portrait is wide enough but leaves the panes short beside a tall empty space.
+ */
+export const layoutOf = (widthClass: WidthClass, landscape: boolean): NowPlayingLayout => {
+  if (widthClass === "phone") return "sheet";
+
+  return widthClass === "wide" && landscape ? "split" : "column";
 };
 
 /**

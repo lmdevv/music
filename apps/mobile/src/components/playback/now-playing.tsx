@@ -56,7 +56,7 @@ import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/icon-button";
 import { Text } from "@/components/ui/text";
 import { useDownloadedLyrics } from "@/downloads";
-import { CLOSED, LAYOUT_OF, partsOf, presentationOf, pressedPanel } from "@/lib/now-playing-layout";
+import { CLOSED, layoutOf, partsOf, presentationOf, pressedPanel } from "@/lib/now-playing-layout";
 import type { NowPlayingLayout, NowPlayingParts, Panel, StageView } from "@/lib/now-playing-layout";
 import type { SheetSong } from "@/lib/song-sheet";
 import { useThemeColor, useThemeLength } from "@/lib/theme-color";
@@ -995,7 +995,8 @@ export function NowPlayingScreen() {
   const offset = useSharedValue(0);
   const reduceMotion = useReducedMotion();
   const background = tint ?? player;
-  const layout = LAYOUT_OF[useWindowLayout().widthClass];
+  const { widthClass, landscape } = useWindowLayout();
+  const layout = layoutOf(widthClass, landscape);
 
   // Presented as the window was when Now Playing opened; Split View may resize it afterwards.
   const [presentation] = useState(() => presentationOf(layout));

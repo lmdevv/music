@@ -9,7 +9,7 @@
 import { Stack } from "expo-router";
 import { useState } from "react";
 
-import { LAYOUT_OF, presentationOf } from "@/lib/now-playing-layout";
+import { layoutOf, presentationOf } from "@/lib/now-playing-layout";
 import { useSheetOptions } from "@/lib/sheet";
 import { useThemeColor } from "@/lib/theme-color";
 import { useWindowLayout } from "@/lib/window-layout";
@@ -20,9 +20,9 @@ const SEE_THROUGH = { contentStyle: { backgroundColor: "transparent" } } as cons
 export default function PlayerLayout() {
   const sheet = useSheetOptions();
   const canvas = useThemeColor("--color-canvas");
-  const { widthClass } = useWindowLayout();
+  const { widthClass, landscape } = useWindowLayout();
   // Presented as the window was when Now Playing opened, as the screen itself is.
-  const [windowed] = useState(() => presentationOf(LAYOUT_OF[widthClass]) === "window");
+  const [windowed] = useState(() => presentationOf(layoutOf(widthClass, landscape)) === "window");
 
   return (
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: canvas } }}>
