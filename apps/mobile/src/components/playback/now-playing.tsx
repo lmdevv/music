@@ -18,7 +18,7 @@ import { lyricsButton, lyricsOffer } from "@music/player/lyrics";
 import type { LyricsAnswer, LyricsOffer } from "@music/player/lyrics";
 import { useRead } from "@music/sdk/react";
 import * as Haptics from "expo-haptics";
-import { router, useLocalSearchParams, useNavigation } from "expo-router";
+import { router, useNavigation } from "expo-router";
 import {
   Airplay,
   Ellipsis,
@@ -52,7 +52,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/icon-button";
 import { Text } from "@/components/ui/text";
-import { CLOSED, layoutOf, openingView, partsOf, pressedPanel } from "@/lib/now-playing-layout";
+import { CLOSED, layoutOf, partsOf, pressedPanel } from "@/lib/now-playing-layout";
 import type { NowPlayingLayout, NowPlayingParts, Panel, StageView } from "@/lib/now-playing-layout";
 import type { SheetSong } from "@/lib/song-sheet";
 import { useThemeColor, useThemeLength } from "@/lib/theme-color";
@@ -1011,9 +1011,8 @@ export function NowPlayingScreen() {
   const tint = useArtTint(nowPlaying?.artUrl ?? null);
   const player = useThemeColor("--color-player");
   const insets = useSafeAreaInsets();
-  const { panel: opening } = useLocalSearchParams<{ panel?: string }>();
-  const [view, setView] = useState<StageView>(() => openingView(opening));
-  const progress = useSharedValue(view.open ? 1 : 0);
+  const [view, setView] = useState<StageView>(CLOSED);
+  const progress = useSharedValue(0);
   const still = useSharedValue(0);
   const offset = useSharedValue(0);
   const reduceMotion = useReducedMotion();
