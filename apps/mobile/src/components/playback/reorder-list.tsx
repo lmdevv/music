@@ -48,6 +48,8 @@ interface Drag {
   readonly from: SharedValue<number>;
   /** Where it would drop. */
   readonly to: SharedValue<number>;
+  /** Where the finger touched down, in the window. */
+  readonly startY: SharedValue<number>;
   /** How far the finger moved since the lift. */
   readonly offset: SharedValue<number>;
   readonly scrollY: SharedValue<number>;
@@ -57,6 +59,18 @@ interface Drag {
   readonly headerHeight: SharedValue<number>;
   readonly count: SharedValue<number>;
 }
+
+/** Where the lifted row would land with the finger `travel` points from where it touched down. */
+const landing = (drag: Drag, travel: number): number => {
+  "worklet";
+
+  return dropIndex(
+    drag.from.value,
+    travel + drag.scrollY.value - drag.startScroll.value,
+    drag.rowHeight.value,
+    drag.count.value,
+  );
+};
 
 /** What a row can do. */
 interface RowActions {
@@ -81,8 +95,9 @@ function Handle({
   const pan = usePanGesture({
     minDistance: 0,
     shouldCancelWhenOutside: false,
-    onBegin: () => {
+    onBegin: (event) => {
       "worklet";
+      drag.startY.value = event.absoluteY;
       drag.from.value = index;
       drag.to.value = index;
       drag.offset.value = 0;
@@ -91,15 +106,19 @@ function Handle({
     },
     onUpdate: (event) => {
       "worklet";
-      drag.offset.value = event.translationY;
+      // Not `translationY`, which starts where the pan activated and so drops a fast finger's first move.
+      drag.offset.value = event.absoluteY - drag.startY.value;
     },
-    onFinalize: () => {
+    onFinalize: (event) => {
       "worklet";
 
       if (drag.from.value < 0) return;
-      const from = drag.from.value;
-      const to = drag.to.value;
-      scheduleOnRN(actions.onDrop, from, to);
+      // The finger's last move can arrive with the release, so this doesn't wait on `drag.to`.
+      scheduleOnRN(
+        actions.onDrop,
+        drag.from.value,
+        landing(drag, event.absoluteY - drag.startY.value),
+      );
     },
   });
 
@@ -294,6 +313,7 @@ export function ReorderList({
   const drag: Drag = {
     from: useSharedValue(-1),
     to: useSharedValue(-1),
+    startY: useSharedValue(0),
     offset: useSharedValue(0),
     scrollY: useSharedValue(0),
     startScroll: useSharedValue(0),
@@ -308,15 +328,7 @@ export function ReorderList({
 
   // Where the lifted row would land follows the finger and the list's own scrolling.
   useAnimatedReaction(
-    () =>
-      drag.from.value < 0
-        ? -1
-        : dropIndex(
-            drag.from.value,
-            drag.offset.value + drag.scrollY.value - drag.startScroll.value,
-            drag.rowHeight.value,
-            drag.count.value,
-          ),
+    () => (drag.from.value < 0 ? -1 : landing(drag, drag.offset.value)),
     (next, previous) => {
       if (next < 0 || next === previous) return;
       drag.to.value = next;
@@ -363,6 +375,8 @@ export function ReorderList({
       const item = shown[from];
 
       if (item === undefined || from === to) return;
+      // A drop moves the row the list anchors on, which isn't content arriving: keep the offset.
+      list.current?.prepareForLayoutAnimationRender();
       setOrder({ source, items: moved(shown, from, to) });
       onMove(item, to);
     },
@@ -401,8 +415,6 @@ export function ReorderList({
         data={shown}
         keyExtractor={(item) => item.itemId}
         scrollEnabled={lifted === null}
-        // Keeping the first row in place would scroll the list by a row after every drop.
-        maintainVisibleContentPosition={{ disabled: true }}
         onScroll={(event) => {
           drag.scrollY.value = event.nativeEvent.contentOffset.y;
         }}
