@@ -2,7 +2,8 @@
  * Now Playing's scrubber (B01): the progress track over elapsed and remaining times in Geist Mono.
  * It is the only part of the screen that re-renders with the position. While dragging, the times
  * follow the finger; the seek is sent once, on release. The iPad's player bar (page 26) draws it
- * `inline`: the times either side of the track, which keeps its 44pt touch area over the row.
+ * `inline`: the times either side of the track, 4pt under the transport as Paper spaces them. Its
+ * touch area starts where the transport ends and runs on down into the bar's foot.
  */
 import * as Haptics from "expo-haptics";
 import { useState } from "react";
@@ -16,6 +17,7 @@ import { Slider } from "./slider";
 
 /** The progress track and its times. */
 export function Scrubber({ inline = false }: { readonly inline?: boolean }) {
+  const touch = inline ? "under" : "around";
   const { positionMs, durationMs } = usePlaybackPosition();
   const { seek } = usePlayerActions();
   const [scrub, setScrub] = useState<number | null>(null);
@@ -27,6 +29,7 @@ export function Scrubber({ inline = false }: { readonly inline?: boolean }) {
       fillClassName="bg-text"
       label="Position"
       valueText={`${clock(shownMs)} of ${clock(durationMs)}`}
+      touch={touch}
       onScrub={setScrub}
       onChange={(fraction) => {
         void Haptics.selectionAsync();
@@ -37,17 +40,17 @@ export function Scrubber({ inline = false }: { readonly inline?: boolean }) {
 
   if (inline) {
     return (
-      <View className="w-full max-w-ios-520 flex-row items-center gap-3">
+      <View className="w-full max-w-ios-520 flex-row items-start gap-3">
         <Text
           variant="mono"
           tone="muted"
           numberOfLines={1}
-          className="min-w-ios-36 shrink-0 text-right"
+          className="mt-1 min-w-ios-36 shrink-0 text-right"
         >
           {clock(shownMs)}
         </Text>
-        <View className="h-4 flex-1 justify-center">{slider}</View>
-        <Text variant="mono" tone="muted" numberOfLines={1} className="min-w-ios-36 shrink-0">
+        <View className="flex-1">{slider}</View>
+        <Text variant="mono" tone="muted" numberOfLines={1} className="mt-1 min-w-ios-36 shrink-0">
           {remainingClock(shownMs, durationMs)}
         </Text>
       </View>

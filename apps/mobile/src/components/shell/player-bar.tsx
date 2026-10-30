@@ -61,7 +61,7 @@ export function PlayerBar() {
             <Artwork
               url={nowPlaying.artUrl}
               recyclingKey={nowPlaying.trackId}
-              className="size-[52px] shrink-0 rounded-md"
+              className="size-ios-52 shrink-0 rounded-md"
             />
             <View className="min-w-0 flex-1">
               <Text variant="bodyStrong" numberOfLines={1}>
@@ -76,13 +76,13 @@ export function PlayerBar() {
             <LikeButton trackId={nowPlaying.trackId} liked={nowPlaying.liked} size="side" />
           ) : null}
         </View>
-        <View className="min-w-0 flex-1 items-center gap-1">
+        <View className="min-w-0 flex-1 items-center self-stretch">
           <BarTransport modes={extras} />
           <Scrubber inline />
         </View>
         <View className={`shrink-0 flex-row items-center justify-end gap-2 ${tools}`}>
           {badge === null ? null : (
-            <View className="rounded-[4px] border border-border px-[6px] py-[3px]">
+            <View className="rounded-xs border border-border px-ios-6 py-ios-3">
               <Text variant="mono" tone="muted" numberOfLines={1}>
                 {badge}
               </Text>

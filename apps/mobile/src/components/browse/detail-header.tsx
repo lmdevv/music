@@ -13,9 +13,6 @@ import { fitsSideBySide } from "@/lib/layout";
 import { useThemeLength } from "@/lib/theme-color";
 import { useContentLayout } from "@/lib/window-layout";
 
-/** The least room the title and actions get beside the art, in points. */
-const MIN_TEXT = 332;
-
 /** Props for `DetailHeader`. */
 export interface DetailHeaderProps {
   readonly art: { readonly url: string | null; readonly recyclingKey?: string };
@@ -33,7 +30,11 @@ export function DetailHeader({ art, facts, title, children, actions }: DetailHea
   const { width, edge } = useContentLayout();
   const artSize = useThemeLength("--spacing-ios-240");
   const gap = useThemeLength("--spacing-8");
-  const beside = fitsSideBySide(width, edge, { art: artSize, gap, text: MIN_TEXT });
+  const button = useThemeLength("--spacing-ios-160");
+  const buttonGap = useThemeLength("--spacing-3");
+  // The text needs at least the room for Play and Shuffle side by side at their least width.
+  const text = 2 * button + buttonGap;
+  const beside = fitsSideBySide(width, edge, { art: artSize, gap, text });
 
   return (
     <View className={beside ? "flex-row items-end gap-8 pt-2 pb-6" : "gap-6 pt-2 pb-6"}>
