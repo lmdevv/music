@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { columnsOf, rowsOf, widthClassOf } from "./layout";
+import { columnsOf, fitsSideBySide, rowsOf, widthClassOf } from "./layout";
 
 const breakpoints = { tablet: 600, wide: 1024 };
 
@@ -47,5 +47,14 @@ describe("rowsOf", () => {
 
   it("gives no rows for no albums", () => {
     expect(rowsOf([], 7)).toEqual([]);
+  });
+});
+
+describe("fitsSideBySide", () => {
+  const header = { art: 240, gap: 32, text: 332 };
+
+  it("needs the art, the gap, and the text between the page's edges", () => {
+    expect(fitsSideBySide(668, 32, header)).toBe(true);
+    expect(fitsSideBySide(667, 32, header)).toBe(false);
   });
 });

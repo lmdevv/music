@@ -141,6 +141,7 @@
 @theme static {
   --breakpoint-tablet: 600px;
   --breakpoint-wide: 1024px;
+  --container-sidebar: 240px;
   --container-dialog: 560px;
   --container-readable: 680px;
 }
@@ -208,6 +209,33 @@
   margin-inline: calc(var(--spacing-mobile-edge) * -1);
   @variant tablet {
     margin-inline: calc(var(--spacing-tablet-edge) * -1);
+  }
+}
+
+/* The color behind a page in the tabs: the canvas, or from `tablet` up in dark mode the raised
+   panel B1 dark draws on the black canvas. `useContentCanvas` gives the same color as a value. */
+@utility bg-content {
+  background-color: var(--color-canvas);
+  @variant tablet {
+    @variant dark {
+      background-color: var(--color-bg);
+    }
+  }
+}
+
+/* The room a page leaves under its content: Paper's 180pt for a phone's tab bar and mini player.
+   From `tablet` up the player bar sits below the page rather than over it, so 40pt is enough. */
+@utility pb-page-foot {
+  padding-bottom: var(--spacing-ios-180);
+  @variant tablet {
+    padding-bottom: var(--spacing-row);
+  }
+}
+
+@utility h-page-foot {
+  height: var(--spacing-ios-180);
+  @variant tablet {
+    height: var(--spacing-row);
   }
 }
 

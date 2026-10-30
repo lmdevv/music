@@ -51,7 +51,10 @@ export function NavBar({
     onBack === undefined && (stacked || navigation.canGoBack()) ? () => router.back() : onBack;
 
   return (
-    <View style={{ paddingTop: insets.top }} className="bg-canvas px-page">
+    <View
+      style={{ paddingTop: insets.top }}
+      className={`px-page ${readable ? "bg-canvas" : "bg-content"}`}
+    >
       <View
         className={`min-h-row-touch flex-row items-center pt-2 pb-3 ${
           readable ? "w-full self-center tablet:max-w-readable" : ""

@@ -21,6 +21,16 @@ export const widthClassOf = (width: number, { tablet, wide }: Breakpoints): Widt
 };
 
 /**
+ * Whether an iPad header's art fits beside `text` points of text in a page `width` points across,
+ * inside its `edge`s with `gap` between them; a narrower page stacks them.
+ */
+export const fitsSideBySide = (
+  width: number,
+  edge: number,
+  { art, gap, text }: { readonly art: number; readonly gap: number; readonly text: number },
+): boolean => width - 2 * edge >= art + gap + text;
+
+/**
  * How many cards at least `min` points wide fit across `width` with `gap` between them, never
  * fewer than one. The cards then stretch to fill the row.
  */
