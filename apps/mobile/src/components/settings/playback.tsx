@@ -18,7 +18,7 @@ import { Switch } from "@/components/ui/switch";
 import { Text } from "@/components/ui/text";
 import { loadAppearance, saveAppearance } from "@/lib/appearance";
 import type { Appearance } from "@/lib/appearance";
-import { usePlayer, usePlayerActions } from "@/player";
+import { DEVICE_FAMILY, usePlayer, usePlayerActions } from "@/player";
 
 const APPEARANCES = [
   { value: "light", label: "Light" },
@@ -29,7 +29,7 @@ const APPEARANCES = [
 const APPEARANCE_NOTES = {
   light: "Always light. Now Playing uses the album’s colors.",
   dark: "Always dark. Now Playing uses the album’s colors.",
-  system: "Follows this iPhone. Now Playing uses the album’s colors.",
+  system: `Follows this ${DEVICE_FAMILY}. Now Playing uses the album’s colors.`,
 } as const satisfies Record<Appearance, string>;
 
 /**

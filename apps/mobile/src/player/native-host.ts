@@ -16,6 +16,7 @@ import { deviceName, modelName } from "expo-device";
 import * as SecureStore from "expo-secure-store";
 import { AppState, Platform } from "react-native";
 
+import type { DeviceFamily } from "../lib/device-family";
 import type { NativeEngine } from "./native-engine";
 import { parseQuality } from "./player-state";
 
@@ -35,7 +36,7 @@ const storage: KeyValueStorage = {
 export const loadPhoneId = (): DeviceId => loadDeviceId(storage, randomUUID);
 
 /** What this device is, for the places that name it: `This iPad` in its own device list. */
-export const DEVICE_FAMILY: "iPhone" | "iPad" =
+export const DEVICE_FAMILY: DeviceFamily =
   Platform.OS === "ios" && Platform.isPad ? "iPad" : "iPhone";
 
 /**

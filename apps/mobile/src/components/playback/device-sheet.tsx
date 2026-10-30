@@ -185,7 +185,7 @@ export function DeviceSheetBody({
       <Notice
         icon={Airplay}
         title="One queue, every device"
-        body="Selecting a device moves playback there. This phone can keep controlling it."
+        body={`Selecting a device moves playback there. This ${DEVICE_FAMILY} can keep controlling it.`}
       />
     </SheetLayout>
   );

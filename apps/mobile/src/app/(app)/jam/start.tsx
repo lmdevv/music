@@ -15,12 +15,12 @@ import { Button } from "@/components/ui/button";
 import { Notice } from "@/components/ui/notice";
 import { SheetLayout } from "@/components/ui/sheet-layout";
 import { Text } from "@/components/ui/text";
-import { useNowPlaying } from "@/player";
+import { DEVICE_FAMILY, useNowPlaying } from "@/player";
 import type { PlayerRole } from "@/player";
 
 /** Where the song plays, after its artist. */
 const whereLine = (role: PlayerRole): string =>
-  role.kind === "remote" ? `Playing on ${role.device.name}` : "Playing on this iPhone";
+  role.kind === "remote" ? `Playing on ${role.device.name}` : `Playing on this ${DEVICE_FAMILY}`;
 
 /** The song the Jam starts from: Paper's row without the hairline. */
 function StartingSong() {

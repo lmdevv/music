@@ -19,7 +19,7 @@ import { TabRoot } from "@/components/ui/tab-root";
 import { useDownloadsLibrary } from "@/downloads";
 import { distinctSongs } from "@/lib/history";
 import { cardOf } from "@/lib/offline-library";
-import { useNowPlaying } from "@/player";
+import { DEVICE_FAMILY, useNowPlaying } from "@/player";
 import { useServerReach } from "@/session/server-reach";
 
 /** How many recently played songs Home lists; History has the rest. */
@@ -64,7 +64,7 @@ function RecentlyPlayed() {
 function OnThisPhone({ albums }: { readonly albums: ReadonlyArray<OfflineAlbum> }) {
   return (
     <AlbumRail
-      title="On this iPhone"
+      title={`On this ${DEVICE_FAMILY}`}
       albums={albums.map(cardOf)}
       action={{ kind: "chevron", onPress: () => router.push("/downloaded") }}
     />
