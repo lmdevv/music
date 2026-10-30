@@ -24,6 +24,7 @@ const den = {
 
 const input = (overrides: Partial<DeviceSheetInput>): DeviceSheetInput => ({
   thisDevice: phone,
+  thisDeviceLabel: "This iPhone",
   devices: [],
   transfer: { state: "idle" },
   now,
@@ -50,6 +51,14 @@ describe("deviceSheet", () => {
       ["MacBook", "Online", false],
       ["Den", "Last seen 10 min ago", false],
     ]);
+  });
+
+  it("names this device by what it is, such as an iPad", () => {
+    const sheet = deviceSheet(
+      input({ thisDeviceLabel: "This iPad", devices: [{ ...mac, active: false }] }),
+    );
+
+    expect(sheet.kind === "picker" && sheet.rows[0]?.name).toBe("This iPad");
   });
 
   it("marks the remote device current while it plays (B02)", () => {

@@ -51,7 +51,7 @@ import { Text } from "@/components/ui/text";
 import { useDownloadedLyrics } from "@/downloads";
 import type { SheetSong } from "@/lib/song-sheet";
 import { useThemeColor, useThemeLength } from "@/lib/theme-color";
-import { usePlayer } from "@/player";
+import { DEVICE_FAMILY, usePlayer } from "@/player";
 import type { NowPlaying, PlayerRole } from "@/player";
 import { useServerReach } from "@/session/server-reach";
 
@@ -299,10 +299,10 @@ function SongRow({ song }: { readonly song: NowPlaying }) {
   );
 }
 
-/** Where the music plays: this iPhone in muted text, another device in the accent (B02). */
+/** Where the music plays: this device in muted text, another device in the accent (B02). */
 function DeviceButton({ role }: { readonly role: PlayerRole }) {
   const remote = role.kind === "remote";
-  const label = remote ? `Playing on ${role.device.name}` : "This iPhone";
+  const label = remote ? `Playing on ${role.device.name}` : `This ${DEVICE_FAMILY}`;
 
   return (
     <Pressable

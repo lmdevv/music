@@ -14,7 +14,7 @@ import type { EventEmitter } from "expo";
 import { randomUUID } from "expo-crypto";
 import { deviceName, modelName } from "expo-device";
 import * as SecureStore from "expo-secure-store";
-import { AppState } from "react-native";
+import { AppState, Platform } from "react-native";
 
 import type { NativeEngine } from "./native-engine";
 import { parseQuality } from "./player-state";
@@ -34,11 +34,15 @@ const storage: KeyValueStorage = {
 /** This phone's stable device ID, made on first use and kept in the keychain. */
 export const loadPhoneId = (): DeviceId => loadDeviceId(storage, randomUUID);
 
+/** What this device is, for the places that name it: `This iPad` in its own device list. */
+export const DEVICE_FAMILY: "iPhone" | "iPad" =
+  Platform.OS === "ios" && Platform.isPad ? "iPad" : "iPhone";
+
 /**
  * How this phone names itself in the device list: its name in Settings where iOS shares it, else
  * the model ("iPhone 17").
  */
-export const phoneName = (): string => deviceName ?? modelName ?? "iPhone";
+export const phoneName = (): string => deviceName ?? modelName ?? DEVICE_FAMILY;
 
 export const loadQuality = (): StreamQuality => parseQuality(readItem(storage, QUALITY_KEY));
 

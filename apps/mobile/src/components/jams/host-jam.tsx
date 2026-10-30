@@ -13,7 +13,7 @@ import { Page } from "@/components/ui/page";
 import { Row, RowCheck, RowChevron } from "@/components/ui/row";
 import { SectionHeader } from "@/components/ui/section-header";
 import { peopleRow, requestsRow } from "@/lib/jam";
-import { useNowPlaying } from "@/player";
+import { DEVICE_FAMILY, useNowPlaying } from "@/player";
 import type { PlayerRole } from "@/player";
 
 import { QrCode } from "./qr-code";
@@ -21,7 +21,7 @@ import { useJamLink } from "./use-jam-link";
 
 /** Where the host's music plays, after "Host". */
 const hostLine = (role: PlayerRole): string => {
-  if (role.kind === "local") return "Host · This iPhone";
+  if (role.kind === "local") return `Host · This ${DEVICE_FAMILY}`;
 
   return role.kind === "remote" ? `Host · Playing on ${role.device.name}` : "Host";
 };

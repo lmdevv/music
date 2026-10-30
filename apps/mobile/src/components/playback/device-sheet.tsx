@@ -22,7 +22,13 @@ import { deviceSheet } from "@/lib/device-sheet";
 import type { DeviceRow, DeviceSheet as DeviceSheetState } from "@/lib/device-sheet";
 import { clock } from "@/lib/playback-format";
 import { useThemeColor } from "@/lib/theme-color";
-import { useDevices, useNowPlaying, usePlaybackPosition, usePlayerActions } from "@/player";
+import {
+  DEVICE_FAMILY,
+  useDevices,
+  useNowPlaying,
+  usePlaybackPosition,
+  usePlayerActions,
+} from "@/player";
 
 const KIND_ICONS = {
   phone: Smartphone,
@@ -131,7 +137,7 @@ export function DeviceSheetBody({
     return (
       <SheetLayout
         title={`Couldn’t reach ${to.name}`}
-        subtitle={`Your music is still on ${from.thisPhone ? "this iPhone" : from.name}.`}
+        subtitle={`Your music is still on ${from.thisPhone ? `this ${DEVICE_FAMILY}` : from.name}.`}
       >
         <Notice icon={Airplay} title={`Open [music] on ${to.name}`} body={message} />
         <View className="flex-row gap-3 pt-mobile-edge">
@@ -190,7 +196,14 @@ export function DeviceSheet() {
   const { thisDevice, devices, transfer, dismissTransfer } = useDevices();
   const moveTo = useMoveTo();
   const [now] = useState(Date.now);
-  const sheet = deviceSheet({ thisDevice, devices, transfer, now });
+
+  const sheet = deviceSheet({
+    thisDevice,
+    thisDeviceLabel: `This ${DEVICE_FAMILY}`,
+    devices,
+    transfer,
+    now,
+  });
 
   // A move that lands closes the sheet; one that fails stays to say so.
   const previous = useRef(transfer.state);
