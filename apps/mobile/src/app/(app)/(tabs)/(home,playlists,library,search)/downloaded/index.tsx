@@ -40,7 +40,8 @@ import {
   removableSongs,
 } from "@/lib/downloaded";
 import type { DownloadedFilter } from "@/lib/downloaded";
-import { DEVICE_FAMILY, useNowPlaying } from "@/player";
+import { DEVICE_FAMILY } from "@/lib/this-device";
+import { useNowPlaying } from "@/player";
 
 type Cell =
   | DownloadedEntry

@@ -6,6 +6,7 @@
 import type { DeviceId } from "@music/commands/ids";
 import type { DeviceKind } from "@music/commands/models";
 
+import type { DeviceFamily } from "./device-family";
 import { deviceStatus } from "./playback-format";
 
 /** One of the user's devices, as the player lists it. */
@@ -56,8 +57,8 @@ export type DeviceSheet =
 /** Everything the sheet is derived from. */
 export interface DeviceSheetInput {
   readonly thisDevice: { readonly id: DeviceId; readonly name: string };
-  /** What this device is called in its own sheet, such as `This iPad`. */
-  readonly thisDeviceLabel: string;
+  /** What this device is; its own row reads `This iPad` or `This iPhone`. */
+  readonly family: DeviceFamily;
   readonly devices: ReadonlyArray<DeviceInput>;
   readonly transfer: TransferInput;
   readonly now: number;
@@ -68,7 +69,7 @@ const rank = (row: DeviceInput): number => (row.active ? 0 : row.online ? 1 : 2)
 /** The sheet for the user's devices and the move in progress. */
 export const deviceSheet = ({
   thisDevice,
-  thisDeviceLabel,
+  family,
   devices,
   transfer,
   now,
@@ -80,7 +81,7 @@ export const deviceSheet = ({
   // playback starts, so it counts as current.
   const phone: DeviceRow = {
     id: thisDevice.id,
-    name: thisDeviceLabel,
+    name: `This ${family}`,
     kind: "phone",
     status: deviceStatus(
       {

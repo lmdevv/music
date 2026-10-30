@@ -18,7 +18,7 @@ import { useDownloadSettings } from "@/downloads";
 import type { DownloadQuality } from "@/downloads";
 import { storageLine } from "@/lib/downloaded";
 import { formatBytes } from "@/lib/format";
-import { DEVICE_FAMILY } from "@/player";
+import { DEVICE_FAMILY } from "@/lib/this-device";
 
 /** What each quality downloads, with Paper's rough size of a song. */
 const QUALITIES = [

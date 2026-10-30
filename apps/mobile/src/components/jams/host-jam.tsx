@@ -13,7 +13,8 @@ import { Page } from "@/components/ui/page";
 import { Row, RowCheck, RowChevron } from "@/components/ui/row";
 import { SectionHeader } from "@/components/ui/section-header";
 import { peopleRow, requestsRow } from "@/lib/jam";
-import { DEVICE_FAMILY, useNowPlaying } from "@/player";
+import { DEVICE_FAMILY } from "@/lib/this-device";
+import { useNowPlaying } from "@/player";
 import type { PlayerRole } from "@/player";
 
 import { QrCode } from "./qr-code";

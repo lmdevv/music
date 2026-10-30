@@ -24,7 +24,7 @@ const den = {
 
 const input = (overrides: Partial<DeviceSheetInput>): DeviceSheetInput => ({
   thisDevice: phone,
-  thisDeviceLabel: "This iPhone",
+  family: "iPhone",
   devices: [],
   transfer: { state: "idle" },
   now,
@@ -54,9 +54,7 @@ describe("deviceSheet", () => {
   });
 
   it("names this device by what it is, such as an iPad", () => {
-    const sheet = deviceSheet(
-      input({ thisDeviceLabel: "This iPad", devices: [{ ...mac, active: false }] }),
-    );
+    const sheet = deviceSheet(input({ family: "iPad", devices: [{ ...mac, active: false }] }));
 
     expect(sheet.kind === "picker" && sheet.rows[0]?.name).toBe("This iPad");
   });

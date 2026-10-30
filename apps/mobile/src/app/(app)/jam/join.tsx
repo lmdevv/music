@@ -14,7 +14,7 @@ import { Notice } from "@/components/ui/notice";
 import { Page } from "@/components/ui/page";
 import { Text } from "@/components/ui/text";
 import { jamCodeFrom } from "@/lib/jam";
-import { DEVICE_FAMILY } from "@/player";
+import { DEVICE_FAMILY } from "@/lib/this-device";
 import { useConnection } from "@/session/connection";
 
 export default function JoinJam() {

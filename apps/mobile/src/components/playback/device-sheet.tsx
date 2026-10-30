@@ -22,13 +22,8 @@ import { deviceSheet } from "@/lib/device-sheet";
 import type { DeviceRow, DeviceSheet as DeviceSheetState } from "@/lib/device-sheet";
 import { clock } from "@/lib/playback-format";
 import { useThemeColor } from "@/lib/theme-color";
-import {
-  DEVICE_FAMILY,
-  useDevices,
-  useNowPlaying,
-  usePlaybackPosition,
-  usePlayerActions,
-} from "@/player";
+import { DEVICE_FAMILY } from "@/lib/this-device";
+import { useDevices, useNowPlaying, usePlaybackPosition, usePlayerActions } from "@/player";
 
 const KIND_ICONS = {
   phone: Smartphone,
@@ -199,7 +194,7 @@ export function DeviceSheet() {
 
   const sheet = deviceSheet({
     thisDevice,
-    thisDeviceLabel: `This ${DEVICE_FAMILY}`,
+    family: DEVICE_FAMILY,
     devices,
     transfer,
     now,

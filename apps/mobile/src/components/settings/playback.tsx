@@ -18,7 +18,8 @@ import { Switch } from "@/components/ui/switch";
 import { Text } from "@/components/ui/text";
 import { loadAppearance, saveAppearance } from "@/lib/appearance";
 import type { Appearance } from "@/lib/appearance";
-import { DEVICE_FAMILY, usePlayer, usePlayerActions } from "@/player";
+import { DEVICE_FAMILY } from "@/lib/this-device";
+import { usePlayer, usePlayerActions } from "@/player";
 
 const APPEARANCES = [
   { value: "light", label: "Light" },

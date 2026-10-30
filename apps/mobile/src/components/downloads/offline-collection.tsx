@@ -17,7 +17,8 @@ import { Text } from "@/components/ui/text";
 import { useDownloadsLibrary } from "@/downloads";
 import type { Unavailable } from "@/lib/detail-state";
 import type { OfflineCollection } from "@/lib/offline-library";
-import { DEVICE_FAMILY, useNowPlaying } from "@/player";
+import { DEVICE_FAMILY } from "@/lib/this-device";
+import { useNowPlaying } from "@/player";
 
 import { LocalSongRow } from "./local-song-row";
 

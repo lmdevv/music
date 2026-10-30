@@ -51,7 +51,8 @@ import { Text } from "@/components/ui/text";
 import { useDownloadedLyrics } from "@/downloads";
 import type { SheetSong } from "@/lib/song-sheet";
 import { useThemeColor, useThemeLength } from "@/lib/theme-color";
-import { DEVICE_FAMILY, usePlayer } from "@/player";
+import { DEVICE_FAMILY } from "@/lib/this-device";
+import { usePlayer } from "@/player";
 import type { NowPlaying, PlayerRole } from "@/player";
 import { useServerReach } from "@/session/server-reach";
 

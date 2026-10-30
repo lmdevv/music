@@ -11,7 +11,7 @@ import { CircleArrowDown, CircleCheck, CircleMinus, RotateCw } from "lucide-reac
 import { useDownload } from "@/downloads";
 import { downloadRows } from "@/lib/download-row";
 import type { DownloadRowLabel } from "@/lib/download-row";
-import { DEVICE_FAMILY } from "@/player";
+import { DEVICE_FAMILY } from "@/lib/this-device";
 
 import { Row } from "../ui/row";
 import type { TextTone } from "../ui/text";

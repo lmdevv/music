@@ -8,7 +8,7 @@ import { useState } from "react";
 import { ConfirmSheet } from "@/components/ui/confirm-sheet";
 import { useDownloadSettings } from "@/downloads";
 import { removeAllCopy } from "@/lib/download-control";
-import { DEVICE_FAMILY } from "@/player";
+import { DEVICE_FAMILY } from "@/lib/this-device";
 
 export default function RemoveAllDownloads() {
   const { usage, removeAll } = useDownloadSettings();

@@ -24,7 +24,8 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { Text } from "@/components/ui/text";
 import { contributionsOf, listenerCount, quotaNotice } from "@/lib/jam";
 import { resolveMediaUrl } from "@/lib/media-url";
-import { DEVICE_FAMILY, useDevices, usePlayer, usePlayerActions } from "@/player";
+import { DEVICE_FAMILY } from "@/lib/this-device";
+import { useDevices, usePlayer, usePlayerActions } from "@/player";
 import { useConnection } from "@/session/connection";
 
 import { ToggleRow } from "./toggle-row";

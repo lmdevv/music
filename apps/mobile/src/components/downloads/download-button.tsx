@@ -10,7 +10,7 @@ import { Pressable } from "react-native";
 import { useSave } from "@/components/states/save-failure";
 import { useDownload } from "@/downloads";
 import { downloadControl } from "@/lib/download-control";
-import { DEVICE_FAMILY } from "@/player";
+import { DEVICE_FAMILY } from "@/lib/this-device";
 
 import { DownloadRingGlyph } from "./download-glyphs";
 import { openRemoveDownload } from "./remove-download";

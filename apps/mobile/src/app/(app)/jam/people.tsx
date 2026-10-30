@@ -20,7 +20,8 @@ import { Row, RowChevron } from "@/components/ui/row";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Text } from "@/components/ui/text";
 import { jamPeople, memberStatus } from "@/lib/jam";
-import { DEVICE_FAMILY, useNowPlaying } from "@/player";
+import { DEVICE_FAMILY } from "@/lib/this-device";
+import { useNowPlaying } from "@/player";
 
 /** Someone waiting: their row, then Let in and Decline. */
 function Request({ member }: { readonly member: JamMember }) {

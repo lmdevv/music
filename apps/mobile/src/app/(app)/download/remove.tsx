@@ -15,7 +15,7 @@ import { SheetLayout } from "@/components/ui/sheet-layout";
 import { useDownload, useDownloadsLibrary } from "@/downloads";
 import { removeDownloadCopy } from "@/lib/download-control";
 import type { RemoveCopy } from "@/lib/download-control";
-import { DEVICE_FAMILY } from "@/player";
+import { DEVICE_FAMILY } from "@/lib/this-device";
 
 const decodeTarget = Schema.decodeUnknownOption(DownloadTarget);
 

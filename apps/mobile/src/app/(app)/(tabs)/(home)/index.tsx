@@ -19,7 +19,8 @@ import { TabRoot } from "@/components/ui/tab-root";
 import { useDownloadsLibrary } from "@/downloads";
 import { distinctSongs } from "@/lib/history";
 import { cardOf } from "@/lib/offline-library";
-import { DEVICE_FAMILY, useNowPlaying } from "@/player";
+import { DEVICE_FAMILY } from "@/lib/this-device";
+import { useNowPlaying } from "@/player";
 import { useServerReach } from "@/session/server-reach";
 
 /** How many recently played songs Home lists; History has the rest. */

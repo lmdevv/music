@@ -32,7 +32,7 @@ import { Text } from "@/components/ui/text";
 import { useDownloadSettings } from "@/downloads";
 import { downloadedDetail, onThisDevice } from "@/lib/downloaded";
 import { librarySummary } from "@/lib/format";
-import { DEVICE_FAMILY } from "@/player";
+import { DEVICE_FAMILY } from "@/lib/this-device";
 import { useServerReach } from "@/session/server-reach";
 
 /** Libraries by who hears them: shared with everyone, some people, or only the owner. */
