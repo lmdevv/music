@@ -1,11 +1,29 @@
 /**
- * What Now Playing shows at each window width (Paper page 25). On a phone (B01) and in the iPad's
- * single column (P07) the queue (B03) and the lyrics (B12) open in place of the cover. In a `wide`
- * window on its side (P08, P09) the cover stays, and a side pane beside the player always holds one of the two: the
- * one the person opened, else the lyrics when the song has them, else the queue. One stage view
- * serves every width, so rotating keeps what the person opened.
+ * How Now Playing is presented on each device, and what it shows at each window width (Paper page
+ * 25). On a phone (B01) and in the iPad's single column (P07) the queue (B03) and the lyrics (B12)
+ * open in place of the cover. In a `wide` window on its side (P08, P09) the cover stays, and a
+ * side pane beside the player always holds one of the two: the one the person opened, else the
+ * lyrics when the song has them, else the queue. One stage view serves every width, so rotating
+ * or resizing keeps what the person opened.
  */
+import { lyricsButton } from "@music/player/lyrics";
+import type { LyricsOffer } from "@music/player/lyrics";
+
+import type { DeviceFamily } from "./device-family";
 import type { WidthClass } from "./layout";
+
+/**
+ * How Now Playing is presented: the iPhone's native `sheet`, which the system drags down (B11), or
+ * over the whole `window` (P07), which the app drags down itself.
+ */
+export type NowPlayingPresentation = "sheet" | "window";
+
+/**
+ * The presentation on a device. An iPad keeps the window at every width, even a phone-wide Split
+ * View, so resizing it while Now Playing is open never has to swap how it is presented.
+ */
+export const presentationOf = (family: DeviceFamily): NowPlayingPresentation =>
+  family === "iPad" ? "window" : "sheet";
 
 /** What opens in place of the cover, or shows in the side pane. */
 export type Panel = "queue" | "lyrics";
@@ -23,30 +41,36 @@ export type StageView =
 export const CLOSED: StageView = { open: false, panel: null };
 
 /**
- * Now Playing's layout: the phone's native `sheet`; the iPad's centered `column`, which fills the
- * window; or `split`, the player beside the side pane.
+ * Now Playing's layout: the iPhone's native `sheet`; a centered `column`, which fills the iPad's
+ * window at any width; or `split`, the player beside the side pane.
  */
 export type NowPlayingLayout = "sheet" | "column" | "split";
 
 /**
- * The layout for a window: two panes only when it is `wide` and on its side, since a 13-inch iPad
- * in portrait is wide enough but leaves the panes short beside a tall empty space.
+ * The layout for a presentation and the window it fills: two panes only when the window is `wide`
+ * and on its side, since a 13-inch iPad in portrait is wide enough but leaves the panes short
+ * beside a tall empty space.
  */
-export const layoutOf = (widthClass: WidthClass, landscape: boolean): NowPlayingLayout => {
-  if (widthClass === "phone") return "sheet";
+export const layoutOf = (
+  presentation: NowPlayingPresentation,
+  widthClass: WidthClass,
+  landscape: boolean,
+): NowPlayingLayout => {
+  if (presentation === "sheet") return "sheet";
 
   return widthClass === "wide" && landscape ? "split" : "column";
 };
 
 /**
- * How Now Playing is presented: the phone's native `sheet`, which the system drags down (B11), or
- * over the whole `window` (P07), which the app drags down itself.
+ * The side pane's panel before the person picks one: the lyrics when the song has words to read,
+ * else the queue. While the lookup runs it keeps the `previous` answer's panel, so the pane doesn't
+ * flip to the lyrics and back on every new song.
  */
-export type NowPlayingPresentation = "sheet" | "window";
+export const defaultPanel = (offer: LyricsOffer, previous: Panel): Panel => {
+  if (offer === "loading") return previous;
 
-/** The presentation for a layout: only the phone's keeps the native sheet. */
-export const presentationOf = (layout: NowPlayingLayout): NowPlayingPresentation =>
-  layout === "sheet" ? "sheet" : "window";
+  return offer === "ready" ? "lyrics" : "queue";
+};
 
 /** What Now Playing renders for a stage view at one layout. */
 export interface NowPlayingParts {
@@ -62,14 +86,21 @@ export interface NowPlayingParts {
   readonly selected: Panel | null;
 }
 
-/** What renders at `layout` for `view`; `hasLyrics` picks the side pane before the person does. */
+/**
+ * What renders at `layout` for `view`, for a song whose lyrics are `offer`. The side pane shows
+ * `fallback` until the person picks a panel, and when they picked the lyrics of a song that has
+ * none, rather than an empty pane behind a dimmed button.
+ */
 export const partsOf = (
   layout: NowPlayingLayout,
   view: StageView,
-  hasLyrics: boolean,
+  offer: LyricsOffer,
+  fallback: Panel,
 ): NowPlayingParts => {
   if (layout === "split") {
-    const side = view.open ? view.panel : hasLyrics ? "lyrics" : "queue";
+    const none = lyricsButton(offer, false).disabled;
+    const chosen = view.open && !(view.panel === "lyrics" && none) ? view.panel : null;
+    const side = chosen ?? fallback;
 
     return { stage: CLOSED, side, folds: false, lyricsFrom: "row", selected: side };
   }

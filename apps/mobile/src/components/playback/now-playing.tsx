@@ -7,12 +7,12 @@
  * it; the lyrics keep only the scrubber and the transport (B12–B14). One of the two shows at a
  * time. With nothing queued it says so (G14).
  *
- * On a phone it is a native sheet over the tabs that the person drags down to dismiss (B11); the
- * sliders keep their own drags. From the tablet width up it fills the window (Paper page 25) and
+ * On an iPhone it is a native sheet over the tabs that the person drags down to dismiss (B11); the
+ * sliders keep their own drags. On an iPad it fills the window at every width (Paper page 25) and
  * the app owns the dismissal: dragging the handle or the player down, tapping the handle, or
- * VoiceOver's escape. There the player is a centered column with a larger cover (P07), and from
- * the wide width the queue and the lyrics leave the cover for a pane beside the player, with a
- * lyrics button in the bottom row (P08, P09, P11). `partsOf` decides what each width shows.
+ * VoiceOver's escape. There the player is a centered column with a larger cover (P07), and in a
+ * wide window on its side the queue and the lyrics leave the cover for a pane beside the player,
+ * with a lyrics button in the bottom row (P08, P09, P11). `partsOf` decides what each width shows.
  */
 import type { TrackId } from "@music/commands/ids";
 import { lyricsAnswer, lyricsButton, lyricsOffer, offlineLyrics } from "@music/player/lyrics";
@@ -56,7 +56,14 @@ import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/icon-button";
 import { Text } from "@/components/ui/text";
 import { useDownloadedLyrics } from "@/downloads";
-import { CLOSED, layoutOf, partsOf, presentationOf, pressedPanel } from "@/lib/now-playing-layout";
+import {
+  CLOSED,
+  defaultPanel,
+  layoutOf,
+  partsOf,
+  presentationOf,
+  pressedPanel,
+} from "@/lib/now-playing-layout";
 import type { NowPlayingLayout, NowPlayingParts, Panel, StageView } from "@/lib/now-playing-layout";
 import type { SheetSong } from "@/lib/song-sheet";
 import { useThemeColor, useThemeLength } from "@/lib/theme-color";
@@ -71,6 +78,9 @@ import { ModePills, QueueList } from "./queue";
 import { Scrubber } from "./scrubber";
 import { Transport, VolumeRow } from "./transport";
 import { useArtTint } from "./use-art-tint";
+
+/** How Now Playing is presented on this device, the same whatever the window does while it is up. */
+const PRESENTATION = presentationOf(DEVICE_FAMILY);
 
 /** Closes Now Playing, back to the tabs underneath. */
 const close = () => {
@@ -163,11 +173,12 @@ const coverTap = (open: boolean, chip: LyricsChipLook): CoverTap => {
 };
 
 /**
- * A drag down closes past this share of the window's height, or at any length flicked faster than
- * `flick` points a second; it claims the touch only after `slop` points down, so taps, the
- * sliders' drags, and sideways swipes keep theirs.
+ * A drag down closes when let go past this share of the window's height, unless the finger is
+ * moving back up faster than `drift` points a second, or at any length flicked down faster than
+ * `flick`; it claims the touch only after `slop` points down, so taps, the sliders' drags, and
+ * sideways swipes keep theirs.
  */
-const DISMISS = { share: 0.25, flick: 800, slop: 12 } as const;
+const DISMISS = { share: 0.25, drift: 100, flick: 800, slop: 12 } as const;
 
 /**
  * Over the whole window (P07) the app closes Now Playing itself, as the native sheet does on a
@@ -199,9 +210,9 @@ function DragToClose({
       "worklet";
 
       if (drag === null) return;
-      const far = event.translationY > height * DISMISS.share || event.velocityY > DISMISS.flick;
+      const past = event.translationY > height * DISMISS.share && event.velocityY > -DISMISS.drift;
 
-      if (!event.canceled && far) {
+      if (!event.canceled && (past || event.velocityY > DISMISS.flick)) {
         scheduleOnRN(close);
       } else {
         drag.value = withSpring(0, MORPH);
@@ -381,6 +392,33 @@ function SongRow({ song }: { readonly song: NowPlaying }) {
   );
 }
 
+/**
+ * A panel's body, in place under the song's row or in the side pane: the queue under its mode
+ * pills (B03), or the song's lyrics (B12), fresh for each song.
+ */
+function PanelBody({
+  panel,
+  song,
+  lyrics,
+  background,
+}: {
+  readonly panel: Panel;
+  readonly song: NowPlaying;
+  readonly lyrics: LyricsAnswer;
+  readonly background: string;
+}) {
+  if (panel === "lyrics") {
+    return <LyricsPanel key={song.trackId} lyrics={lyrics} background={background} />;
+  }
+
+  return (
+    <>
+      <ModePills />
+      <QueueList background={background} />
+    </>
+  );
+}
+
 /** Where the music plays: this device in muted text, another device in the accent (B02). */
 function DeviceButton({ role }: { readonly role: PlayerRole }) {
   const remote = role.kind === "remote";
@@ -430,7 +468,8 @@ function JamButton() {
 
 /**
  * The lyrics in the bottom row beside the side pane (P08), where they leave the cover: dimmed for
- * a song with none, on a faint wash while the pane shows them.
+ * a song with none, a spinner in place of the glyph while they are looked up, on a faint wash
+ * while the pane shows them. It keeps `IconButton`'s look, which has no spinner.
  */
 function LyricsButton({
   offer,
@@ -442,16 +481,23 @@ function LyricsButton({
   readonly onPress: () => void;
 }) {
   const { label, disabled, loading } = lyricsButton(offer, false);
+  const text = useThemeColor("--color-text");
 
   return (
-    <IconButton
-      icon={MessageSquareQuote}
-      label={label}
-      disabled={disabled}
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
       accessibilityState={{ selected, disabled, busy: loading }}
-      className={`${selected ? "bg-text/10" : ""} ${disabled ? "opacity-disabled" : ""}`}
+      disabled={disabled}
       onPress={onPress}
-    />
+      className={`size-hit-target items-center justify-center rounded-full active:opacity-60 ${selected ? "bg-text/10" : ""} ${disabled ? "opacity-disabled" : ""}`}
+    >
+      {loading ? (
+        <ActivityIndicator size="small" color={text} />
+      ) : (
+        <Icon icon={MessageSquareQuote} />
+      )}
+    </Pressable>
   );
 }
 
@@ -710,14 +756,7 @@ function Stage({
           className="absolute inset-0"
         >
           <SongRow song={song} />
-          {view.panel === "queue" ? (
-            <>
-              <ModePills />
-              <QueueList background={background} />
-            </>
-          ) : (
-            <LyricsPanel key={song.trackId} lyrics={lyrics} background={background} />
-          )}
+          <PanelBody panel={view.panel} song={song} lyrics={lyrics} background={background} />
         </Animated.View>
       )}
       <Animated.View style={cover} className="absolute overflow-hidden">
@@ -820,7 +859,7 @@ function Controls({
 
 /**
  * The player: the stage over the controls, whose `children` are the rows the lyrics fold away. On
- * a phone it fills the sheet as B01 draws it. From tablet up it is a column no wider than the
+ * an iPhone it fills the sheet as B01 draws it. On an iPad it is a column no wider than the
  * layout lets it grow and no taller than its content at the largest cover, so the room around it
  * centers it (P07, P08). Folding the rows for the lyrics keeps that height, so the stage grows
  * into their room as it does on a phone.
@@ -906,9 +945,12 @@ function PlayerColumn({
   );
 }
 
+/** How far down each panel starts in the side pane, so the lyrics' lines sit where P08 draws them. */
+const SIDE_TOP: Readonly<Record<Panel, string>> = { queue: "pt-8", lyrics: "pt-2" };
+
 /**
- * The 440pt pane beside the player from `wide` up (P08, P09): the lyrics, their lines Paper's
- * 32pt down, or the queue under its mode pills.
+ * The 440pt pane beside the player in a wide window on its side (P08, P09): the lyrics, or the
+ * queue under its mode pills.
  */
 function SidePane({
   panel,
@@ -923,24 +965,17 @@ function SidePane({
 }) {
   return (
     <View className="min-h-0 w-ios-440 shrink-0">
-      {panel === "queue" ? (
-        <View className="min-h-0 flex-1 pt-8">
-          <ModePills />
-          <QueueList background={background} />
-        </View>
-      ) : (
-        <View className="min-h-0 flex-1 pt-2">
-          <LyricsPanel key={song.trackId} lyrics={lyrics} background={background} />
-        </View>
-      )}
+      <View className={`min-h-0 flex-1 ${SIDE_TOP[panel]}`}>
+        <PanelBody panel={panel} song={song} lyrics={lyrics} background={background} />
+      </View>
     </View>
   );
 }
 
 /**
- * Where the player sits in each layout: filling the sheet (B01), centered in the window (P07), or
- * beside the side pane (P08). Over the whole window the player drags down to close, except while
- * a panel scrolls in its place.
+ * Where the player sits in each layout: filling the sheet (B01), which the system drags down,
+ * centered in the window (P07), or beside the side pane (P08). Over the whole window the player
+ * drags down to close, except while a panel scrolls in its place.
  */
 function PlayerBody({
   layout,
@@ -955,13 +990,7 @@ function PlayerBody({
   readonly drag: SharedValue<number> | null;
   readonly children: ReactElement;
 }) {
-  if (layout === "sheet") {
-    return (
-      <DragToClose drag={drag} enabled={!panelInPlace}>
-        {children}
-      </DragToClose>
-    );
-  }
+  if (layout === "sheet") return children;
 
   if (layout === "column") {
     return (
@@ -996,10 +1025,7 @@ export function NowPlayingScreen() {
   const reduceMotion = useReducedMotion();
   const background = tint ?? player;
   const { widthClass, landscape } = useWindowLayout();
-  const layout = layoutOf(widthClass, landscape);
-
-  // Presented as the window was when Now Playing opened; Split View may resize it afterwards.
-  const [presentation] = useState(() => presentationOf(layout));
+  const layout = layoutOf(PRESENTATION, widthClass, landscape);
 
   // Read while Now Playing is up, for the cover's chip as much as for the lyrics. Settled, not
   // thrown: a failed read shows in the lyrics instead of taking Now Playing down.
@@ -1013,13 +1039,20 @@ export function NowPlayingScreen() {
   const held = useDownloadedLyrics(offline ? (nowPlaying?.trackId ?? null) : null);
   const lyrics = offline ? offlineLyrics(served, held) : served;
   const offer = lyricsOffer(lyrics);
-  const parts = partsOf(layout, view, LYRICS_CHIP[offer] !== null);
+
+  // The side pane's default for the last settled answer, kept while the next song's lookup runs.
+  const [settled, setSettled] = useState<Panel>("queue");
+  const fallback = defaultPanel(offer, settled);
+
+  if (fallback !== settled) setSettled(fallback);
+
+  const parts = partsOf(layout, view, offer, fallback);
 
   useFailureSheet(status === "failed" && role.kind !== "remote", error, nowPlaying?.itemId);
 
   const dragged = useAnimatedStyle(() => ({ transform: [{ translateY: offset.value }] }));
 
-  const windowed = presentation === "window";
+  const windowed = PRESENTATION === "window";
   const drag = windowed ? offset : null;
 
   // Once the closing morph ends, unless a panel opened again meanwhile.

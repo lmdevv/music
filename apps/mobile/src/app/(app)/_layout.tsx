@@ -2,7 +2,7 @@
  * The signed-in app: the tabs, then everything pushed or presented over them. Pages Paper draws
  * without the tab bar (settings, Jams, playlist editing) push here, above the tabs; Paper's bottom
  * sheets present here as native form sheets; Now Playing is a modal with its own stack: the native
- * sheet on a phone, and over the whole window from the tablet width up (Paper page 25). It mounts
+ * sheet on an iPhone, and over the whole window on an iPad (Paper page 25). It mounts
  * offline too, on the downloads (D11), and stays mounted when the server answers, so the player
  * never stops for it.
  */
@@ -15,11 +15,11 @@ import { SaveFailureProvider } from "@/components/states/save-failure";
 import { PlayerProvider } from "@/player";
 import { useConnection } from "@/session/connection";
 
-import { layoutOf, presentationOf } from "@/lib/now-playing-layout";
+import { presentationOf } from "@/lib/now-playing-layout";
 import type { NowPlayingPresentation } from "@/lib/now-playing-layout";
 import { useSheetOptions } from "@/lib/sheet";
 import { useThemeColor } from "@/lib/theme-color";
-import { useWindowLayout } from "@/lib/window-layout";
+import { DEVICE_FAMILY } from "@/lib/this-device";
 
 /** A link that opens a page over the tabs at launch, such as Settings, keeps the tabs under it. */
 export const unstable_settings = { anchor: "(tabs)" };
@@ -52,8 +52,8 @@ const SHEETS = [
 ] as const;
 
 /**
- * Now Playing on a phone is the native sheet the person drags down (B11). From the tablet width up
- * it covers the window, see-through around its own background, so the tabs show behind it as the
+ * Now Playing on an iPhone is the native sheet the person drags down (B11). On an iPad it covers
+ * the window, see-through around its own background, so the tabs show behind it as the
  * app's own drag pulls it down (P07).
  */
 const PLAYER: Readonly<Record<NowPlayingPresentation, NativeStackNavigationOptions>> = {
@@ -61,21 +61,19 @@ const PLAYER: Readonly<Record<NowPlayingPresentation, NativeStackNavigationOptio
   window: { presentation: "transparentModal", contentStyle: { backgroundColor: "transparent" } },
 };
 
+const PLAYER_OPTIONS = PLAYER[presentationOf(DEVICE_FAMILY)];
+
 export default function AppLayout() {
   const sheet = useSheetOptions();
   const canvas = useThemeColor("--color-canvas");
   const { origin } = useConnection();
-  const { widthClass, landscape } = useWindowLayout();
 
   return (
     <PlayerProvider origin={origin}>
       <SaveFailureProvider>
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: canvas } }}>
           <Stack.Screen name="(tabs)" />
-          <Stack.Screen
-            name="player"
-            options={PLAYER[presentationOf(layoutOf(widthClass, landscape))]}
-          />
+          <Stack.Screen name="player" options={PLAYER_OPTIONS} />
           {SHEETS.map((name) => (
             <Stack.Screen key={name} name={name} options={sheet} />
           ))}
