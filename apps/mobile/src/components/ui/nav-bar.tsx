@@ -10,6 +10,8 @@ import type { ReactNode } from "react";
 import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { usePageBackground } from "@/lib/window-layout";
+
 import { IconButton } from "./icon-button";
 import { Text } from "./text";
 
@@ -46,6 +48,7 @@ export function NavBar({
   // which can predate the push (a page pushed on Home showed no Back). It still covers the root
   // of a stack presented over another, such as Now Playing's.
   const stacked = useNavigationState((state) => state.index > 0);
+  const background = usePageBackground();
 
   const back =
     onBack === undefined && (stacked || navigation.canGoBack()) ? () => router.back() : onBack;
@@ -53,7 +56,7 @@ export function NavBar({
   return (
     <View
       style={{ paddingTop: insets.top }}
-      className={`px-page ${readable ? "bg-canvas" : "bg-content"}`}
+      className={`px-page ${readable ? "bg-canvas" : background}`}
     >
       <View
         className={`min-h-row-touch flex-row items-center pt-2 pb-3 ${

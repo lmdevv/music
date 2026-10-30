@@ -5,6 +5,8 @@
 import type { ReactNode } from "react";
 import { ScrollView, View } from "react-native";
 
+import { usePageBackground } from "@/lib/window-layout";
+
 import { ContentScroll } from "./content-scroll";
 import { NavBar } from "./nav-bar";
 import type { NavBarProps } from "./nav-bar";
@@ -27,6 +29,7 @@ export interface PageProps extends NavBarProps {
 /** A scrolling pushed page with Paper's nav bar. */
 export function Page({ children, bottom = "tabs", ...bar }: PageProps) {
   const readable = bottom === "plain";
+  const background = usePageBackground();
 
   return (
     <ContentScroll>
@@ -36,7 +39,7 @@ export function Page({ children, bottom = "tabs", ...bar }: PageProps) {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
         automaticallyAdjustKeyboardInsets
-        className={`flex-1 ${readable ? "bg-canvas" : "bg-content"}`}
+        className={`flex-1 ${readable ? "bg-canvas" : background}`}
         contentContainerClassName={readable ? "pb-row" : "pb-page-foot"}
       >
         <NavBar {...bar} readable={readable} />

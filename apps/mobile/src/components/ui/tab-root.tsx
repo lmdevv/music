@@ -125,14 +125,18 @@ export function TabRoot({ title, children, action, figures }: TabRootProps) {
   return (
     <ContentScroll>
       <ScrollView
-        onScroll={beside ? undefined : onScroll}
+        onScroll={onScroll}
         scrollEventThrottle={16}
-        stickyHeaderIndices={beside ? undefined : STICKY_BAR}
+        stickyHeaderIndices={STICKY_BAR}
         contentInsetAdjustmentBehavior="never"
         className="flex-1 bg-content"
         contentContainerClassName="pb-page-foot"
       >
-        {beside ? null : (
+        {/* Empty but the same height beside the sidebar: a sticky child only repositions on a scroll
+            event, so if the bar's height changed, hiding the sidebar on a scrolled page would lose it. */}
+        {beside ? (
+          <View className="h-hit-target" style={{ pointerEvents: "box-none" }} />
+        ) : (
           <CompactBar title={title} collapsed={collapsed} action={action} sidebar={sidebar} />
         )}
         {sidebar === null ? (
@@ -150,7 +154,9 @@ export function TabRoot({ title, children, action, figures }: TabRootProps) {
             <View className="size-row" />
           </View>
         ) : (
-          <View className="flex-row items-end gap-2 px-page pt-4 pb-3">
+          <View
+            className={`flex-row items-end gap-2 px-page pt-4 pb-3 ${beside ? "-mt-hit-target" : ""}`}
+          >
             <Text
               variant="largeTitle"
               numberOfLines={1}

@@ -3,7 +3,7 @@ import { createContext, use } from "react";
 import { useWindowDimensions } from "react-native";
 import { useUniwind } from "uniwind";
 
-import { widthClassOf } from "./layout";
+import { contentClassOf, widthClassOf } from "./layout";
 import type { WidthClass } from "./layout";
 import { useThemeColor, useThemeLength } from "./theme-color";
 
@@ -44,8 +44,8 @@ export const ContentWidthContext = createContext<number | null>(null);
 
 /**
  * The layout a page in the tabs gets from the room it has, rather than from the window: what a
- * pinned sidebar leaves. A class's `tablet:` variant still follows the window, which is right for
- * the page's margins.
+ * pinned sidebar leaves. That room sets its column counts and whether a header stacks. Whether it
+ * has an iPad layout at all follows the window, as the frame and `tablet:` variants do.
  */
 export const useContentLayout = (): WindowLayout => {
   const window = useWindowLayout();
@@ -55,10 +55,16 @@ export const useContentLayout = (): WindowLayout => {
 
   if (content === null) return window;
 
-  const widthClass = widthClassOf(content, { tablet, wide });
-
-  return { ...window, width: content, widthClass, tablet: widthClass !== "phone" };
+  return {
+    ...window,
+    width: content,
+    widthClass: contentClassOf(window.widthClass, content, { tablet, wide }),
+  };
 };
+
+/** The class for what lies behind a page: `bg-content` in the area beside the sidebar. */
+export const usePageBackground = (): "bg-content" | "bg-canvas" =>
+  use(ContentWidthContext) === null ? "bg-canvas" : "bg-content";
 
 /**
  * The color behind a page in the tabs, as the `bg-content` class draws it: the canvas, except in
