@@ -156,7 +156,7 @@ function Editor({ detail }: { readonly detail: PlaylistDetail }) {
           />
         }
       />
-      <View className="px-mobile-edge">
+      <View className="px-page">
         {owner ? (
           <PlaylistFields
             value={draft.text}

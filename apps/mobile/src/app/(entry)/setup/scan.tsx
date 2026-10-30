@@ -171,13 +171,13 @@ function Ready({
       contentContainerClassName="pb-row"
       style={{ paddingTop: insets.top }}
     >
-      <View className="min-h-row-touch flex-row items-center justify-between px-mobile-edge pt-2 pb-3">
+      <View className="min-h-row-touch flex-row items-center justify-between px-page pt-2 pb-3">
         <Text variant="largeTitle" accessibilityRole="header">
           You’re ready
         </Text>
         <IconButton icon={Check} label="Done" onPress={onListen} />
       </View>
-      <View className="px-mobile-edge">
+      <View className="px-page">
         <View
           className="flex-row items-center justify-center gap-3 py-row"
           accessibilityElementsHidden

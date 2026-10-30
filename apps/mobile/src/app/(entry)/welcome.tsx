@@ -21,7 +21,7 @@ export default function Welcome() {
       contentContainerClassName="pb-row"
       style={{ paddingTop: insets.top }}
     >
-      <View className="min-h-row-touch flex-row items-center justify-between px-mobile-edge pt-2 pb-3">
+      <View className="min-h-row-touch flex-row items-center justify-between px-page pt-2 pb-3">
         <Text variant="largeTitle" accessibilityRole="header">
           [music]
         </Text>
@@ -29,7 +29,7 @@ export default function Welcome() {
           <Icon icon={Info} />
         </View>
       </View>
-      <View className="px-mobile-edge">
+      <View className="px-page">
         <View
           className="flex-row items-center justify-center gap-3 py-row"
           accessibilityElementsHidden

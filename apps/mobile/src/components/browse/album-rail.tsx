@@ -34,8 +34,8 @@ export function AlbumRail({ title, albums, action, first = false, size = "rail" 
         keyExtractor={(album) => album.id}
         renderItem={({ item }) => <AlbumCard album={item} size={size} />}
         showsHorizontalScrollIndicator={false}
-        className="-mx-mobile-edge"
-        contentContainerClassName="gap-3 px-mobile-edge"
+        className="bleed-page"
+        contentContainerClassName="gap-3 px-page"
         initialNumToRender={3}
         windowSize={3}
       />

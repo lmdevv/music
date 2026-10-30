@@ -44,7 +44,7 @@ export function NavBar({ title, trailing, onBack }: NavBarProps) {
 
   return (
     <View style={{ paddingTop: insets.top }} className="bg-canvas">
-      <View className="min-h-row-touch flex-row items-center px-mobile-edge pt-2 pb-3">
+      <View className="min-h-row-touch flex-row items-center px-page pt-2 pb-3">
         {back === null || back === undefined ? null : (
           <IconButton icon={ChevronLeft} label="Back" onPress={back} />
         )}

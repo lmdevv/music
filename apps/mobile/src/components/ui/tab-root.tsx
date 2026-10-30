@@ -79,7 +79,7 @@ function CompactBar({
         </Animated.View>
       ) : null}
       <View
-        className="h-hit-target flex-row items-center justify-end gap-2 px-mobile-edge"
+        className="h-hit-target flex-row items-center justify-end gap-2 px-page"
         pointerEvents="box-none"
       >
         {collapsed ? (
@@ -130,7 +130,7 @@ export function TabRoot({ title, children, action }: TabRootProps) {
         contentContainerClassName="pb-ios-180"
       >
         <CompactBar title={title} collapsed={collapsed} action={action} />
-        <View className="-mt-hit-target min-h-row-touch flex-row items-center gap-2 px-mobile-edge pt-2 pb-3">
+        <View className="-mt-hit-target min-h-row-touch flex-row items-center gap-2 px-page pt-2 pb-3">
           <Text
             variant="largeTitle"
             numberOfLines={1}
@@ -143,7 +143,7 @@ export function TabRoot({ title, children, action }: TabRootProps) {
           {action === undefined ? null : <View className="size-hit-target" />}
           <View className="size-row" />
         </View>
-        <View className="px-mobile-edge">{children}</View>
+        <View className="px-page">{children}</View>
       </ScrollView>
     </ContentScroll>
   );

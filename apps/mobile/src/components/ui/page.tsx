@@ -36,7 +36,7 @@ export function Page({ children, bottom = "tabs", ...bar }: PageProps) {
         contentContainerClassName={bottom === "tabs" ? "pb-ios-180" : "pb-row"}
       >
         <NavBar {...bar} />
-        <View className="px-mobile-edge">{children}</View>
+        <View className="px-page">{children}</View>
       </ScrollView>
     </ContentScroll>
   );

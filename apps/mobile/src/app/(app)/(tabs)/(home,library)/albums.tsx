@@ -30,7 +30,7 @@ const rowsOfTwo = (albums: ReadonlyArray<Album>): ReadonlyArray<ReadonlyArray<Al
 /** One row of the grid: two cards 12pt apart, filling the page between its 20pt edges. */
 function GridRow({ albums }: { readonly albums: ReadonlyArray<Album> }) {
   return (
-    <View className="flex-row gap-3 px-mobile-edge pb-4">
+    <View className="flex-row gap-3 px-page pb-4">
       {albums.map((album) => (
         <View key={album.id} className="flex-1">
           <AlbumCard album={album} size="fill" />
@@ -59,7 +59,7 @@ export default function Albums() {
   };
 
   const header = (
-    <View className="px-mobile-edge">
+    <View className="px-page">
       <ChipGroup
         label="Sort"
         options={SORT_SHEETS.albums.sorts}
@@ -73,7 +73,7 @@ export default function Albums() {
 
   const footer =
     done && albums.length === 0 ? (
-      <View className="px-mobile-edge">
+      <View className="px-page">
         <EmptyState
           icon={Library}
           title={"No albums\nyet."}
