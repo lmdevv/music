@@ -29,6 +29,15 @@ import { useThemeColor } from "@/lib/theme-color";
 import { usePlayerActions, usePositionReader } from "@/player";
 
 import { EdgeFade } from "./edge-fade";
+import type { PanelPlace } from "./reorder-list";
+
+/** How timed lines read in each place: Now Playing's B12, or the iPad panel's smaller B2. */
+const LINES: Readonly<
+  Record<PanelPlace, { readonly variant: "lyric" | "panelHeading"; readonly list: string }>
+> = {
+  player: { variant: "lyric", list: "gap-6 pt-6 pr-6" },
+  panel: { variant: "panelHeading", list: "gap-3 pt-1" },
+};
 
 /**
  * The playing song's lyrics under its row: synced lines, plain text, the song's own plain text
@@ -39,16 +48,20 @@ import { EdgeFade } from "./edge-fade";
 export function LyricsPanel({
   lyrics,
   background,
+  place = "player",
 }: {
   readonly lyrics: LyricsAnswer;
   readonly background: string;
+  readonly place?: PanelPlace;
 }) {
   if (lyrics === "loading") return <LyricsMessage looking>Looking for lyrics…</LyricsMessage>;
 
   if (lyrics === "failed") return <LyricsMessage>Couldn’t load the lyrics</LyricsMessage>;
 
   return TrackLyrics.match(lyrics, {
-    Synced: ({ main }) => <SyncedLyrics lines={main.body.lines} background={background} />,
+    Synced: ({ main }) => (
+      <SyncedLyrics lines={main.body.lines} background={background} place={place} />
+    ),
     Plain: ({ main }) => <PlainLyrics text={main.body.text} background={background} />,
     Pending: ({ fallback }) =>
       fallback === null ? (
@@ -274,9 +287,11 @@ function useLineFollow(started: number, animate: boolean) {
 function SyncedLyrics({
   lines,
   background,
+  place,
 }: {
   readonly lines: ReadonlyArray<LyricLine>;
   readonly background: string;
+  readonly place: PanelPlace;
 }) {
   const readPosition = usePositionReader();
   const { seek } = usePlayerActions();
@@ -325,7 +340,7 @@ function SyncedLyrics({
         onScroll={follow.onScroll}
         onScrollBeginDrag={follow.onScrollBeginDrag}
         onMomentumScrollEnd={follow.onMomentumScrollEnd}
-        contentContainerClassName="gap-6 pt-6 pr-6"
+        contentContainerClassName={LINES[place].list}
       >
         {lines.map((line, index) => (
           <Line
@@ -334,6 +349,7 @@ function SyncedLyrics({
             text={line.text}
             startMs={line.startMs}
             state={lyricLineState(index, moment)}
+            variant={LINES[place].variant}
             onSeek={onSeek}
             onBox={onLineLayout}
           />
@@ -361,6 +377,7 @@ const Line = memo(function Line({
   text,
   startMs,
   state,
+  variant,
   onSeek,
   onBox,
 }: {
@@ -368,6 +385,7 @@ const Line = memo(function Line({
   readonly text: string;
   readonly startMs: number;
   readonly state: LyricLineState;
+  readonly variant: "lyric" | "panelHeading";
   readonly onSeek: (startMs: number) => void;
   readonly onBox: (index: number, box: LineBox) => void;
 }) {
@@ -388,7 +406,7 @@ const Line = memo(function Line({
       }}
       className={LINE_LOOK[state]}
     >
-      <Text variant="lyric">{blank ? "♪" : text}</Text>
+      <Text variant={variant}>{blank ? "♪" : text}</Text>
     </Pressable>
   );
 });

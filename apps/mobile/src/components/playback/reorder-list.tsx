@@ -26,8 +26,18 @@ import { Artwork } from "@/components/ui/artwork";
 import { Icon } from "@/components/ui/icon";
 import { SwipeToRemove } from "@/components/ui/swipe-to-remove";
 import { Text } from "@/components/ui/text";
+import { clock } from "@/lib/playback-format";
 import { dropIndex, edgeScroll, moved, shiftOf } from "@/lib/reorder";
 import type { QueueItem } from "@/player";
+
+/** Where the queue or the lyrics sit: filling Now Playing, or in the iPad's narrower panel (B1). */
+export type PanelPlace = "player" | "panel";
+
+/** Each place's side margin, which the rows draw so a swiped row's Remove reaches its edge. */
+export const QUEUE_EDGE: Readonly<Record<PanelPlace, "px-page" | "px-4">> = {
+  player: "px-page",
+  panel: "px-4",
+};
 
 /** How long the rows take to slide out of the lifted row's way. */
 const SHIFT_MS = 150;
@@ -112,13 +122,18 @@ function Handle({
   );
 }
 
-/** A queue song: 40pt art, title over artist, then the handle in a fixed 32pt lane. */
+/**
+ * A queue song: 40pt art, title over artist, the length in the iPad's panel (`timed`, B1), then
+ * the handle in a fixed 32pt lane.
+ */
 export function QueueLine({
   item,
   trailing,
+  timed = false,
 }: {
   readonly item: QueueItem;
   readonly trailing?: ReactNode;
+  readonly timed?: boolean;
 }) {
   return (
     <>
@@ -135,6 +150,11 @@ export function QueueLine({
           {item.artist}
         </Text>
       </View>
+      {timed ? (
+        <Text variant="mono" tone="muted" className="w-row shrink-0 text-right">
+          {clock(item.durationMs)}
+        </Text>
+      ) : null}
       <View className="w-8 shrink-0 items-center">{trailing}</View>
     </>
   );
@@ -147,6 +167,7 @@ function QueueRow({
   drag,
   actions,
   background,
+  place,
 }: {
   readonly item: QueueItem;
   readonly index: number;
@@ -154,6 +175,7 @@ function QueueRow({
   readonly actions: RowActions;
   /** The sheet's color, so the row covers Remove until it slides aside. */
   readonly background: string;
+  readonly place: PanelPlace;
 }) {
   const handle =
     drag === null ? (
@@ -181,9 +203,9 @@ function QueueRow({
           onPress={() => {
             if (!settle()) actions.onJump(item);
           }}
-          className="min-h-row-touch flex-row items-center gap-3 px-page py-2 active:opacity-60"
+          className={`min-h-row-touch flex-row items-center gap-3 py-2 active:opacity-60 ${QUEUE_EDGE[place]}`}
         >
-          <QueueLine item={item} trailing={handle} />
+          <QueueLine item={item} trailing={handle} timed={place === "panel"} />
         </Pressable>
       )}
     </SwipeToRemove>
@@ -239,6 +261,7 @@ export interface ReorderListProps {
   readonly header: ReactNode;
   /** Under the rows: what autoplay added. */
   readonly footer?: ReactNode;
+  readonly place?: PanelPlace;
 }
 
 /** The queue list with its header and footer. */
@@ -250,6 +273,7 @@ export function ReorderList({
   onRemove,
   header,
   footer,
+  place = "player",
 }: ReorderListProps) {
   const list = useRef<FlashListRef<QueueItem>>(null);
   // The order a drop showed, until the server's queue changes.
@@ -377,6 +401,8 @@ export function ReorderList({
         data={shown}
         keyExtractor={(item) => item.itemId}
         scrollEnabled={lifted === null}
+        // Keeping the first row in place would scroll the list by a row after every drop.
+        maintainVisibleContentPosition={{ disabled: true }}
         onScroll={(event) => {
           drag.scrollY.value = event.nativeEvent.contentOffset.y;
         }}
@@ -400,6 +426,7 @@ export function ReorderList({
               drag={drag}
               actions={actions}
               background={background}
+              place={place}
             />
           </Cell>
         )}
@@ -413,6 +440,7 @@ export function ReorderList({
               drag={null}
               actions={actions}
               background={background}
+              place={place}
             />
           </View>
         )}

@@ -26,6 +26,7 @@ export const unstable_settings = { anchor: "(tabs)" };
 /** Routes Paper draws as bottom sheets, presented as native form sheets. */
 const SHEETS = [
   "audio",
+  "clear-queue",
   "devices",
   "song/[id]/actions",
   "song/[id]/add-to-playlist",
