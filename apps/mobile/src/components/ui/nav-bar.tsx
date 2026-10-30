@@ -10,6 +10,8 @@ import type { ReactNode } from "react";
 import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useSidebarControl } from "@/components/shell/sidebar-control";
+import { ShowSidebarButton } from "@/components/shell/top-buttons";
 import { usePageBackground } from "@/lib/window-layout";
 
 import { IconButton } from "./icon-button";
@@ -49,6 +51,8 @@ export function NavBar({
   // of a stack presented over another, such as Now Playing's.
   const stacked = useNavigationState((state) => state.index > 0);
   const background = usePageBackground();
+  // Otherwise a page pushed under a hidden sidebar could only reach it by going Back to the root.
+  const sidebar = useSidebarControl();
 
   const back =
     onBack === undefined && (stacked || navigation.canGoBack()) ? () => router.back() : onBack;
@@ -63,6 +67,11 @@ export function NavBar({
           readable ? "w-full self-center tablet:max-w-readable" : ""
         }`}
       >
+        {sidebar?.placement === "hidden" ? (
+          <View className="mr-2">
+            <ShowSidebarButton onPress={sidebar.toggle} />
+          </View>
+        ) : null}
         {back === null || back === undefined ? null : (
           <IconButton icon={ChevronLeft} label="Back" onPress={back} />
         )}
