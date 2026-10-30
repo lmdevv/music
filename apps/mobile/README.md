@@ -73,6 +73,15 @@ Pages take their layout from `useContentLayout`, the room beside the sidebar, no
 A class's `tablet:` variant follows the window, which is fine for margins. The iPhone doesn't run
 this frame at all: the device picks the tree, so a resize in Split View keeps the tabs mounted.
 
+The Now Playing panel (`components/shell/inspector.tsx`) sits beside the content as a pane in a wide
+window on its side, and above the player bar as a sheet otherwise. `lib/inspector.ts` holds its tab
+and whether it is open: the shell keeps one answer per placement, so rotating neither drops a sheet
+over the page nor loses the pane, and until someone picks a tab it follows Now Playing's
+`defaultPanel`. The bar's lyrics and queue buttons open it on that tab and hide it when lit; the song
+in the bar still opens full-screen Now Playing, and while that is up the panel drops its body, so
+only one lyrics frame loop and one queue run at a time. Its Clear presents `/clear-queue`, since
+`/player/clear-queue` belongs to Now Playing's own stack.
+
 ## Tab bar
 
 iOS minimizes the tab bar and moves the mini player inline as a page scrolls, but it finds the
