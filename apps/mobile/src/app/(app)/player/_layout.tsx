@@ -8,14 +8,13 @@
  */
 import { Stack } from "expo-router";
 
-import { presentationOf } from "@/lib/now-playing-layout";
+import { NOW_PLAYING_PRESENTATION } from "@/components/playback/now-playing-presentation";
 import { useSheetOptions } from "@/lib/sheet";
 import { useThemeColor } from "@/lib/theme-color";
-import { DEVICE_FAMILY } from "@/lib/this-device";
 
 /** Over the whole window, the page under Now Playing lets the tabs show through. */
 const INDEX =
-  presentationOf(DEVICE_FAMILY) === "window"
+  NOW_PLAYING_PRESENTATION === "window"
     ? { contentStyle: { backgroundColor: "transparent" } }
     : undefined;
 

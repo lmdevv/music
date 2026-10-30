@@ -10,16 +10,15 @@ import { Stack } from "expo-router";
 import type { NativeStackNavigationOptions } from "expo-router";
 
 import { AppFailure } from "@/components/app-failure";
+import { NOW_PLAYING_PRESENTATION } from "@/components/playback/now-playing-presentation";
 import { SaveFailureProvider } from "@/components/states/save-failure";
 
 import { PlayerProvider } from "@/player";
 import { useConnection } from "@/session/connection";
 
-import { presentationOf } from "@/lib/now-playing-layout";
 import type { NowPlayingPresentation } from "@/lib/now-playing-layout";
 import { useSheetOptions } from "@/lib/sheet";
 import { useThemeColor } from "@/lib/theme-color";
-import { DEVICE_FAMILY } from "@/lib/this-device";
 
 /** A link that opens a page over the tabs at launch, such as Settings, keeps the tabs under it. */
 export const unstable_settings = { anchor: "(tabs)" };
@@ -61,7 +60,7 @@ const PLAYER: Readonly<Record<NowPlayingPresentation, NativeStackNavigationOptio
   window: { presentation: "transparentModal", contentStyle: { backgroundColor: "transparent" } },
 };
 
-const PLAYER_OPTIONS = PLAYER[presentationOf(DEVICE_FAMILY)];
+const PLAYER_OPTIONS = PLAYER[NOW_PLAYING_PRESENTATION];
 
 export default function AppLayout() {
   const sheet = useSheetOptions();

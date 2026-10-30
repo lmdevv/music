@@ -2,9 +2,9 @@
  * How Now Playing is presented on each device, and what it shows at each window width (Paper page
  * 25). On a phone (B01) and in the iPad's single column (P07) the queue (B03) and the lyrics (B12)
  * open in place of the cover. In a `wide` window on its side (P08, P09) the cover stays, and a
- * side pane beside the player always holds one of the two: the one the person opened, else the
- * lyrics when the song has them, else the queue. One stage view serves every width, so rotating
- * or resizing keeps what the person opened.
+ * side pane beside the player holds one of the two: the one the person opened, else the lyrics
+ * when the song has them, else the queue. One stage view serves every width, so rotating or
+ * resizing keeps what the person opened.
  */
 import { lyricsButton } from "@music/player/lyrics";
 import type { LyricsOffer } from "@music/player/lyrics";
@@ -64,9 +64,10 @@ export const layoutOf = (
 /**
  * The side pane's panel before the person picks one: the lyrics when the song has words to read,
  * else the queue. While the lookup runs it keeps the `previous` answer's panel, so the pane doesn't
- * flip to the lyrics and back on every new song.
+ * flip to the lyrics and back on every new song, and before the first answer it is null, so
+ * opening on a song with lyrics doesn't show the queue first.
  */
-export const defaultPanel = (offer: LyricsOffer, previous: Panel): Panel => {
+export const defaultPanel = (offer: LyricsOffer, previous: Panel | null): Panel | null => {
   if (offer === "loading") return previous;
 
   return offer === "ready" ? "lyrics" : "queue";
@@ -74,9 +75,14 @@ export const defaultPanel = (offer: LyricsOffer, previous: Panel): Panel => {
 
 /** What Now Playing renders for a stage view at one layout. */
 export interface NowPlayingParts {
-  /** What the player's stage shows in place: the stage view, or always the cover beside a pane. */
+  /** What the player's stage shows in place: the stage view, or the cover beside a pane. */
   readonly stage: StageView;
-  /** The side pane's panel, or null when there is no side pane. */
+  /**
+   * Whether the stage follows the morph. It holds the cover still where it shows the cover over
+   * an open view: beside the side pane, and over lyrics the song lacks.
+   */
+  readonly morphs: boolean;
+  /** The side pane's panel; null with no side pane, or while it waits for the first answer. */
   readonly side: Panel | null;
   /** Whether the controls fold the volume and the bottom row away for the lyrics (B12). */
   readonly folds: boolean;
@@ -89,28 +95,34 @@ export interface NowPlayingParts {
 /**
  * What renders at `layout` for `view`, for a song whose lyrics are `offer`. The side pane shows
  * `fallback` until the person picks a panel, and when they picked the lyrics of a song that has
- * none, rather than an empty pane behind a dimmed button.
+ * none, rather than an empty pane behind a dimmed button. For the same song the iPad's column
+ * shows the cover, so rotating from that fallback doesn't open an empty panel in its place; the
+ * phone keeps the lyrics open to say there are none.
  */
 export const partsOf = (
   layout: NowPlayingLayout,
   view: StageView,
   offer: LyricsOffer,
-  fallback: Panel,
+  fallback: Panel | null,
 ): NowPlayingParts => {
-  if (layout === "split") {
-    const none = lyricsButton(offer, false).disabled;
-    const chosen = view.open && !(view.panel === "lyrics" && none) ? view.panel : null;
-    const side = chosen ?? fallback;
+  const missing = view.open && view.panel === "lyrics" && lyricsButton(offer, false).disabled;
 
-    return { stage: CLOSED, side, folds: false, lyricsFrom: "row", selected: side };
+  if (layout === "split") {
+    const side = view.open && !missing ? view.panel : fallback;
+
+    return { stage: CLOSED, morphs: false, side, folds: false, lyricsFrom: "row", selected: side };
   }
 
+  const cover = layout === "column" && missing;
+  const stage = cover ? CLOSED : view;
+
   return {
-    stage: view,
+    stage,
+    morphs: !cover,
     side: null,
-    folds: view.panel === "lyrics",
+    folds: stage.panel === "lyrics",
     lyricsFrom: "cover",
-    selected: view.open ? view.panel : null,
+    selected: stage.open ? stage.panel : null,
   };
 };
 

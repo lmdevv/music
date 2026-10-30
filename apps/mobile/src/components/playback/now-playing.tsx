@@ -33,7 +33,6 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { ActivityIndicator, Pressable, useWindowDimensions, View } from "react-native";
-import type { LayoutRectangle } from "react-native";
 import { GestureDetector, usePanGesture } from "react-native-gesture-handler";
 import Animated, {
   Extrapolation,
@@ -56,14 +55,7 @@ import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/icon-button";
 import { Text } from "@/components/ui/text";
 import { useDownloadedLyrics } from "@/downloads";
-import {
-  CLOSED,
-  defaultPanel,
-  layoutOf,
-  partsOf,
-  presentationOf,
-  pressedPanel,
-} from "@/lib/now-playing-layout";
+import { CLOSED, defaultPanel, layoutOf, partsOf, pressedPanel } from "@/lib/now-playing-layout";
 import type { NowPlayingLayout, NowPlayingParts, Panel, StageView } from "@/lib/now-playing-layout";
 import type { SheetSong } from "@/lib/song-sheet";
 import { useThemeColor, useThemeLength } from "@/lib/theme-color";
@@ -74,13 +66,11 @@ import type { NowPlaying, PlayerRole } from "@/player";
 import { useServerReach } from "@/session/server-reach";
 
 import { LyricsPanel } from "./lyrics";
+import { NOW_PLAYING_PRESENTATION } from "./now-playing-presentation";
 import { ModePills, QueueList } from "./queue";
 import { Scrubber } from "./scrubber";
 import { Transport, VolumeRow } from "./transport";
 import { useArtTint } from "./use-art-tint";
-
-/** How Now Playing is presented on this device, the same whatever the window does while it is up. */
-const PRESENTATION = presentationOf(DEVICE_FAMILY);
 
 /** Closes Now Playing, back to the tabs underneath. */
 const close = () => {
@@ -115,6 +105,12 @@ const STAGE_TOP = "--spacing-2";
 
 /** The gap between the cover and the title under it. */
 const STAGE_GAP = "--spacing-6";
+
+/** The stage's size. */
+interface Box {
+  readonly width: number;
+  readonly height: number;
+}
 
 /** The largest cover a layout draws: B01's 326pt, P07's column, or P08's 520pt. */
 type CoverLimit = "--spacing-ios-326" | "--container-dialog" | "--spacing-ios-520";
@@ -469,7 +465,7 @@ function JamButton() {
 /**
  * The lyrics in the bottom row beside the side pane (P08), where they leave the cover: dimmed for
  * a song with none, a spinner in place of the glyph while they are looked up, on a faint wash
- * while the pane shows them. It keeps `IconButton`'s look, which has no spinner.
+ * while the pane shows them.
  */
 function LyricsButton({
   offer,
@@ -481,23 +477,17 @@ function LyricsButton({
   readonly onPress: () => void;
 }) {
   const { label, disabled, loading } = lyricsButton(offer, false);
-  const text = useThemeColor("--color-text");
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ selected, disabled, busy: loading }}
+    <IconButton
+      icon={MessageSquareQuote}
+      label={label}
+      loading={loading}
       disabled={disabled}
+      accessibilityState={{ selected, disabled }}
+      className={`${selected ? "bg-text/10" : ""} ${disabled ? "opacity-disabled" : ""}`}
       onPress={onPress}
-      className={`size-hit-target items-center justify-center rounded-full active:opacity-60 ${selected ? "bg-text/10" : ""} ${disabled ? "opacity-disabled" : ""}`}
-    >
-      {loading ? (
-        <ActivityIndicator size="small" color={text} />
-      ) : (
-        <Icon icon={MessageSquareQuote} />
-      )}
-    </Pressable>
+    />
   );
 }
 
@@ -678,7 +668,23 @@ function Stage({
   const offer = lyricsOffer(lyrics);
   const chip = lyricsFrom === "cover" ? LYRICS_CHIP[offer] : null;
   const tap = COVER_TAP[coverTap(open, chip)];
-  const [box, setBox] = useState<LayoutRectangle | null>(null);
+
+  // While the lyrics fold the controls away the stage grows. The cover keeps the height the stage
+  // had when the fold started, so the morph starts where the cover is. Mounted folded, there is
+  // no such height, so it takes the stage's own.
+  const [live, setLive] = useState<Box | null>(null);
+
+  const [fold, setFold] = useState<{ readonly folds: boolean; readonly held: Box | null }>({
+    folds,
+    held: null,
+  });
+
+  if (fold.folds !== folds) setFold({ folds, held: folds ? live : null });
+
+  const { held } = fold;
+
+  const box =
+    folds && held !== null && live !== null ? { width: live.width, height: held.height } : live;
 
   const largest = useThemeLength(largestToken);
   const small = useThemeLength("--spacing-16");
@@ -688,8 +694,6 @@ function Stage({
   const rowRadius = useThemeLength("--radius-md");
 
   // The cover fills the width up to the layout's largest, leaving room for the title under it.
-  // The lyrics grow the stage as the controls under it go; the cover keeps the box it had, so the
-  // morph starts where the cover is.
   const width = box?.width ?? 0;
 
   const size = Math.max(
@@ -717,7 +721,7 @@ function Stage({
       borderRadius: (coverRadius + (rowRadius - coverRadius) * at) / scale,
       transform: [{ translateX: -left * at }, { scale }],
     };
-  }, [measured, left, top, size, small, coverRadius, rowRadius]);
+  }, [progress, measured, left, top, size, small, coverRadius, rowRadius]);
 
   const title = useAnimatedStyle(() => ({
     opacity: interpolate(progress.value, [0, 0.4], [1, 0], Extrapolation.CLAMP),
@@ -733,16 +737,14 @@ function Stage({
     <View
       className="flex-1"
       onLayout={(event) => {
-        const next = event.nativeEvent.layout;
+        const { width: nextWidth, height } = event.nativeEvent.layout;
 
-        // While the lyrics fold the controls away the stage grows, so it keeps the height it had
-        // over the cover, but takes a new width, as when Split View narrows the window. Mounted
-        // with the lyrics already open, it takes the box it has, to show the cover at all.
-        setBox((held) => {
-          if (!folds || held === null) return next;
-
-          return held.width === next.width ? held : { ...held, x: next.x, width: next.width };
-        });
+        // At the width the fold started at, its growth is skipped, so the stage is back to that
+        // box when the fold ends, which brings no layout of its own. After a new width, as when
+        // Split View narrows the window, it takes every layout until the fold ends.
+        setLive((current) =>
+          folds && held?.width === nextWidth ? current : { width: nextWidth, height },
+        );
       }}
     >
       <Animated.View
@@ -822,7 +824,7 @@ function Controls({
     const shut = folds ? progress.value : 0;
 
     return { marginVertical: -tighten * shut };
-  }, [folds, tighten]);
+  }, [progress, folds, tighten]);
 
   const rows = useAnimatedStyle(() => {
     const shut = folds ? progress.value : 0;
@@ -831,7 +833,7 @@ function Controls({
       opacity: interpolate(shut, [0, 0.5], [1, 0], Extrapolation.CLAMP),
       marginBottom: -rowsHeight.value * shut,
     };
-  }, [folds]);
+  }, [progress, folds]);
 
   return (
     <>
@@ -966,16 +968,18 @@ function SidePane({
   lyrics,
   background,
 }: {
-  readonly panel: Panel;
+  readonly panel: Panel | null;
   readonly song: NowPlaying;
   readonly lyrics: LyricsAnswer;
   readonly background: string;
 }) {
   return (
     <View className="min-h-0 w-ios-440 shrink-0">
-      <View className={`min-h-0 flex-1 ${SIDE_TOP[panel]}`}>
-        <PanelBody panel={panel} song={song} lyrics={lyrics} background={background} />
-      </View>
+      {panel === null ? null : (
+        <View className={`min-h-0 flex-1 ${SIDE_TOP[panel]}`}>
+          <PanelBody panel={panel} song={song} lyrics={lyrics} background={background} />
+        </View>
+      )}
     </View>
   );
 }
@@ -1033,7 +1037,7 @@ export function NowPlayingScreen() {
   const reduceMotion = useReducedMotion();
   const background = tint ?? player;
   const { widthClass, landscape } = useWindowLayout();
-  const layout = layoutOf(PRESENTATION, widthClass, landscape);
+  const layout = layoutOf(NOW_PLAYING_PRESENTATION, widthClass, landscape);
 
   // Read while Now Playing is up, for the cover's chip as much as for the lyrics. Settled, not
   // thrown: a failed read shows in the lyrics instead of taking Now Playing down.
@@ -1049,7 +1053,7 @@ export function NowPlayingScreen() {
   const offer = lyricsOffer(lyrics);
 
   // The side pane's default for the last settled answer, kept while the next song's lookup runs.
-  const [settled, setSettled] = useState<Panel>("queue");
+  const [settled, setSettled] = useState<Panel | null>(null);
   const fallback = defaultPanel(offer, settled);
 
   if (fallback !== settled) setSettled(fallback);
@@ -1060,7 +1064,7 @@ export function NowPlayingScreen() {
 
   const dragged = useAnimatedStyle(() => ({ transform: [{ translateY: offset.value }] }));
 
-  const windowed = PRESENTATION === "window";
+  const windowed = NOW_PLAYING_PRESENTATION === "window";
   const drag = windowed ? offset : null;
 
   // Once the closing morph ends, unless a panel opened again meanwhile.
@@ -1077,6 +1081,9 @@ export function NowPlayingScreen() {
 
     if (panel !== null) {
       setView({ open: true, panel });
+
+      // A stage held on the cover may have the morph left at the row; it opens from the cover.
+      if (!parts.morphs) progress.value = 0;
       progress.value = instant ? 1 : withSpring(1, MORPH);
     } else if (instant) {
       setView(CLOSED);
@@ -1114,14 +1121,14 @@ export function NowPlayingScreen() {
           panelInPlace={parts.stage.panel !== null}
           drag={drag}
           side={
-            parts.side === null ? null : (
+            layout === "split" ? (
               <SidePane
                 panel={parts.side}
                 song={nowPlaying}
                 lyrics={lyrics}
                 background={background}
               />
-            )
+            ) : null
           }
         >
           <PlayerColumn
@@ -1129,7 +1136,7 @@ export function NowPlayingScreen() {
             song={nowPlaying}
             parts={parts}
             lyrics={lyrics}
-            progress={layout === "split" ? still : progress}
+            progress={parts.morphs ? progress : still}
             background={background}
             onOpenLyrics={() => {
               show("lyrics");

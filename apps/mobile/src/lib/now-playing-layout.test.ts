@@ -18,14 +18,16 @@ const closing = (panel: Panel): StageView => ({ open: false, panel });
 
 const panels = fc.constantFrom<Panel>("queue", "lyrics");
 
+const fallbacks = fc.constantFrom<Panel | null>("queue", "lyrics", null);
+
 const views = fc.oneof(fc.constant(CLOSED), panels.map(open), panels.map(closing));
 
 const offers = fc.constantFrom<LyricsOffer>("ready", "loading", "failed", "none", "instrumental");
 
-/** The side pane's default after each answer in turn, starting from the queue. */
-const defaultsAfter = (answers: readonly LyricsOffer[]): readonly Panel[] => {
-  const shown: Panel[] = [];
-  let previous: Panel = "queue";
+/** The side pane's default after each answer in turn, starting undecided. */
+const defaultsAfter = (answers: readonly LyricsOffer[]): ReadonlyArray<Panel | null> => {
+  const shown: Array<Panel | null> = [];
+  let previous: Panel | null = null;
 
   for (const offer of answers) {
     previous = defaultPanel(offer, previous);
@@ -72,6 +74,11 @@ describe("defaultPanel", () => {
     expect(defaultPanel("failed", "lyrics")).toBe("queue");
   });
 
+  it("waits for the first answer before picking a pane", () => {
+    expect(defaultsAfter(["loading", "loading", "ready"])).toEqual([null, null, "lyrics"]);
+    expect(defaultsAfter(["loading", "none"])).toEqual([null, "queue"]);
+  });
+
   it("keeps the last settled answer's pane while the next song's lyrics load", () => {
     expect(defaultsAfter(["ready", "loading", "ready"])).toEqual(["lyrics", "lyrics", "lyrics"]);
     expect(defaultsAfter(["none", "loading", "none"])).toEqual(["queue", "queue", "queue"]);
@@ -84,7 +91,7 @@ describe("defaultPanel", () => {
         const shown = defaultsAfter(answers);
 
         answers.forEach((offer, index) => {
-          if (offer === "loading") expect(shown[index]).toBe(shown[index - 1] ?? "queue");
+          if (offer === "loading") expect(shown[index]).toBe(shown[index - 1] ?? null);
         });
       }),
     );
@@ -92,22 +99,50 @@ describe("defaultPanel", () => {
 });
 
 describe("partsOf", () => {
-  it("shows a phone or a tablet column exactly what the person opened, in place", () => {
+  it("shows a phone exactly what the person opened, in place", () => {
     fc.assert(
-      fc.property(
-        fc.constantFrom("sheet", "column"),
-        views,
-        offers,
-        panels,
-        (layout, view, offer, fallback) => {
-          const parts = partsOf(layout, view, offer, fallback);
+      fc.property(views, offers, fallbacks, (view, offer, fallback) => {
+        const parts = partsOf("sheet", view, offer, fallback);
 
-          expect(parts.stage).toBe(view);
-          expect(parts.side).toBeNull();
-          expect(parts.lyricsFrom).toBe("cover");
-        },
-      ),
+        expect(parts.stage).toBe(view);
+        expect(parts.morphs).toBe(true);
+        expect(parts.side).toBeNull();
+        expect(parts.lyricsFrom).toBe("cover");
+      }),
     );
+  });
+
+  it("shows a tablet column what the person opened, in place, unless it is lyrics the song lacks", () => {
+    fc.assert(
+      fc.property(views, offers, fallbacks, (view, offer, fallback) => {
+        const parts = partsOf("column", view, offer, fallback);
+
+        const lacking =
+          view.open && view.panel === "lyrics" && (offer === "none" || offer === "instrumental");
+
+        expect(parts.stage).toBe(lacking ? CLOSED : view);
+        expect(parts.morphs).toBe(!lacking);
+        expect(parts.side).toBeNull();
+        expect(parts.lyricsFrom).toBe("cover");
+      }),
+    );
+  });
+
+  it("shows the cover in the column, not an empty panel, when the iPad turns from a fallback pane", () => {
+    for (const offer of ["none", "instrumental"] as const) {
+      const fallback = defaultPanel(offer, "lyrics");
+
+      expect(partsOf("split", open("lyrics"), offer, fallback).side).toBe("queue");
+      expect(partsOf("column", open("lyrics"), offer, fallback)).toEqual({
+        stage: CLOSED,
+        morphs: false,
+        side: null,
+        folds: false,
+        lyricsFrom: "cover",
+        selected: null,
+      });
+      expect(partsOf("sheet", open("lyrics"), offer, fallback).stage).toEqual(open("lyrics"));
+    }
   });
 
   it("folds the controls in place while the lyrics are open or closing (B12)", () => {
@@ -126,6 +161,7 @@ describe("partsOf", () => {
   it("shows the default panel in the side pane until the person picks one (P08)", () => {
     expect(partsOf("split", CLOSED, "ready", "lyrics")).toEqual({
       stage: CLOSED,
+      morphs: false,
       side: "lyrics",
       folds: false,
       lyricsFrom: "row",
@@ -134,15 +170,22 @@ describe("partsOf", () => {
     expect(partsOf("split", CLOSED, "none", "queue").side).toBe("queue");
   });
 
+  it("leaves the side pane empty until the first lyrics answer settles", () => {
+    expect(partsOf("split", CLOSED, "loading", null).side).toBeNull();
+    expect(partsOf("split", CLOSED, "loading", null).selected).toBeNull();
+    expect(partsOf("split", open("queue"), "loading", null).side).toBe("queue");
+  });
+
   it("keeps the cover and never folds the controls beside the side pane", () => {
     fc.assert(
-      fc.property(views, offers, panels, (view, offer, fallback) => {
+      fc.property(views, offers, fallbacks, (view, offer, fallback) => {
         const parts = partsOf("split", view, offer, fallback);
 
         expect(parts.stage).toEqual(CLOSED);
+        expect(parts.morphs).toBe(false);
         expect(parts.folds).toBe(false);
-        expect(parts.side).not.toBeNull();
         expect(parts.selected).toBe(parts.side);
+        expect(parts.side === null && fallback !== null).toBe(false);
       }),
     );
   });
@@ -156,7 +199,7 @@ describe("partsOf", () => {
     expect(partsOf("split", closing("lyrics"), "none", "queue").side).toBe("queue");
   });
 
-  it("falls back from chosen lyrics to the queue, unselected, for a song with none", () => {
+  it("falls back from chosen lyrics to the queue, and highlights the queue, for a song with none", () => {
     for (const offer of ["none", "instrumental"] as const) {
       const parts = partsOf("split", open("lyrics"), offer, defaultPanel(offer, "lyrics"));
 
