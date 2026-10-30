@@ -78,6 +78,24 @@ export const fileDetails = (file: AudioFile): string => {
   return format === "" ? codecName(file.codec) : `${codecName(file.codec)} · ${format}`;
 };
 
+/**
+ * The player bar's badge (page 26): `FLAC 24/96` for lossless files, `MP3 320` for lossy ones, or
+ * the codec alone when the scanner found nothing more. Null with no codec at all.
+ */
+export const formatBadge = (file: AudioFile): string | null => {
+  if (file.codec === "") return null;
+
+  const name = codecName(file.codec).toUpperCase();
+
+  if (!file.lossless) {
+    return file.bitrate === null ? name : `${name} ${Math.round(file.bitrate / 1000)}`;
+  }
+
+  if (file.bitDepth === null || file.sampleRate === null) return name;
+
+  return `${name} ${file.bitDepth}/${(file.sampleRate / 1000).toFixed(1).replace(/\.0$/, "")}`;
+};
+
 const QUALITY_NAMES = {
   lossless: "Lossless",
   high: "High quality",
