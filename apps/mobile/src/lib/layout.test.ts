@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { columnsOf, widthClassOf } from "./layout";
+import { columnsOf, rowsOf, widthClassOf } from "./layout";
 
 const breakpoints = { tablet: 600, wide: 1024 };
 
@@ -26,5 +26,26 @@ describe("columnsOf", () => {
 
   it("keeps one column when not even one card fits", () => {
     expect(columnsOf(100, 168, 16)).toBe(1);
+  });
+});
+
+describe("rowsOf", () => {
+  it("lays seven albums in rows of three, leaving the last row short", () => {
+    expect(rowsOf(["a", "b", "c", "d", "e", "f", "g"], 3)).toEqual([
+      ["a", "b", "c"],
+      ["d", "e", "f"],
+      ["g"],
+    ]);
+  });
+
+  it("fills every row when the albums divide evenly", () => {
+    expect(rowsOf(["a", "b", "c", "d"], 2)).toEqual([
+      ["a", "b"],
+      ["c", "d"],
+    ]);
+  });
+
+  it("gives no rows for no albums", () => {
+    expect(rowsOf([], 7)).toEqual([]);
   });
 });

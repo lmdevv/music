@@ -26,3 +26,12 @@ export const widthClassOf = (width: number, { tablet, wide }: Breakpoints): Widt
  */
 export const columnsOf = (width: number, min: number, gap: number): number =>
   Math.max(1, Math.floor((width + gap) / (min + gap)));
+
+/** `items` in rows of `columns`, in order; the last row holds what is left. */
+export const rowsOf = <Item>(
+  items: ReadonlyArray<Item>,
+  columns: number,
+): ReadonlyArray<ReadonlyArray<Item>> =>
+  Array.from({ length: Math.ceil(items.length / columns) }, (_, row) =>
+    items.slice(row * columns, (row + 1) * columns),
+  );
