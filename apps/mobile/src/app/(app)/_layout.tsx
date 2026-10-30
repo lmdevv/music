@@ -1,11 +1,13 @@
 /**
  * The signed-in app: the tabs, then everything pushed or presented over them. Pages Paper draws
  * without the tab bar (settings, Jams, playlist editing) push here, above the tabs; Paper's bottom
- * sheets present here as native form sheets; Now Playing is a modal with its own stack. It mounts
+ * sheets present here as native form sheets; Now Playing is a modal with its own stack: the native
+ * sheet on a phone, and over the whole window from the tablet width up (Paper page 25). It mounts
  * offline too, on the downloads (D11), and stays mounted when the server answers, so the player
  * never stops for it.
  */
 import { Stack } from "expo-router";
+import type { NativeStackNavigationOptions } from "expo-router";
 
 import { AppFailure } from "@/components/app-failure";
 import { SaveFailureProvider } from "@/components/states/save-failure";
@@ -13,8 +15,11 @@ import { SaveFailureProvider } from "@/components/states/save-failure";
 import { PlayerProvider } from "@/player";
 import { useConnection } from "@/session/connection";
 
+import { LAYOUT_OF, presentationOf } from "@/lib/now-playing-layout";
+import type { NowPlayingPresentation } from "@/lib/now-playing-layout";
 import { useSheetOptions } from "@/lib/sheet";
 import { useThemeColor } from "@/lib/theme-color";
+import { useWindowLayout } from "@/lib/window-layout";
 
 /** A link that opens a page over the tabs at launch, such as Settings, keeps the tabs under it. */
 export const unstable_settings = { anchor: "(tabs)" };
@@ -46,17 +51,28 @@ const SHEETS = [
   "save-failed",
 ] as const;
 
+/**
+ * Now Playing on a phone is the native sheet the person drags down (B11). From the tablet width up
+ * it covers the window, see-through around its own background, so the tabs show behind it as the
+ * app's own drag pulls it down (P07).
+ */
+const PLAYER: Readonly<Record<NowPlayingPresentation, NativeStackNavigationOptions>> = {
+  sheet: { presentation: "modal" },
+  window: { presentation: "transparentModal", contentStyle: { backgroundColor: "transparent" } },
+};
+
 export default function AppLayout() {
   const sheet = useSheetOptions();
   const canvas = useThemeColor("--color-canvas");
   const { origin } = useConnection();
+  const { widthClass } = useWindowLayout();
 
   return (
     <PlayerProvider origin={origin}>
       <SaveFailureProvider>
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: canvas } }}>
           <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="player" options={{ presentation: "modal" }} />
+          <Stack.Screen name="player" options={PLAYER[presentationOf(LAYOUT_OF[widthClass])]} />
           {SHEETS.map((name) => (
             <Stack.Screen key={name} name={name} options={sheet} />
           ))}

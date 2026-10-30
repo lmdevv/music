@@ -5,8 +5,12 @@
  * queue button opens the queue (B03, H06), in place, as Apple Music does: the cover shrinks into
  * the corner of a row with the song's title, and the queue or the lyrics rise under it. The queue
  * keeps every control below it; the lyrics keep only the scrubber and the transport (B12–B14).
- * One of the two shows at a time. The person drags the sheet down to dismiss it (B11); the
- * sliders keep their own drags. With nothing queued it says so (G14).
+ * One of the two shows at a time. With nothing queued it says so (G14).
+ *
+ * On a phone it is a native sheet over the tabs that the person drags down to dismiss (B11); the
+ * sliders keep their own drags. From the tablet width up it fills the window (Paper page 25) and
+ * the app owns the dismissal: dragging the handle or the player down, tapping the handle, or
+ * VoiceOver's escape.
  */
 import type { TrackId } from "@music/commands/ids";
 import { lyricsAnswer, lyricsButton, lyricsOffer, offlineLyrics } from "@music/player/lyrics";
@@ -25,9 +29,10 @@ import {
   Users,
 } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
-import { ActivityIndicator, Pressable, View } from "react-native";
+import type { ReactElement, ReactNode } from "react";
+import { ActivityIndicator, Pressable, useWindowDimensions, View } from "react-native";
 import type { LayoutRectangle } from "react-native";
+import { GestureDetector, usePanGesture } from "react-native-gesture-handler";
 import Animated, {
   Extrapolation,
   interpolate,
@@ -49,9 +54,12 @@ import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/icon-button";
 import { Text } from "@/components/ui/text";
 import { useDownloadedLyrics } from "@/downloads";
+import { CLOSED, LAYOUT_OF, presentationOf } from "@/lib/now-playing-layout";
+import type { Panel, StageView } from "@/lib/now-playing-layout";
 import type { SheetSong } from "@/lib/song-sheet";
 import { useThemeColor, useThemeLength } from "@/lib/theme-color";
 import { DEVICE_FAMILY } from "@/lib/this-device";
+import { useWindowLayout } from "@/lib/window-layout";
 import { usePlayer } from "@/player";
 import type { NowPlaying, PlayerRole } from "@/player";
 import { useServerReach } from "@/session/server-reach";
@@ -61,6 +69,11 @@ import { ModePills, QueueList } from "./queue";
 import { Scrubber } from "./scrubber";
 import { Transport, VolumeRow } from "./transport";
 import { useArtTint } from "./use-art-tint";
+
+/** Closes Now Playing, back to the tabs underneath. */
+const close = () => {
+  router.back();
+};
 
 /** Leaves Now Playing for a page in the tabs underneath. */
 const leaveTo = (go: () => void) => {
@@ -84,20 +97,6 @@ const sheetSongOf = (song: NowPlaying): SheetSong | null =>
 
 /** The cover's move between the full cover and the song's row: a soft spring with no bounce. */
 const MORPH = { duration: 450, dampingRatio: 0.9 } as const;
-
-/** What can open under the song's row in place of the cover. */
-type Panel = "queue" | "lyrics";
-
-/**
- * What the stage shows: the cover, or a panel under the song's row. Closed, `panel` is the one
- * still closing, mounted until the cover is back so it can animate, then null, so nothing in it
- * (the lyrics' frame loop) runs behind the cover.
- */
-type StageView =
-  | { readonly open: false; readonly panel: Panel | null }
-  | { readonly open: true; readonly panel: Panel };
-
-const CLOSED: StageView = { open: false, panel: null };
 
 /**
  * The lyrics, open or closing, fold the volume and the bottom row away with the cover's morph,
@@ -149,13 +148,81 @@ const coverTap = (open: boolean, chip: LyricsChipLook): CoverTap => {
   return chip === null ? "none" : "lyrics";
 };
 
-/** The drag handle Paper draws in place of a close button. */
-function Handle() {
+/**
+ * A drag down closes past this share of the window's height, or at any length flicked faster than
+ * `flick` points a second; it claims the touch only after `slop` points down, so taps, the
+ * sliders' drags, and sideways swipes keep theirs.
+ */
+const DISMISS = { share: 0.25, flick: 800, slop: 12 } as const;
+
+/**
+ * Over the whole window (P07) the app closes Now Playing itself, as the native sheet does on a
+ * phone (B11): dragging `children` down moves Now Playing by `drag`, and past `DISMISS` closes
+ * it; short of that it springs back. With no `drag`, on a phone, `children` render alone and the
+ * native sheet owns the drag.
+ */
+function DragToClose({
+  drag,
+  enabled = true,
+  children,
+}: {
+  readonly drag: SharedValue<number> | null;
+  readonly enabled?: boolean;
+  readonly children: ReactElement;
+}) {
+  const { height } = useWindowDimensions();
+
+  const pan = usePanGesture({
+    enabled: drag !== null && enabled,
+    activeOffsetY: DISMISS.slop,
+    failOffsetX: [-DISMISS.slop, DISMISS.slop],
+    onUpdate: (event) => {
+      "worklet";
+
+      if (drag !== null) drag.value = Math.max(0, event.translationY);
+    },
+    onDeactivate: (event) => {
+      "worklet";
+
+      if (drag === null) return;
+      const far = event.translationY > height * DISMISS.share || event.velocityY > DISMISS.flick;
+
+      if (!event.canceled && far) {
+        scheduleOnRN(close);
+      } else {
+        drag.value = withSpring(0, MORPH);
+      }
+    },
+  });
+
+  if (drag === null) return children;
+
+  return <GestureDetector gesture={pan}>{children}</GestureDetector>;
+}
+
+/**
+ * The drag handle Paper draws in place of a close button. Over the whole window it is a button
+ * too (`onClose`), since no system sheet closes Now Playing there.
+ */
+function Handle({ onClose }: { readonly onClose: (() => void) | null }) {
+  const bar = <View className="h-1 w-row rounded-full bg-text-muted opacity-muted" />;
+
   return (
     <View className="h-row-touch items-center justify-center px-page">
-      <View className="size-hit-target items-center justify-center" accessible={false}>
-        <View className="h-1 w-row rounded-full bg-text-muted opacity-muted" />
-      </View>
+      {onClose === null ? (
+        <View className="size-hit-target items-center justify-center" accessible={false}>
+          {bar}
+        </View>
+      ) : (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close Now Playing"
+          onPress={onClose}
+          className="size-hit-target items-center justify-center active:opacity-60"
+        >
+          {bar}
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -398,26 +465,37 @@ const useFailureSheet = (failed: boolean, error: string | null, itemId: string |
   }, [key, navigation]);
 };
 
-/** G14: the player opened with nothing queued. */
-function NothingPlaying() {
+/**
+ * G14: the player opened with nothing queued. Over the whole window it sits in the middle, as
+ * wide as P07's column, and drags down to close (`drag`).
+ */
+function NothingPlaying({ drag }: { readonly drag: SharedValue<number> | null }) {
+  const empty = (
+    <EmptyState
+      icon={Music}
+      title={"Something good\nis waiting."}
+      body={"Choose a song from your collection.\nYour listening session starts here."}
+      primary={
+        <Button
+          label="Browse library"
+          onPress={() => {
+            leaveTo(() => {
+              router.navigate("/(app)/(tabs)/(library)");
+            });
+          }}
+        />
+      }
+    />
+  );
+
+  if (drag === null) return <View className="px-page">{empty}</View>;
+
   return (
-    <View className="px-page">
-      <EmptyState
-        icon={Music}
-        title={"Something good\nis waiting."}
-        body={"Choose a song from your collection.\nYour listening session starts here."}
-        primary={
-          <Button
-            label="Browse library"
-            onPress={() => {
-              leaveTo(() => {
-                router.navigate("/(app)/(tabs)/(library)");
-              });
-            }}
-          />
-        }
-      />
-    </View>
+    <DragToClose drag={drag}>
+      <View className="flex-1 items-center justify-center px-page pb-row">
+        <View className="w-full max-w-dialog">{empty}</View>
+      </View>
+    </DragToClose>
   );
 }
 
@@ -655,8 +733,13 @@ export function NowPlayingScreen() {
   const insets = useSafeAreaInsets();
   const [view, setView] = useState<StageView>(CLOSED);
   const progress = useSharedValue(0);
+  const offset = useSharedValue(0);
   const reduceMotion = useReducedMotion();
   const background = tint ?? player;
+  const layout = LAYOUT_OF[useWindowLayout().widthClass];
+
+  // Presented as the window was when Now Playing opened; Split View may resize it afterwards.
+  const [presentation] = useState(() => presentationOf(layout));
 
   // Read while Now Playing is up, for the cover's chip as much as for the lyrics. Settled, not
   // thrown: a failed read shows in the lyrics instead of taking Now Playing down.
@@ -671,6 +754,11 @@ export function NowPlayingScreen() {
   const lyrics = offline ? offlineLyrics(served, held) : served;
 
   useFailureSheet(status === "failed" && role.kind !== "remote", error, nowPlaying?.itemId);
+
+  const dragged = useAnimatedStyle(() => ({ transform: [{ translateY: offset.value }] }));
+
+  const windowed = presentation === "window";
+  const drag = windowed ? offset : null;
 
   // Once the closing morph ends, unless a panel opened again meanwhile.
   const unmountClosed = () => {
@@ -697,37 +785,53 @@ export function NowPlayingScreen() {
   const queueOpen = view.open && view.panel === "queue";
 
   return (
-    <View className="flex-1" style={{ backgroundColor: background, paddingBottom: insets.bottom }}>
-      <Handle />
+    <Animated.View
+      className="flex-1"
+      style={[
+        {
+          backgroundColor: background,
+          paddingTop: windowed ? insets.top : 0,
+          paddingBottom: insets.bottom,
+        },
+        dragged,
+      ]}
+      accessibilityViewIsModal={windowed}
+      onAccessibilityEscape={windowed ? close : undefined}
+    >
+      <DragToClose drag={drag}>
+        <Handle onClose={windowed ? close : null} />
+      </DragToClose>
       {nowPlaying === null ? (
-        <NothingPlaying />
+        <NothingPlaying drag={drag} />
       ) : (
-        <View className="flex-1 px-page pb-row">
-          <Stage
-            song={nowPlaying}
-            view={view}
-            lyrics={lyrics}
-            progress={progress}
-            background={background}
-            onOpenLyrics={() => {
-              show("lyrics");
-            }}
-            onClose={() => {
-              show(null);
-            }}
-          />
-          <Controls folds={foldsOf(view)} folded={view.open} progress={progress}>
-            <VolumeRow />
-            <ActionRow
-              role={role}
-              queueOpen={queueOpen}
-              onQueue={() => {
-                show(queueOpen ? null : "queue");
+        <DragToClose drag={drag} enabled={view.panel === null}>
+          <View className="flex-1 px-page pb-row">
+            <Stage
+              song={nowPlaying}
+              view={view}
+              lyrics={lyrics}
+              progress={progress}
+              background={background}
+              onOpenLyrics={() => {
+                show("lyrics");
+              }}
+              onClose={() => {
+                show(null);
               }}
             />
-          </Controls>
-        </View>
+            <Controls folds={foldsOf(view)} folded={view.open} progress={progress}>
+              <VolumeRow />
+              <ActionRow
+                role={role}
+                queueOpen={queueOpen}
+                onQueue={() => {
+                  show(queueOpen ? null : "queue");
+                }}
+              />
+            </Controls>
+          </View>
+        </DragToClose>
       )}
-    </View>
+    </Animated.View>
   );
 }
