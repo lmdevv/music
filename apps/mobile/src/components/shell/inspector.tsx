@@ -163,7 +163,7 @@ function About({ song, background }: { readonly song: NowPlaying; readonly backg
   );
 }
 
-/** The tab's body; empty while Now Playing covers the panel. */
+/** The tab's body. */
 function Body({
   song,
   inspector,
@@ -175,12 +175,17 @@ function Body({
 }) {
   const { tab, lyrics, covered } = inspector;
 
-  if (covered || tab === null) return null;
-
   if (tab === "about") return <About song={song} background={background} />;
 
   return (
-    <PanelBody panel={tab} song={song} lyrics={lyrics} background={background} place="panel" />
+    <PanelBody
+      panel={tab}
+      song={song}
+      lyrics={lyrics}
+      background={background}
+      place="panel"
+      paused={covered}
+    />
   );
 }
 

@@ -354,7 +354,7 @@ function SongRow({ song }: { readonly song: NowPlaying }) {
 
 /**
  * A panel's body, in place under the song's row, in the side pane, or in the iPad's panel: the queue
- * (B03), under its mode pills in Now Playing, or the song's lyrics (B12), fresh for each song.
+ * under its mode pills (B03), or the song's lyrics (B12), fresh for each song.
  */
 export function PanelBody({
   panel,
@@ -362,20 +362,31 @@ export function PanelBody({
   lyrics,
   background,
   place = "player",
+  paused = false,
 }: {
   readonly panel: Panel;
   readonly song: NowPlaying;
   readonly lyrics: LyricsAnswer;
   readonly background: string;
   readonly place?: PanelPlace;
+  /** Whether something covers the body, so its lyrics stop following playback. */
+  readonly paused?: boolean;
 }) {
   if (panel === "lyrics") {
-    return <LyricsPanel key={song.trackId} lyrics={lyrics} background={background} place={place} />;
+    return (
+      <LyricsPanel
+        key={song.trackId}
+        lyrics={lyrics}
+        background={background}
+        place={place}
+        paused={paused}
+      />
+    );
   }
 
   return (
     <>
-      {place === "player" ? <ModePills /> : null}
+      <ModePills place={place} />
       <QueueList background={background} place={place} />
     </>
   );

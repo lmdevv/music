@@ -1,8 +1,8 @@
 /**
  * The iPad's Now Playing panel (Paper page 26, B1 to B3): which tab it shows and whether it is open.
- * Its Up next and Lyrics are Now Playing's panels, and until the person picks a tab it follows
- * Now Playing's `defaultPanel`, so a song without lyrics falls back to the queue and a new song's
- * lookup doesn't flip the tab.
+ * Its Up next and Lyrics are Now Playing's panels. Until the person picks a tab it shows the queue,
+ * then follows Now Playing's `defaultPanel`, so a song's lyrics take over once they are ready and a
+ * new song's lookup doesn't flip the tab.
  */
 import { lyricsButton } from "@music/player/lyrics";
 import type { LyricsOffer } from "@music/player/lyrics";
@@ -35,16 +35,18 @@ export const INSPECTOR_START: InspectorState = {
 
 /**
  * The tab showing for a song whose lyrics are `offer`: the one picked, unless that is lyrics the
- * song lacks, else `fallback`, which is null until the first lyrics answer settles.
+ * song lacks, else `fallback`, or the queue while `fallback` waits for the first lyrics answer.
  */
 export const shownTab = (
   picked: InspectorTab | null,
   offer: LyricsOffer,
   fallback: Panel | null,
-): InspectorTab | null => {
-  if (picked === null) return fallback;
+): InspectorTab => {
+  const following = fallback ?? "queue";
 
-  return picked === "lyrics" && lyricsButton(offer, false).disabled ? fallback : picked;
+  if (picked === null) return following;
+
+  return picked === "lyrics" && lyricsButton(offer, false).disabled ? following : picked;
 };
 
 /** Chooses a tab from the panel's switch. */
@@ -67,7 +69,7 @@ export const setOpen = (
 export const pressPanel = (
   state: InspectorState,
   placement: InspectorPlacement,
-  shown: InspectorTab | null,
+  shown: InspectorTab,
   panel: Panel,
 ): InspectorState =>
   state.open[placement] && shown === panel

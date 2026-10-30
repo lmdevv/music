@@ -8,7 +8,7 @@ import { useSongLyrics } from "@/components/playback/use-song-lyrics";
 import { INSPECTOR_START, pickTab, pressPanel, setOpen, shownTab } from "@/lib/inspector";
 import type { InspectorPlacement, InspectorTab } from "@/lib/inspector";
 import type { Panel } from "@/lib/now-playing-layout";
-import { nowPlayingIsUp } from "@/lib/shell-layout";
+import { tabsAreCovered } from "@/lib/shell-layout";
 import type { ShellLayout } from "@/lib/shell-layout";
 
 /** The panel as the frame, the bar, and the panel itself read and change it. */
@@ -16,12 +16,13 @@ export interface Inspector {
   /** Where it sits at this window size, or null where the frame has no panel. */
   readonly placement: InspectorPlacement | null;
   readonly open: boolean;
-  readonly tab: InspectorTab | null;
+  readonly tab: InspectorTab;
   readonly lyrics: LyricsAnswer;
   readonly offer: LyricsOffer;
   /**
-   * Whether full-screen Now Playing is up. The panel keeps its place under it but drops its body,
-   * so the two never run the lyrics' frame loop or a queue at once.
+   * Whether a page or Now Playing is over the tabs. The panel keeps its body, scroll, and swiped
+   * rows under it, since Now Playing is see-through as it drags down, and only pauses the lyrics'
+   * frame loop.
    */
   readonly covered: boolean;
   readonly pick: (tab: InspectorTab) => void;
@@ -37,7 +38,7 @@ export const useInspector = (
   const [state, setState] = useState(INSPECTOR_START);
   const at = placement === "none" ? null : placement;
   const { lyrics, offer, fallback } = useSongLyrics(at === null ? null : trackId);
-  const covered = useNavigationState(nowPlayingIsUp);
+  const covered = useNavigationState(tabsAreCovered);
   const tab = shownTab(state.picked, offer, fallback);
 
   return {

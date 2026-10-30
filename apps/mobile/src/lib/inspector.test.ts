@@ -1,7 +1,10 @@
 import type { LyricsOffer } from "@music/player/lyrics";
 import { describe, expect, it } from "vitest";
 
+import { defaultPanel } from "./now-playing-layout";
+import type { Panel } from "./now-playing-layout";
 import { INSPECTOR_START, pickTab, pressPanel, setOpen, shownTab } from "./inspector";
+import type { InspectorTab } from "./inspector";
 
 describe("shownTab", () => {
   it("follows the song until a tab is picked", () => {
@@ -9,8 +12,17 @@ describe("shownTab", () => {
     expect(shownTab(null, "none", "queue")).toBe("queue");
   });
 
-  it("waits for the first lyrics answer", () => {
-    expect(shownTab(null, "loading", null)).toBeNull();
+  it("shows the queue until the first answer says lyrics are ready", () => {
+    expect(shownTab(null, "loading", null)).toBe("queue");
+    expect(shownTab(null, "ready", "lyrics")).toBe("lyrics");
+  });
+
+  it("shows the lyrics' own loading state when the person chose them before the first answer", () => {
+    expect(shownTab("lyrics", "loading", null)).toBe("lyrics");
+  });
+
+  it("falls back to the queue from picked lyrics before any answer has settled", () => {
+    expect(shownTab("lyrics", "none", null)).toBe("queue");
   });
 
   it("keeps the last answer's tab while a new song's lyrics are looked up", () => {
@@ -34,6 +46,52 @@ describe("shownTab", () => {
     expect(shownTab("queue", "ready", "lyrics")).toBe("queue");
     expect(shownTab("about", "ready", "lyrics")).toBe("about");
     expect(shownTab("about", "none", "queue")).toBe("about");
+  });
+});
+
+/** The tab after each lyrics answer in turn, with the song's `defaultPanel` carried between them. */
+const tabsThrough = (
+  picked: InspectorTab | null,
+  offers: ReadonlyArray<LyricsOffer>,
+): ReadonlyArray<InspectorTab> => {
+  let settled: Panel | null = null;
+
+  return offers.map((offer) => {
+    settled = defaultPanel(offer, settled);
+
+    return shownTab(picked, offer, settled);
+  });
+};
+
+describe("the tab across songs", () => {
+  it("lets ready lyrics take over from the first wait, once", () => {
+    expect(tabsThrough(null, ["loading", "ready"])).toEqual(["queue", "lyrics"]);
+  });
+
+  it("holds the lyrics through the next song's lookup", () => {
+    expect(tabsThrough(null, ["ready", "loading", "ready"])).toEqual([
+      "lyrics",
+      "lyrics",
+      "lyrics",
+    ]);
+  });
+
+  it("holds the queue through the next song's lookup, until that song has lyrics", () => {
+    expect(tabsThrough(null, ["none", "loading", "none", "loading", "ready"])).toEqual([
+      "queue",
+      "queue",
+      "queue",
+      "queue",
+      "lyrics",
+    ]);
+  });
+
+  it("never takes over from a tab the person chose", () => {
+    for (const picked of ["queue", "about"] satisfies InspectorTab[]) {
+      expect(tabsThrough(picked, ["loading", "ready", "loading", "none", "ready"])).toEqual(
+        Array.from({ length: 5 }, () => picked),
+      );
+    }
   });
 });
 

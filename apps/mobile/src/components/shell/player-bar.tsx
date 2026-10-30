@@ -99,6 +99,7 @@ export function PlayerBar({ inspector }: { readonly inspector: Inspector }) {
             size="side"
             tone={lit === "lyrics" ? "accent" : "default"}
             disabled={lyrics.disabled}
+            loading={lyrics.loading}
             accessibilityState={{ selected: lit === "lyrics", disabled: lyrics.disabled }}
             className={`${litClass(lit === "lyrics")} ${lyrics.disabled ? "opacity-disabled" : ""}`}
             onPress={() => {

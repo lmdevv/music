@@ -31,28 +31,38 @@ import { usePlayerActions, usePositionReader } from "@/player";
 import { EdgeFade } from "./edge-fade";
 import type { PanelPlace } from "./reorder-list";
 
-/** How timed lines read in each place: Now Playing's B12, or the iPad panel's smaller B2. */
+/** How lyrics read in each place: Now Playing's B12, or the iPad panel's smaller B2. */
 const LINES: Readonly<
-  Record<PanelPlace, { readonly variant: "lyric" | "panelHeading"; readonly list: string }>
+  Record<
+    PanelPlace,
+    {
+      readonly variant: "lyric" | "panelHeading";
+      readonly list: string;
+      readonly plainList: string;
+    }
+  >
 > = {
-  player: { variant: "lyric", list: "gap-6 pt-6 pr-6" },
-  panel: { variant: "panelHeading", list: "gap-3 pt-1" },
+  player: { variant: "lyric", list: "gap-6 pt-6 pr-6", plainList: "gap-6 pt-6 pr-6 pb-12" },
+  panel: { variant: "panelHeading", list: "gap-3 pt-1", plainList: "gap-3 pt-1 pb-12" },
 };
 
 /**
  * The playing song's lyrics under its row: synced lines, plain text, the song's own plain text
  * while synced lyrics are looked up, or a note that there are none, that this is an instrumental,
  * or that they failed to load. Mount it with the song's ID as its `key`, so a new song starts at
- * the top, following. `background` is the sheet's color, for the fades at the edges.
+ * the top, following. `background` is the sheet's color, for the fades at the edges. `paused` stops
+ * following playback while something covers the lyrics.
  */
 export function LyricsPanel({
   lyrics,
   background,
   place = "player",
+  paused = false,
 }: {
   readonly lyrics: LyricsAnswer;
   readonly background: string;
   readonly place?: PanelPlace;
+  readonly paused?: boolean;
 }) {
   if (lyrics === "loading") return <LyricsMessage looking>Looking for lyrics…</LyricsMessage>;
 
@@ -60,14 +70,16 @@ export function LyricsPanel({
 
   return TrackLyrics.match(lyrics, {
     Synced: ({ main }) => (
-      <SyncedLyrics lines={main.body.lines} background={background} place={place} />
+      <SyncedLyrics lines={main.body.lines} background={background} place={place} paused={paused} />
     ),
-    Plain: ({ main }) => <PlainLyrics text={main.body.text} background={background} />,
+    Plain: ({ main }) => (
+      <PlainLyrics text={main.body.text} background={background} place={place} />
+    ),
     Pending: ({ fallback }) =>
       fallback === null ? (
         <LyricsMessage looking>Looking for lyrics…</LyricsMessage>
       ) : (
-        <PlainLyrics text={fallback.body.text} background={background} />
+        <PlainLyrics text={fallback.body.text} background={background} place={place} />
       ),
     None: () => <LyricsMessage>No lyrics for this song</LyricsMessage>,
     Instrumental: () => <LyricsMessage>Instrumental</LyricsMessage>,
@@ -99,14 +111,22 @@ function LyricsMessage({
 }
 
 /** Untimed lyrics to read and scroll (B13), a stanza to each blank-line-separated block. */
-function PlainLyrics({ text, background }: { readonly text: string; readonly background: string }) {
+function PlainLyrics({
+  text,
+  background,
+  place,
+}: {
+  readonly text: string;
+  readonly background: string;
+  readonly place: PanelPlace;
+}) {
   const stanzas = text.split(/\n\s*\n/u).filter((stanza) => stanza.trim() !== "");
 
   return (
     <View className="min-h-0 flex-1">
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerClassName="gap-6 pt-6 pr-6 pb-12"
+        contentContainerClassName={LINES[place].plainList}
       >
         {stanzas.map((stanza, index) => (
           <Text key={index} variant="lyricPlain">
@@ -288,10 +308,12 @@ function SyncedLyrics({
   lines,
   background,
   place,
+  paused,
 }: {
   readonly lines: ReadonlyArray<LyricLine>;
   readonly background: string;
   readonly place: PanelPlace;
+  readonly paused: boolean;
 }) {
   const readPosition = usePositionReader();
   const { seek } = usePlayerActions();
@@ -300,6 +322,8 @@ function SyncedLyrics({
   const follow = useLineFollow(moment.started, !reduceMotion);
 
   useEffect(() => {
+    if (paused) return undefined;
+
     let shown: LyricsMoment | null = null;
 
     let frame = requestAnimationFrame(function tick() {
@@ -316,7 +340,7 @@ function SyncedLyrics({
     return () => {
       cancelAnimationFrame(frame);
     };
-  }, [lines, readPosition]);
+  }, [lines, readPosition, paused]);
 
   const { follow: followAgain, onLineLayout } = follow;
 

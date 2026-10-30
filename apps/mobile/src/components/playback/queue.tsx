@@ -21,10 +21,13 @@ import { EdgeFade } from "./edge-fade";
 import { QUEUE_EDGE, QueueLine, ReorderList } from "./reorder-list";
 import type { PanelPlace } from "./reorder-list";
 
-/** What differs by place: how far the list reaches past its parent's margin, and the Clear sheet's route. */
+/**
+ * What differs by place: how far the list reaches past its parent's margin, the Clear sheet's route,
+ * and the mode pills' shape, which in the panel matches its tab switch.
+ */
 const PLACES = {
-  player: { bleed: "bleed-page", clear: "/player/clear-queue" },
-  panel: { bleed: "-mx-4", clear: "/clear-queue" },
+  player: { bleed: "bleed-page", clear: "/player/clear-queue", pill: "h-ios-36 rounded-full" },
+  panel: { bleed: "-mx-4", clear: "/clear-queue", pill: "h-8 rounded-md" },
 } as const;
 
 /** A mode pill: the text color with an inverse glyph when on, a faint wash of it when off. */
@@ -32,11 +35,13 @@ function ModePill({
   icon,
   label,
   on,
+  place,
   onPress,
 }: {
   readonly icon: LucideIcon;
   readonly label: string;
   readonly on: boolean;
+  readonly place: PanelPlace;
   readonly onPress: () => void;
 }) {
   return (
@@ -48,7 +53,7 @@ function ModePill({
         void Haptics.selectionAsync();
         onPress();
       }}
-      className={`h-ios-36 flex-1 items-center justify-center rounded-full active:opacity-70 ${on ? "bg-text" : "bg-text/8"}`}
+      className={`flex-1 items-center justify-center active:opacity-70 ${PLACES[place].pill} ${on ? "bg-text" : "bg-text/8"}`}
     >
       <Icon icon={icon} tone={on ? "inverse" : "default"} size="inline" />
     </Pressable>
@@ -56,7 +61,7 @@ function ModePill({
 }
 
 /** Shuffle, repeat, and autoplay. */
-export function ModePills() {
+export function ModePills({ place = "player" }: { readonly place?: PanelPlace }) {
   const { shuffle, repeat, autoplay } = usePlayer();
   const actions = usePlayerActions();
 
@@ -66,18 +71,21 @@ export function ModePills() {
         icon={Shuffle}
         label="Shuffle"
         on={shuffle}
+        place={place}
         onPress={() => void actions.setShuffle(!shuffle)}
       />
       <ModePill
         icon={repeat === "one" ? Repeat1 : Repeat}
         label={REPEAT_LABELS[repeat]}
         on={repeat !== "off"}
+        place={place}
         onPress={() => void actions.cycleRepeat()}
       />
       <ModePill
         icon={Endless}
         label="Autoplay"
         on={autoplay}
+        place={place}
         onPress={() => void actions.setAutoplay(!autoplay)}
       />
     </View>
