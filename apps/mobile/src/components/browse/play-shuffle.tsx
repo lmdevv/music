@@ -13,6 +13,12 @@ import { Button } from "@/components/ui/button";
  */
 export const PAIR_WIDTHS = { fill: "flex-1", natural: "min-w-ios-160" } as const;
 
+/**
+ * The pair's row. In an iPad header it wraps: in a 600pt Split View the text beside the 240pt art
+ * leaves room for one button, so the second goes under the first instead of past the window.
+ */
+export const PAIR_ROWS = { fill: "flex-row gap-3", natural: "flex-row flex-wrap gap-3" } as const;
+
 /** How wide a Play button and its partner are. */
 export type PairWidth = keyof typeof PAIR_WIDTHS;
 
@@ -32,7 +38,7 @@ export function PlayShuffle({
   readonly className?: string;
 }) {
   return (
-    <View className={`flex-row gap-3 ${className ?? ""}`}>
+    <View className={`${PAIR_ROWS[width]} ${className ?? ""}`}>
       <Button
         label="Play"
         icon={Play}

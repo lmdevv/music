@@ -8,7 +8,7 @@ import type { TrackId } from "@music/commands/ids";
 import { Play, Plus, Shuffle } from "lucide-react-native";
 import { View } from "react-native";
 
-import { PAIR_WIDTHS } from "@/components/browse/play-shuffle";
+import { PAIR_ROWS, PAIR_WIDTHS } from "@/components/browse/play-shuffle";
 import type { PairWidth } from "@/components/browse/play-shuffle";
 import { Button } from "@/components/ui/button";
 import { usePlayer, usePlayerActions } from "@/player";
@@ -47,7 +47,7 @@ export function PlayButtons({ trackIds, second, width = "fill", className }: Pla
   const empty = trackIds.length === 0;
 
   return (
-    <View className={`flex-row gap-3 ${className ?? ""}`}>
+    <View className={`${PAIR_ROWS[width]} ${className ?? ""}`}>
       <Button
         label="Play"
         icon={Play}
