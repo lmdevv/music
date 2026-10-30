@@ -17,7 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { ShellLayout } from "@/lib/shell-layout";
 import { useThemeLength } from "@/lib/theme-color";
-import { useNowPlaying } from "@/player";
+import { useSong } from "@/player";
 
 import { ContentArea } from "./content-area";
 import { InspectorPane, InspectorSheet } from "./inspector";
@@ -76,7 +76,7 @@ export function Shell({
 }) {
   const insets = useSafeAreaInsets();
   const margin = useThemeLength("--spacing-2");
-  const { nowPlaying } = useNowPlaying();
+  const nowPlaying = useSong();
   const [hidden, setHidden] = useState(false);
   const [overlaid, setOverlaid] = useState(false);
   const [lastSidebar, setLastSidebar] = useState(layout.sidebar);

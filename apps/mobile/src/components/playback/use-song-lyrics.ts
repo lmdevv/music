@@ -8,7 +8,7 @@ import { useState } from "react";
 import { useDownloadedLyrics } from "@/downloads";
 import { defaultPanel } from "@/lib/now-playing-layout";
 import type { Panel } from "@/lib/now-playing-layout";
-import { usePlayer } from "@/player";
+import { useOwnSession } from "@/player";
 import { useServerReach } from "@/session/server-reach";
 
 /** A song's lyrics, what they offer, and the panel they make the default. */
@@ -24,7 +24,7 @@ export interface SongLyrics {
  * the lyrics instead of taking the screen down.
  */
 export const useSongLyrics = (trackId: TrackId | null): SongLyrics => {
-  const { ownSession } = usePlayer();
+  const ownSession = useOwnSession();
 
   const served = lyricsAnswer(
     useReadSettled("lyrics.get", trackId === null ? "skip" : { trackId }),
