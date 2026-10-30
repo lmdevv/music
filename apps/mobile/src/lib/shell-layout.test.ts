@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DESTINATIONS,
+  nowPlayingIsUp,
   playlistPlace,
   playlistSelection,
   popsToOpen,
@@ -216,5 +217,19 @@ describe("opening a place", () => {
 
   it("has nothing to pop in a tab not yet visited", () => {
     expect(popsToOpen({ routes: [{ name: "(tabs)", state: { routes: [] } }] }, library)).toBeNull();
+  });
+});
+
+describe("nowPlayingIsUp", () => {
+  it("is false over the tabs alone, or a sheet on them", () => {
+    expect(nowPlayingIsUp({ routes: [{ name: "(tabs)" }] })).toBe(false);
+    expect(nowPlayingIsUp({ routes: [{ name: "(tabs)" }, { name: "devices" }] })).toBe(false);
+  });
+
+  it("is true while Now Playing is up, or under a sheet of its own", () => {
+    expect(nowPlayingIsUp({ routes: [{ name: "(tabs)" }, { name: "player" }] })).toBe(true);
+    expect(
+      nowPlayingIsUp({ routes: [{ name: "(tabs)" }, { name: "player" }, { name: "audio" }] }),
+    ).toBe(true);
   });
 });

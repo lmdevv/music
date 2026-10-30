@@ -189,6 +189,13 @@ export const playlistPlace = (id: string): Place => ({
   id,
 });
 
+/**
+ * Whether Now Playing is up over the tabs, or under a sheet of its own, for the navigator that holds
+ * `(tabs)`. The panel beneath it stops running its lyrics and its queue meanwhile.
+ */
+export const nowPlayingIsUp = (app: NavigationSnapshot): boolean =>
+  app.routes.some((route) => route.name === "player");
+
 /** The tabs' state, from any navigator above them. */
 const tabsOf = (navigator: NavigationSnapshot): NavigationSnapshot | undefined => {
   for (const route of navigator.routes) {
