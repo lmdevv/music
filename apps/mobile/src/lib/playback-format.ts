@@ -47,8 +47,9 @@ const CODEC_NAMES: ReadonlyArray<readonly [RegExp, string]> = [
 export const codecName = (codec: string): string =>
   CODEC_NAMES.find(([pattern]) => pattern.test(codec))?.[1] ?? codec;
 
+/** A sample rate in hertz as kilohertz, with no needless decimal: `44.1`, `96`. */
 const kilohertz = (sampleRate: number): string =>
-  `${(sampleRate / 1000).toFixed(1).replace(/\.0$/, "")} kHz`;
+  (sampleRate / 1000).toFixed(1).replace(/\.0$/, "");
 
 /** The audio fields of a song, as the player carries them. */
 export interface AudioFile {
@@ -71,7 +72,10 @@ export const fileDetails = (file: AudioFile): string => {
   const rate =
     !file.lossless && file.bitrate !== null ? `${Math.round(file.bitrate / 1000)} kbps` : null;
 
-  const format = [depth ?? rate, file.sampleRate === null ? null : kilohertz(file.sampleRate)]
+  const format = [
+    depth ?? rate,
+    file.sampleRate === null ? null : `${kilohertz(file.sampleRate)} kHz`,
+  ]
     .filter((part) => part !== null)
     .join(" / ");
 
@@ -93,8 +97,15 @@ export const formatBadge = (file: AudioFile): string | null => {
 
   if (file.bitDepth === null || file.sampleRate === null) return name;
 
-  return `${name} ${file.bitDepth}/${(file.sampleRate / 1000).toFixed(1).replace(/\.0$/, "")}`;
+  return `${name} ${file.bitDepth}/${kilohertz(file.sampleRate)}`;
 };
+
+/** What VoiceOver reads for each repeat mode. */
+export const REPEAT_LABELS = {
+  off: "Repeat off",
+  all: "Repeat all",
+  one: "Repeat one",
+} as const;
 
 const QUALITY_NAMES = {
   lossless: "Lossless",

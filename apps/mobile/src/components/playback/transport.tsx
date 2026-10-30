@@ -21,7 +21,7 @@ import { Pressable, View } from "react-native";
 
 import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/icon-button";
-import { playsOn } from "@/lib/playback-format";
+import { REPEAT_LABELS, playsOn } from "@/lib/playback-format";
 import { usePlayer, usePlayerActions } from "@/player";
 
 import { Slider } from "./slider";
@@ -72,8 +72,6 @@ export function Transport() {
     </View>
   );
 }
-
-const REPEAT_LABELS = { off: "Repeat off", all: "Repeat all", one: "Repeat one" } as const;
 
 /** Previous and next in the bar: 26pt filled glyphs, 44pt wide on the row's 36pt height. */
 function BarSkipButton({
