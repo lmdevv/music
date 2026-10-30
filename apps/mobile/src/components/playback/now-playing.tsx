@@ -739,12 +739,16 @@ function Stage({
       onLayout={(event) => {
         const { width: nextWidth, height } = event.nativeEvent.layout;
 
-        // At the width the fold started at, its growth is skipped, so the stage is back to that
-        // box when the fold ends, which brings no layout of its own. After a new width, as when
-        // Split View narrows the window, it takes every layout until the fold ends.
-        setLive((current) =>
-          folds && held?.width === nextWidth ? current : { width: nextWidth, height },
-        );
+        // At the width the fold started at, the stage's growth is skipped and the box set back to
+        // the one it had, since the fold's end brings no layout of its own. After a new width, as
+        // when Split View narrows the window, it takes every layout until the fold ends.
+        if (folds && held !== null && held.width === nextWidth) {
+          if (live?.width !== held.width || live.height !== held.height) setLive(held);
+
+          return;
+        }
+
+        setLive({ width: nextWidth, height });
       }}
     >
       <Animated.View
