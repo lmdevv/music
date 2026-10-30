@@ -47,15 +47,21 @@ export type DestinationKey =
   | "history"
   | "playlists";
 
-/** One fixed place in the sidebar. */
-export interface Destination {
-  readonly key: DestinationKey;
-  readonly label: string;
+/** Somewhere the sidebar opens: one page in one tab. */
+export interface Place {
   readonly href: Href;
   /** The tab it opens in. */
   readonly tab: string;
   /** The routes that are this place, in whichever tab's stack; none for a tab's root. */
   readonly routes: ReadonlyArray<string>;
+  /** Which page of its route, where the route takes an ID. */
+  readonly id?: string;
+}
+
+/** One fixed place in the sidebar. */
+export interface Destination extends Place {
+  readonly key: DestinationKey;
+  readonly label: string;
   /** `device` opens with no server (Downloaded, and the roots that say why they are empty). */
   readonly source: "device" | "server";
 }
@@ -164,6 +170,7 @@ export const playlistSelection = (id: string): SidebarSelection => `playlist:${i
 
 /** The part of a navigator's state the selection reads. */
 export interface NavigationSnapshot {
+  readonly key?: string | undefined;
   readonly index?: number | undefined;
   readonly routes: ReadonlyArray<{
     readonly name: string;
@@ -174,6 +181,47 @@ export interface NavigationSnapshot {
 
 const PLAYLIST_ROUTE = "playlist/[id]";
 
+/** A playlist as somewhere the sidebar opens. */
+export const playlistPlace = (id: string): Place => ({
+  href: { pathname: "/(app)/(tabs)/(playlists)/playlist/[id]", params: { id } },
+  tab: "(playlists)",
+  routes: [PLAYLIST_ROUTE],
+  id,
+});
+
+/** The tabs' state, from any navigator above them. */
+const tabsOf = (navigator: NavigationSnapshot): NavigationSnapshot | undefined => {
+  for (const route of navigator.routes) {
+    if (route.name === "(tabs)") return route.state;
+
+    const nested = route.state === undefined ? undefined : tabsOf(route.state);
+
+    if (nested !== undefined) return nested;
+  }
+
+  return undefined;
+};
+
+/**
+ * What to pop from the stack of `place`'s tab so that opening it leaves that page alone over the
+ * tab's root, or null with nothing to pop. A stack already holding the page there keeps it, and
+ * its scroll, under whatever was pushed on it. Null too for a tab not yet visited: it has no stack.
+ */
+export const popsToOpen = (
+  root: NavigationSnapshot,
+  place: Place,
+): { readonly stack: string; readonly count: number } | null => {
+  const stack = tabsOf(root)?.routes.find((route) => route.name === place.tab)?.state;
+
+  if (stack?.key === undefined) return null;
+
+  const page = stack.routes[1];
+  const kept = page?.name === place.routes[0] && page?.params?.id === place.id ? 2 : 1;
+  const count = (stack.index ?? stack.routes.length - 1) + 1 - kept;
+
+  return count > 0 ? { stack: stack.key, count } : null;
+};
+
 /**
  * What the sidebar highlights for the navigator that holds `(tabs)`: the top place in the focused
  * tab's stack, so an album opened from Albums keeps Albums lit, or else that tab's root. Reading
@@ -181,7 +229,7 @@ const PLAYLIST_ROUTE = "playlist/[id]";
  * keeps the selection while Now Playing or Settings covers the tabs. Null before the tabs mount.
  */
 export const sidebarSelectionOf = (app: NavigationSnapshot): SidebarSelection | null => {
-  const tabs = app.routes.find((route) => route.name === "(tabs)")?.state;
+  const tabs = tabsOf(app);
   const tab = tabs?.routes[tabs.index ?? 0];
 
   if (tab === undefined) return null;

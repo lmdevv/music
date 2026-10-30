@@ -6,6 +6,7 @@
  * does. On an iPad the sidebar's Search row asks instead, and may do so before the Search tab has
  * ever mounted, so its request waits, and the screen's field opens focused.
  */
+import { useIsFocused } from "expo-router";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -85,16 +86,25 @@ export const useActivateSearch = (): (() => void) => useSearchActivation().activ
 export const useRequestSearch = (): (() => void) => useSearchActivation().request;
 
 /**
- * The Search screen's side of `request`: keeps asking `focus` until `focused`. The Search tab may
- * only be on its way to the screen, and UIKit attaches the header's field some frames after the
- * screen mounts; it says nothing when it has, and ignores a focus before then.
+ * The Search screen's side of `request`: while the screen is on show, keeps asking `focus` until
+ * `fieldFocused`. The Search tab may only be on its way to the screen, and UIKit attaches the
+ * header's field some frames after the screen mounts; it says nothing when it has, and ignores a
+ * focus before then. Leaving the screen drops the request.
  */
-export const useFocusOnRequest = (focus: () => void, focused: boolean): void => {
+export const useFocusOnRequest = (focus: () => void, fieldFocused: boolean): void => {
   const { takeRequest, onRequest } = useSearchActivation();
+  const onShow = useIsFocused();
+  const [wasOnShow, setWasOnShow] = useState(onShow);
   const [requested, setRequested] = useState(takeRequest);
-  const asking = requested && !focused;
+  const asking = requested && onShow && !fieldFocused;
 
-  if (requested && focused) setRequested(false);
+  if (requested && fieldFocused) setRequested(false);
+
+  if (onShow !== wasOnShow) {
+    setWasOnShow(onShow);
+
+    if (!onShow) setRequested(false);
+  }
 
   useEffect(() => onRequest(() => setRequested(true)), [onRequest]);
 

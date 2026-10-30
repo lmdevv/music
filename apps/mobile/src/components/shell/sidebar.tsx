@@ -8,7 +8,6 @@
  */
 import type { Playlist } from "@music/commands/models";
 import { useRead } from "@music/sdk/react";
-import type { Href } from "expo-router";
 import { router } from "expo-router";
 import { useNavigationState } from "expo-router/react-navigation";
 import {
@@ -38,12 +37,14 @@ import { sidebarLine } from "@/lib/playlist-format";
 import {
   DESTINATIONS,
   LIBRARY_ROWS,
+  playlistPlace,
   playlistSelection,
   sidebarSelectionOf,
 } from "@/lib/shell-layout";
-import type { Destination, DestinationKey, SidebarSelection } from "@/lib/shell-layout";
+import type { Destination, DestinationKey, Place, SidebarSelection } from "@/lib/shell-layout";
 import { useServerReach } from "@/session/server-reach";
 
+import { useOpenPlace } from "./open-place";
 import { useOpenSearch } from "./top-buttons";
 
 /** Each row's glyph; the headings have none. */
@@ -67,7 +68,7 @@ function PlaceRow({
   readonly place: Destination & { readonly key: keyof typeof ICONS };
   readonly selection: SidebarSelection | null;
   readonly offline: boolean;
-  readonly onSelect: (href: Href) => void;
+  readonly onSelect: (place: Place) => void;
 }) {
   const selected = selection === place.key;
   const dark = useUniwind().theme === "dark";
@@ -79,7 +80,7 @@ function PlaceRow({
       accessibilityLabel={place.label}
       accessibilityState={{ selected, disabled: dimmed }}
       disabled={dimmed}
-      onPress={() => onSelect(place.href)}
+      onPress={() => onSelect(place)}
       className={`h-row flex-row items-center gap-3 rounded-md px-3 active:opacity-60 ${
         selected ? "bg-accent/12" : ""
       } ${dimmed ? "opacity-disabled" : ""}`}
@@ -106,7 +107,7 @@ function Heading({
 }: {
   readonly place: Destination;
   readonly selection: SidebarSelection | null;
-  readonly onSelect: (href: Href) => void;
+  readonly onSelect: (place: Place) => void;
   readonly action?: ReactNode;
 }) {
   const selected = selection === place.key;
@@ -118,7 +119,7 @@ function Heading({
         accessibilityLabel={place.label}
         accessibilityState={{ selected }}
         hitSlop={8}
-        onPress={() => onSelect(place.href)}
+        onPress={() => onSelect(place)}
         className="active:opacity-60"
       >
         <Text variant="secondaryStrong" tone={selected ? "accent" : "muted"}>
@@ -138,7 +139,7 @@ function PlaylistRow({
 }: {
   readonly playlist: Playlist;
   readonly selection: SidebarSelection | null;
-  readonly onSelect: (href: Href) => void;
+  readonly onSelect: (place: Place) => void;
 }) {
   const selected = selection === playlistSelection(playlist.id);
   const line = sidebarLine(playlist);
@@ -148,12 +149,7 @@ function PlaylistRow({
       accessibilityRole="button"
       accessibilityLabel={`${playlist.name}, ${line}`}
       accessibilityState={{ selected }}
-      onPress={() =>
-        onSelect({
-          pathname: "/(app)/(tabs)/(playlists)/playlist/[id]",
-          params: { id: playlist.id },
-        })
-      }
+      onPress={() => onSelect(playlistPlace(playlist.id))}
       className={`h-hit-target flex-row items-center gap-3 rounded-md px-2 active:opacity-60 ${
         selected ? "bg-accent/12" : ""
       }`}
@@ -211,13 +207,14 @@ export function Sidebar({
   const selection = useNavigationState(sidebarSelectionOf);
   const offline = useServerReach() === "offline";
   const dark = useUniwind().theme === "dark";
+  const openPlace = useOpenPlace();
   const openSearch = useOpenSearch();
   const playlists = useRead("playlists.list", {});
   const shared = useRead("playlists.shared", {});
 
-  const go = (href: Href) => {
+  const go = (place: Place) => {
     onDone();
-    router.navigate(href);
+    openPlace(place);
   };
 
   const searching = selection === DESTINATIONS.search.key;

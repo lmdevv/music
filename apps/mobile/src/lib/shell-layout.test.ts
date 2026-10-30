@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { DESTINATIONS, playlistSelection, shellOf, sidebarSelectionOf } from "./shell-layout";
-import type { NavigationSnapshot } from "./shell-layout";
+import {
+  DESTINATIONS,
+  playlistPlace,
+  playlistSelection,
+  popsToOpen,
+  shellOf,
+  sidebarSelectionOf,
+} from "./shell-layout";
+import type { NavigationSnapshot, Place } from "./shell-layout";
 
 describe("shellOf", () => {
   it.each([
@@ -93,5 +100,121 @@ describe("sidebarSelectionOf", () => {
       "(playlists)",
       "(search)",
     ]);
+  });
+});
+
+type Stack = NavigationSnapshot["routes"];
+
+/** The root navigator's state, as the container reports it, with `tab`'s stack holding `stack`. */
+const rooted = (tab: string, stack: Stack): NavigationSnapshot => ({
+  routes: [
+    {
+      name: "(app)",
+      state: {
+        routes: [
+          {
+            name: "(tabs)",
+            state: {
+              index: 0,
+              routes: [
+                { name: tab, state: { key: "stack", index: stack.length - 1, routes: stack } },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  ],
+});
+
+/**
+ * The stack after opening `place` as the sidebar does: the pops, then a `navigate`, which by the
+ * stack router's rule reuses a route only if it is the one on top, and otherwise pushes.
+ */
+const opened = (stack: Stack, place: Place): Stack => {
+  const count = popsToOpen(rooted(place.tab, stack), place)?.count ?? 0;
+  const left = stack.slice(0, stack.length - count);
+  const name = place.routes[0];
+
+  if (name === undefined || left.at(-1)?.name === name) return left;
+
+  return [...left, place.id === undefined ? { name } : { name, params: { id: place.id } }];
+};
+
+const names = (stack: Stack) => stack.map((route) => route.name);
+
+describe("opening a place", () => {
+  const root = { name: "index" };
+  const albums = { name: "albums" };
+  const album = { name: "album/[id]", params: { id: "a" } };
+  const otherAlbum = { name: "album/[id]", params: { id: "b" } };
+  const { library, albums: albumsPlace, songs, downloaded } = DESTINATIONS;
+
+  it("returns a tab to its root, which is then what the sidebar selects", () => {
+    const stack = opened([root, albums], library);
+
+    expect(names(stack)).toEqual(["index"]);
+    expect(sidebarSelectionOf(rooted("(library)", stack))).toBe("library");
+    expect(names(opened([root, albums, album, otherAlbum], library))).toEqual(["index"]);
+    expect(names(opened([root], library))).toEqual(["index"]);
+  });
+
+  it("lands on one page over the root from a deep page", () => {
+    const stack = opened([root, album, otherAlbum], albumsPlace);
+
+    expect(names(stack)).toEqual(["index", "albums"]);
+    expect(sidebarSelectionOf(rooted("(library)", stack))).toBe("albums");
+    expect(names(opened([root, { name: songs.routes[0] }], albumsPlace))).toEqual([
+      "index",
+      "albums",
+    ]);
+  });
+
+  it("keeps the page that is already there, popping what was pushed on it", () => {
+    expect(popsToOpen(rooted("(library)", [root, albums]), albumsPlace)).toBeNull();
+    expect(popsToOpen(rooted("(library)", [root, albums, album]), albumsPlace)).toEqual({
+      stack: "stack",
+      count: 1,
+    });
+    expect(names(opened([root, { name: "downloaded/index" }, album], downloaded))).toEqual([
+      "index",
+      "downloaded/index",
+    ]);
+  });
+
+  it("tells one playlist from another", () => {
+    const stack = [root, { name: "playlist/[id]", params: { id: "abc" } }, album];
+
+    expect(popsToOpen(rooted("(playlists)", stack), playlistPlace("abc"))?.count).toBe(1);
+    expect(popsToOpen(rooted("(playlists)", stack), playlistPlace("xyz"))?.count).toBe(2);
+
+    const next = opened(stack, playlistPlace("xyz"));
+
+    expect(sidebarSelectionOf(rooted("(playlists)", next))).toBe(playlistSelection("xyz"));
+    expect(next).toHaveLength(2);
+  });
+
+  it("leaves routes preloaded past the stack's top alone", () => {
+    const preloaded = {
+      routes: [
+        {
+          name: "(tabs)",
+          state: {
+            routes: [
+              {
+                name: "(library)",
+                state: { key: "stack", index: 1, routes: [root, album, otherAlbum] },
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    expect(popsToOpen(preloaded, library)?.count).toBe(1);
+  });
+
+  it("has nothing to pop in a tab not yet visited", () => {
+    expect(popsToOpen({ routes: [{ name: "(tabs)", state: { routes: [] } }] }, library)).toBeNull();
   });
 });
