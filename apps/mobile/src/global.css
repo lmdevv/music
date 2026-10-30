@@ -207,3 +207,15 @@
     margin-inline: calc(var(--spacing-tablet-edge) * -1);
   }
 }
+
+/* Settings and forms (P10): the whole page on a phone; from `tablet` a column at most
+   --container-readable wide, centered between the page's edges, with the phone's 20pt edge inside
+   so its rows match the phone. A readable nav bar's row spans the column without that edge. */
+@utility readable {
+  width: 100%;
+  align-self: center;
+  @variant tablet {
+    max-width: var(--container-readable);
+    padding-inline: var(--spacing-mobile-edge);
+  }
+}
