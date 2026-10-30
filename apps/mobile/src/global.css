@@ -133,9 +133,12 @@
   --radius-mobile-card: 20px;
   --radius-sheet: 28px;
   --radius-full: 9999px;
+}
 
-  /* iPad layouts (Paper page 25): at `tablet` the window is wide enough for the iPad design
-     (iPhone and narrow Split View stay below it), and at `wide` two panes fit side by side. */
+/* iPad layouts (Paper page 25): at `tablet` the window is wide enough for the iPad design
+   (iPhone and narrow Split View stay below it), and at `wide` two panes fit side by side. Static,
+   so `useWindowLayout` can read the breakpoints, which variants inline rather than reference. */
+@theme static {
   --breakpoint-tablet: 600px;
   --breakpoint-wide: 1024px;
   --container-dialog: 560px;

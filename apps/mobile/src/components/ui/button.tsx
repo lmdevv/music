@@ -63,7 +63,7 @@ export function Button({
         if (variant === "primary") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         onPress?.(event);
       }}
-      className={`h-12 flex-row items-center justify-center gap-2 rounded-full px-page py-3 active:opacity-80 ${box} ${
+      className={`h-12 flex-row items-center justify-center gap-2 rounded-full px-mobile-edge py-3 active:opacity-80 ${box} ${
         disabled === true ? "opacity-disabled" : pending ? "opacity-muted" : ""
       } ${className ?? ""}`}
       {...props}
