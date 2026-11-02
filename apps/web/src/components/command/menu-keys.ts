@@ -11,7 +11,6 @@ export type Chord = "enter" | "mod+enter" | "shift+enter" | "alt+enter";
 /** Every chord, in the order a preview lays out its buttons. */
 export const CHORDS: ReadonlyArray<Chord> = ["enter", "mod+enter", "shift+enter", "alt+enter"];
 
-/** What a key pressed in the menu's search field does: move through the list or run an action. */
 type MenuKey =
   | { readonly kind: "next" }
   | { readonly kind: "previous" }

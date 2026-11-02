@@ -107,6 +107,24 @@ export const Preview = memo(function Preview({
   }
 });
 
+function NowProgress({ durationMs }: { readonly durationMs: number }) {
+  const position = usePlayerPosition();
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <ProgressBar
+        percent={Math.min(100, (position / Math.max(1, durationMs)) * 100)}
+        label="Position"
+        className="h-1 [&>div]:bg-text"
+      />
+      <div className="flex justify-between font-mono text-xs/xs text-text-muted">
+        <span>{formatDuration(position)}</span>
+        <span>{formatDuration(durationMs)}</span>
+      </div>
+    </div>
+  );
+}
+
 function NowPreview({
   track,
   onClose,
@@ -114,7 +132,6 @@ function NowPreview({
   registerActions,
 }: PreviewProps & { readonly track: Track }) {
   const player = usePlayer();
-  const position = usePlayerPosition();
   const ui = useUi();
   const playing = player.status === "playing";
   const upNext = player.queue.slice(player.index + 1, player.index + 3);
@@ -123,17 +140,7 @@ function NowPreview({
     <PreviewFrame onBack={onBack}>
       <Artwork url={track.artUrl} seed={track.albumId} className={previewArt} />
       <PreviewTitle title={track.title} meta={`${track.artist} · ${track.album}`} />
-      <div className="flex flex-col gap-1.5">
-        <ProgressBar
-          percent={Math.min(100, (position / Math.max(1, player.durationMs)) * 100)}
-          label="Position"
-          className="h-1 [&>div]:bg-text"
-        />
-        <div className="flex justify-between font-mono text-xs/xs text-text-muted">
-          <span>{formatDuration(position)}</span>
-          <span>{formatDuration(player.durationMs)}</span>
-        </div>
-      </div>
+      <NowProgress durationMs={player.durationMs} />
       {upNext.length === 0 ? null : (
         <div className="flex flex-col">
           <span className="pb-1.5 font-sans text-xs/xs font-semibold text-text-muted">Up next</span>

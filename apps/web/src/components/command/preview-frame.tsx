@@ -2,11 +2,11 @@ import { Button } from "@music/ui/components/button";
 import { Kbd } from "@music/ui/components/kbd";
 import { cn } from "@music/ui/lib/utils";
 import { ArrowLeftIcon } from "lucide-react";
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect } from "react";
 import type { ReactNode } from "react";
 
 import { CHORDS, CHORD_LABELS } from "./menu-keys";
-import type { Chord, ChordActions, PreviewAction } from "./menu-keys";
+import type { ChordActions } from "./menu-keys";
 
 /** Classes for the large artwork at the top of a preview. */
 export const previewArt = "size-37 rounded-md shadow-art-preview";
@@ -25,37 +25,11 @@ const useRegisterActions = (
   registerActions: PreviewProps["registerActions"],
   actions: ChordActions,
 ): void => {
-  const latest = useRef(actions);
-
   useLayoutEffect(() => {
-    latest.current = actions;
-  });
-
-  // Re-register only when what the menu shows changes, not on every render: the now-playing
-  // preview re-renders on each position tick, and every registration re-renders the menu. A layout
-  // effect, so the footer never paints without the new selection's Enter label.
-  const shown = CHORDS.map((chord) => {
-    const action = actions[chord];
-
-    return action === undefined
-      ? ""
-      : `${action.label}|${action.disabled === true}|${action.pending === true}`;
-  }).join("\n");
-
-  useLayoutEffect(() => {
-    const registered: Partial<Record<Chord, PreviewAction>> = {};
-
-    for (const chord of CHORDS) {
-      const action = latest.current[chord];
-
-      if (action !== undefined)
-        registered[chord] = { ...action, run: () => latest.current[chord]?.run() };
-    }
-
-    registerActions(registered);
+    registerActions(actions);
 
     return () => registerActions(null);
-  }, [registerActions, shown]);
+  }, [registerActions, actions]);
 };
 
 /**
