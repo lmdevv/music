@@ -1,4 +1,4 @@
-import { TrackId } from "@music/commands/ids";
+import { ControllerId, TrackId } from "@music/commands/ids";
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineEvent, PlayerEngine } from "./engine";
@@ -103,6 +103,7 @@ const setup = (queue: ReadonlyArray<SongId>, downloaded: ReadonlyArray<SongId>) 
     { mse: null, create: () => output.engine },
     {
       deviceId: phone.id,
+      controllerId: ControllerId.make("offline-controller"),
       device: { name: phone.name, kind: phone.kind },
       canPlay: () => true,
       now: clock.now,

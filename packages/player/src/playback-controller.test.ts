@@ -1,6 +1,13 @@
 import { createServer } from "node:http";
 
-import { AlbumId, ArtistId, DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
+import {
+  AlbumId,
+  ArtistId,
+  ControllerId,
+  DeviceId,
+  QueueItemId,
+  TrackId,
+} from "@music/commands/ids";
 import { StreamProfile } from "@music/commands/models";
 import type { PlaybackState, QueueEntry } from "@music/commands/models";
 import { makeMusicClient } from "@music/sdk/client";
@@ -17,6 +24,8 @@ import { streamSources } from "./source-resolver";
 import type { StreamQuality } from "./stream-quality";
 
 const deviceId = DeviceId.make("this-browser");
+
+const controllerId = ControllerId.make("this-controller");
 
 const SIX_HOURS = 6 * 60 * 60 * 1000;
 
@@ -273,6 +282,7 @@ const setup = async (options: {
     },
     {
       deviceId,
+      controllerId,
       device: { name: "Test", kind: "web" },
       canPlay: () => true,
       now: () => clock.now,
@@ -447,11 +457,15 @@ describe("PlaybackController", () => {
       );
       await vi.waitFor(() => expect(record.loads).toHaveLength(1));
       await controller.seek(3000);
+      expect(mutations).toContainEqual({
+        name: "playback.seek",
+        args: { positionMs: 3000, appliedBy: controllerId },
+      });
       await vi.waitFor(() => expect(record.loads).toHaveLength(2));
       controller.sync(
         session(true, clock.now, false, {
           positionMs: 3000,
-          control: { revision: 2, seek: 2, transport: 1, appliedBy: deviceId },
+          control: { revision: 2, seek: 2, transport: 1, appliedBy: controllerId },
         }),
       );
       ready.resolve();
@@ -464,6 +478,33 @@ describe("PlaybackController", () => {
       });
     } finally {
       ready.resolve();
+      stop();
+    }
+  });
+
+  it("applies another controller's seek when both controllers share a device ID", async () => {
+    const { controller, mutations, record, clock, stop } = await setup({ gapless: false });
+
+    try {
+      controller.sync(
+        session(false, clock.now, false, { control: { revision: 1, seek: 1, transport: 1 } }),
+      );
+      await vi.waitFor(() => expect(reports(mutations)).toHaveLength(1));
+      controller.sync(
+        session(false, clock.now, false, {
+          positionMs: 60_000,
+          control: {
+            revision: 2,
+            seek: 2,
+            transport: 1,
+            appliedBy: ControllerId.make("this-browser"),
+          },
+        }),
+      );
+
+      expect(record.seeks).toEqual([60_000]);
+      expect(controller.positionMs()).toBe(60_000);
+    } finally {
       stop();
     }
   });
@@ -481,13 +522,13 @@ describe("PlaybackController", () => {
       controller.sync(
         session(false, clock.now, false, {
           positionMs: 5000,
-          control: { revision: 2, seek: 2, transport: 1, appliedBy: deviceId },
+          control: { revision: 2, seek: 2, transport: 1, appliedBy: controllerId },
         }),
       );
       controller.sync(
         session(false, clock.now, false, {
           positionMs: 5500,
-          control: { revision: 3, seek: 3, transport: 1, appliedBy: deviceId },
+          control: { revision: 3, seek: 3, transport: 1, appliedBy: controllerId },
         }),
       );
       expect(record.seeks).toEqual([5000, 5500]);
@@ -643,6 +684,7 @@ describe("PlaybackController", () => {
       { mse: null, create: (kind) => instantEngine(kind, record) },
       {
         deviceId,
+        controllerId,
         device: { name: "Test", kind: "web" },
         canPlay: () => true,
         now: () => 1000,
@@ -708,6 +750,7 @@ describe("PlaybackController", () => {
       { mse: null, create: (kind) => instantEngine(kind, record) },
       {
         deviceId,
+        controllerId,
         device: { name: "Test", kind: "web" },
         canPlay: () => true,
         now: () => 1000,

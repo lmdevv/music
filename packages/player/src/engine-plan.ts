@@ -1,4 +1,4 @@
-import type { DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
+import type { ControllerId, DeviceId, QueueItemId, TrackId } from "@music/commands/ids";
 import type { PlaybackState, QueueEntry, RepeatMode } from "@music/commands/models";
 import { Data } from "effect";
 
@@ -33,9 +33,13 @@ export interface SessionView {
 }
 
 /** Projects the session onto one device. */
-export const sessionView = (state: PlaybackState, deviceId: DeviceId): SessionView => ({
+export const sessionView = (
+  state: PlaybackState,
+  deviceId: DeviceId,
+  controllerId?: ControllerId,
+): SessionView => ({
   control: state.control,
-  ownSeek: state.control?.appliedBy === deviceId,
+  ownSeek: controllerId !== undefined && state.control?.appliedBy === controllerId,
   active: state.activeDevice?.id === deviceId,
   index: state.index,
   track: state.queue[state.index] ?? null,

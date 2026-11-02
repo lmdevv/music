@@ -1,4 +1,4 @@
-import type { DeviceId, TrackId } from "@music/commands/ids";
+import type { ControllerId, DeviceId, TrackId } from "@music/commands/ids";
 import type { PlaybackState, QueueEntry, StreamProfile, Track } from "@music/commands/models";
 import { errorMessage } from "@music/sdk/errors";
 import { Effect, Exit, Fiber, Result } from "effect";
@@ -80,6 +80,7 @@ export interface NowPlayingControls {
 
 /** What the controller needs from its host besides the server and the engine. */
 export interface ControllerEnvironment {
+  readonly controllerId: ControllerId;
   readonly deviceId: DeviceId;
   readonly device: DeviceDescription;
   /** Answers `audio.canPlayType(mimeType) !== ""`. */
@@ -266,7 +267,7 @@ export class PlaybackController {
     const controlChanged =
       state.control !== undefined && state.control.revision !== this.#state?.control?.revision;
 
-    const view = sessionView(state, this.deviceId);
+    const view = sessionView(state, this.deviceId, this.#env.controllerId);
     this.#applying = true;
 
     try {
@@ -428,7 +429,9 @@ export class PlaybackController {
     await this.capture(
       this.#session.run(
         "playback.seek",
-        appliedHere ? { positionMs: target, appliedBy: this.deviceId } : { positionMs: target },
+        appliedHere
+          ? { positionMs: target, appliedBy: this.#env.controllerId }
+          : { positionMs: target },
       ),
     );
   }

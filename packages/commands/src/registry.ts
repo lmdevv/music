@@ -5,6 +5,7 @@ import {
   AlbumId,
   ApiKeyId,
   ArtistId,
+  ControllerId,
   DeviceId,
   DownloadPinId,
   InviteId,
@@ -240,7 +241,7 @@ export const commands = {
     job: false,
     args: Schema.Struct({
       positionMs: Millis,
-      appliedBy: Schema.optionalKey(DeviceId).pipe(
+      appliedBy: Schema.optionalKey(ControllerId).pipe(
         Schema.annotateKey({ "music/playerOnly": true }),
       ),
     }),

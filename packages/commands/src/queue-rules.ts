@@ -1,6 +1,6 @@
 import { Match } from "effect";
 
-import type { DeviceId } from "./ids";
+import type { ControllerId } from "./ids";
 import type { PlaybackControl, RepeatMode } from "./models";
 
 /** Control markers for sessions stored before playback ordering was recorded. */
@@ -11,7 +11,7 @@ export const nextPlaybackControl = (
   current: PlaybackControl | undefined,
   kind: "seek" | "transport" | "restart" | "fence" | "reconcile",
   after?: PlaybackControl,
-  appliedBy?: DeviceId,
+  appliedBy?: ControllerId,
 ): PlaybackControl => {
   const revision = Math.max(current?.revision ?? 0, after?.revision ?? 0) + 1;
 

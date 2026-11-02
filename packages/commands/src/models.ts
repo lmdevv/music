@@ -4,6 +4,7 @@ import {
   AlbumId,
   ApiKeyId,
   ArtistId,
+  ControllerId,
   DeviceId,
   DownloadPinId,
   InviteId,
@@ -443,8 +444,8 @@ export const PlaybackControl = Schema.Struct({
   revision: ControlRevision,
   seek: ControlRevision,
   transport: ControlRevision,
-  /** The device that applied this seek before sending it, so its echo does not seek again. */
-  appliedBy: Schema.optionalKey(DeviceId),
+  /** The controller that applied this seek before sending it, so its echo does not seek again. */
+  appliedBy: Schema.optionalKey(ControllerId),
 });
 
 /** Control ordering, with separate markers for position and play/pause application. */
