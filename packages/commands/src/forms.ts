@@ -341,3 +341,11 @@ export const outcomeOf = (result: CommandResult<MutationName>): CommandOutcome =
 
   return { kind: "none" };
 };
+
+/**
+ * A command's short title in a client: its summary up to the first colon, semicolon, or
+ * parenthesis, where the registry starts explaining CLI flags. `Add songs to the queue: --next …`
+ * reads `Add songs to the queue`.
+ */
+export const commandTitle = (summary: string): string =>
+  summary.split(/[:;]| \(/u)[0]?.trim() ?? summary;

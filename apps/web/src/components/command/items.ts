@@ -1,3 +1,4 @@
+import { commandTitle } from "@music/commands/forms";
 import type { FieldSpec } from "@music/commands/forms";
 import type {
   AlbumCard as Album,
@@ -63,7 +64,7 @@ export const groupOf = (name: MutationName): string => {
   return `${group.charAt(0).toUpperCase()}${group.slice(1)}`;
 };
 
-/** The row's main line: the record's name, the command's summary, or the action's title. */
+/** The row's main line: the record's name, the command's short title, or the action's title. */
 export const titleOf = (item: Item): string => {
   switch (item.kind) {
     case "now":
@@ -76,7 +77,7 @@ export const titleOf = (item: Item): string => {
     case "playlist":
       return item.playlist.name;
     case "command":
-      return commands[item.name].summary;
+      return commandTitle(commands[item.name].summary);
     case "action":
       return item.title;
     default:
@@ -87,7 +88,7 @@ export const titleOf = (item: Item): string => {
 const keywordsOf = (item: Item): string => {
   switch (item.kind) {
     case "command":
-      return `${item.name} ${commands[item.name].group}`;
+      return `${item.name} ${commands[item.name].group} ${commands[item.name].summary}`;
     case "action":
       return item.detail;
     case "now":

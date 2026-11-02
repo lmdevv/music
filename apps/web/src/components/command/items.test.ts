@@ -96,6 +96,12 @@ describe("titleOf", () => {
     );
     expect(titleOf(action("a", "Shuffle liked songs", ""))).toBe("Shuffle liked songs");
   });
+
+  it("titles a command without the CLI details in its summary", () => {
+    expect(
+      titleOf({ kind: "command", id: "cmd", section: "", name: "queue.add", fields: [] }),
+    ).toBe("Add songs to the queue");
+  });
 });
 
 describe("browseItems", () => {
