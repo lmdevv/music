@@ -154,9 +154,12 @@ The example identities must be replaced with the model and tool that actually co
 - Run `/pstack:no-comments` on the diff before `/code-review` when a PR adds or changes comments,
   with or without `/pstack:poteto-mode`. Tell it to keep required `// SAFETY:` comments; its agent
   does not know this repo's rule.
-- Every PR gets Codex automatic review on GitHub; address its findings before merging. Run
-  Claude's `/code-review` locally before you open or merge one. Do not enable, request, or wait for
-  CodeRabbit or Bugbot. Don't add a project skill named `code-review`; it shadows Claude's.
+- Run Claude's `/code-review` and Codex locally before you open or merge a PR, and address their
+  findings. After `git fetch origin main`, run
+  `codex review --base origin/main -c model=gpt-6.1-sol -c model_reasoning_effort=high`. Its
+  sandbox is read-only, so it can't run tests. Say in the PR when you can't run it. Don't wait for
+  a Codex review on GitHub. Do not enable, request, or wait for CodeRabbit or Bugbot. Don't add a
+  project skill named `code-review`; it shadows Claude's.
 - Cloud environments: none yet. Pin the Claude one in `.claude/settings.json`
   (`remote.defaultEnvironmentId`) and write the Codex ID here for `codex cloud exec --env`. Docker
   suites run in Claude cloud only.
