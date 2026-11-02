@@ -197,12 +197,12 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
         )}
         <input
           ref={input}
-          aria-label="Search your library or type a command"
+          aria-label="Search your library"
           aria-activedescendant={current === undefined ? undefined : `command-${current.id}`}
           aria-controls="command-list"
           role="combobox"
           aria-expanded
-          placeholder="Search your library or type a command…"
+          placeholder="Search your library…"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={onKeyDown}

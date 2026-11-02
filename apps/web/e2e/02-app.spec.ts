@@ -443,7 +443,6 @@ test("the command menu runs a registry command with arguments", async ({ page })
   await page.keyboard.type("shuffle on or off");
   await menu.getByRole("option", { name: /Turn shuffle on or off/ }).click();
   await expect(menu.getByRole("heading", { name: "Turn shuffle on or off" })).toBeVisible();
-  await expect(menu.getByText("music playback shuffle").first()).toBeVisible();
   await menu.getByRole("button", { name: "Run" }).click();
 
   await expect(menu).toBeHidden();

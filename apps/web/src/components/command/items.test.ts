@@ -4,7 +4,7 @@ import { Schema } from "effect";
 import { HeartIcon } from "lucide-react";
 import { describe, expect, it } from "vitest";
 
-import { browseItems, cliOf, primaryLabel, searchItems, titleOf } from "./items";
+import { browseItems, groupOf, primaryLabel, searchItems, titleOf } from "./items";
 import type { Item } from "./items";
 
 const track = (id: string, title: string): Track =>
@@ -77,10 +77,10 @@ const command = (name: "playlists.create"): Item => ({
 
 const ids = (items: ReadonlyArray<Item>) => items.map((item) => item.id);
 
-describe("cliOf", () => {
-  it("spells a command the way the CLI takes it", () => {
-    expect(cliOf("playlists.create")).toBe("music playlists create");
-    expect(cliOf("search")).toBe("music search");
+describe("groupOf", () => {
+  it("names a command's group as a word", () => {
+    expect(groupOf("playlists.create")).toBe("Playlists");
+    expect(groupOf("people.role")).toBe("People");
   });
 });
 
@@ -196,7 +196,7 @@ describe("searchItems", () => {
 
   it("needs every word of the query somewhere in the title or keywords", () => {
     expect(
-      ids(searchItems({ query: "music playlists", results: undefined, playlists: [], actions })),
+      ids(searchItems({ query: "playlists create", results: undefined, playlists: [], actions })),
     ).toEqual(["cmd-playlists.create"]);
     expect(
       ids(searchItems({ query: "new speaker", results: undefined, playlists: [], actions })),

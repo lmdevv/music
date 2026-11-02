@@ -25,7 +25,7 @@ import { formatCount } from "@/lib/format";
 import { ArgsForm } from "./args-form";
 import type { MenuContext } from "./args-form";
 import { useCommandDefaults } from "./command-defaults";
-import { cliOf } from "./items";
+import { groupOf } from "./items";
 import { jobMeta } from "./outcome";
 import { PreviewFrame, PreviewTitle, usePrimary } from "./preview-frame";
 import type { PreviewProps } from "./preview-frame";
@@ -55,7 +55,7 @@ type CommandPreviewProps = PreviewProps & {
 };
 
 /**
- * A registry command's preview: its form, the same command for a terminal, and Run. After a run
+ * A registry command's preview: its group, summary, form, and Run. After a run
  * it shows the job, key, or invite the command returned, opens a new playlist, or closes the menu.
  */
 export function CommandPreview(props: CommandPreviewProps) {
@@ -161,7 +161,7 @@ function CommandForm({
     <PreviewFrame onBack={onBack}>
       <div className="flex flex-col gap-1">
         <span className="font-mono text-xs/xs tracking-mono text-text-muted uppercase">
-          {command.group}
+          {groupOf(name)}
           {command.access === "user" ? "" : ` · ${capabilityLabel(command.access)}`}
         </span>
         <h2 className="font-sans text-xl/xl font-heavy tracking-tight text-text">
@@ -189,12 +189,6 @@ function CommandForm({
           {error}
         </p>
       )}
-      <div className="flex flex-col gap-1.5 rounded-md bg-surface px-3.5 py-3">
-        <span className="font-sans text-xs/xs font-semibold text-text-muted">
-          Same command in a terminal
-        </span>
-        <code className="font-mono text-sm/xs text-text">{cliOf(name)}</code>
-      </div>
       <div className="flex gap-2">
         <Button variant="solid" size="sm" pending={pending} onClick={() => void run()}>
           {pending ? "Running…" : "Run"}

@@ -7,7 +7,7 @@ import type {
   Track,
 } from "@music/commands/models";
 import { commands } from "@music/commands/registry";
-import type { CommandName, MutationName } from "@music/commands/registry";
+import type { MutationName } from "@music/commands/registry";
 import { foldSearchText } from "@music/commands/search-text";
 import type { LucideIcon } from "lucide-react";
 
@@ -56,8 +56,12 @@ export type Item =
       readonly run: () => void;
     };
 
-/** `playlists.create` → `music playlists create`, the CLI spelling of a command. */
-export const cliOf = (name: CommandName): string => `music ${name.split(".").join(" ")}`;
+/** A command's group as a word for people, `playlists.create` → `Playlists`. */
+export const groupOf = (name: MutationName): string => {
+  const { group } = commands[name];
+
+  return `${group.charAt(0).toUpperCase()}${group.slice(1)}`;
+};
 
 /** The row's main line: the record's name, the command's summary, or the action's title. */
 export const titleOf = (item: Item): string => {
@@ -83,7 +87,7 @@ export const titleOf = (item: Item): string => {
 const keywordsOf = (item: Item): string => {
   switch (item.kind) {
     case "command":
-      return `${item.name} ${commands[item.name].group} ${cliOf(item.name)}`;
+      return `${item.name} ${commands[item.name].group}`;
     case "action":
       return item.detail;
     case "now":
