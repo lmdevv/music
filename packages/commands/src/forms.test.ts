@@ -229,9 +229,19 @@ describe("commandTitle", () => {
     expect(commandTitle(commands["libraries.scan"].summary)).toBe("Rescan a library folder");
   });
 
+  it("drops asides without cutting the sentence short", () => {
+    expect(commandTitle(commands["libraries.update"].summary)).toBe(
+      "Rename a library folder, or change who can listen to it",
+    );
+    expect(commandTitle(commands["jam.approve"].summary)).toBe(
+      "Let someone waiting into your Jam, or turn them away",
+    );
+  });
+
   it("titles every offered command with words", () => {
     for (const { name } of offeredCommands({ role: "owner", playing: true })) {
       expect(commandTitle(commands[name].summary).length).toBeGreaterThan(3);
+      expect(commandTitle(commands[name].summary)).not.toContain("--");
     }
   });
 });

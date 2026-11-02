@@ -27,9 +27,9 @@ const useRegisterActions = (
 ): void => {
   useLayoutEffect(() => {
     registerActions(actions);
+  });
 
-    return () => registerActions(null);
-  }, [registerActions, actions]);
+  useLayoutEffect(() => () => registerActions(null), [registerActions]);
 };
 
 /**

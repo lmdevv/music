@@ -104,25 +104,43 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
     list.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
   }, [active]);
 
-  const [registered, setRegistered] = useState<{
+  const registered = useRef<{ readonly id: string; readonly actions: ChordActions } | null>(null);
+
+  const [footer, setFooter] = useState<{
     readonly id: string;
-    readonly actions: ChordActions;
+    readonly label: string | null;
   } | null>(null);
 
   const currentId = current?.id ?? null;
-  const actions = registered !== null && registered.id === currentId ? registered.actions : null;
+  const footerLabel = footer !== null && footer.id === currentId ? footer.label : null;
 
   const registerActions = useCallback(
     (next: ChordActions | null) => {
       if (currentId === null) return;
 
-      setRegistered((previous) =>
-        next === null
-          ? previous?.id === currentId
-            ? null
-            : previous
-          : { id: currentId, actions: next },
+      if (next === null) {
+        if (registered.current?.id === currentId) registered.current = null;
+
+        return;
+      }
+
+      registered.current = { id: currentId, actions: next };
+      const label = next.enter?.label ?? null;
+
+      setFooter((previous) =>
+        previous?.id === currentId && previous.label === label
+          ? previous
+          : { id: currentId, label },
       );
+    },
+    [currentId],
+  );
+
+  const run = useCallback(
+    (chord: Chord) => {
+      const shown = registered.current;
+
+      if (shown !== null && shown.id === currentId) runnableAction(shown.actions, chord)?.run();
     },
     [currentId],
   );
@@ -136,18 +154,11 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
       return;
     }
 
-    if (registered?.id !== runWhenShown) return;
+    if (footer?.id !== runWhenShown) return;
 
     setRunWhenShown(null);
-    runnableAction(registered.actions, "enter")?.run();
-  }, [currentId, registered, runWhenShown]);
-
-  const run = useCallback(
-    (chord: Chord) => {
-      if (actions !== null) runnableAction(actions, chord)?.run();
-    },
-    [actions],
-  );
+    run("enter");
+  }, [currentId, footer, run, runWhenShown]);
 
   const latest = useRef({ active, run });
 
@@ -290,9 +301,9 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
 
       <div className="hidden h-11 shrink-0 items-center gap-3.5 border-t border-border bg-surface pr-3 pl-5 lg:flex">
         <span className="grow font-mono text-xs/xs font-semibold text-text-muted">[music]</span>
-        {actions?.enter === undefined ? null : (
+        {footerLabel === null ? null : (
           <span className="flex items-center gap-2 font-sans text-sm/xs font-medium text-text">
-            {actions.enter.label}
+            {footerLabel}
             <Kbd>{CHORD_LABELS.enter}</Kbd>
           </span>
         )}

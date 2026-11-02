@@ -1,6 +1,6 @@
 import { argsDecoder } from "@music/commands/codec";
 import type { JobId } from "@music/commands/ids";
-import { missingFields, outcomeOf, rawArgs } from "@music/commands/forms";
+import { commandTitle, missingFields, outcomeOf, rawArgs } from "@music/commands/forms";
 import type { FieldSpec, FormValues } from "@music/commands/forms";
 import { capabilityLabel } from "@music/commands/permissions";
 import { commands } from "@music/commands/registry";
@@ -55,7 +55,7 @@ type CommandPreviewProps = PreviewProps & {
 };
 
 /**
- * A registry command's preview: its group, summary, form, and Run. After a run
+ * A registry command's preview: its group, title, form, and Run. After a run
  * it shows the job, key, or invite the command returned, opens a new playlist, or closes the menu.
  */
 export function CommandPreview(props: CommandPreviewProps) {
@@ -118,7 +118,7 @@ function CommandForm({
 
       switch (result.kind) {
         case "job":
-          setOutcome({ kind: "job", jobId: result.jobId, title: command.summary });
+          setOutcome({ kind: "job", jobId: result.jobId, title: commandTitle(command.summary) });
           break;
         case "key":
           setOutcome({ kind: "key", key: result.key });
@@ -141,7 +141,7 @@ function CommandForm({
           onClose();
 
           if (command.group !== "playback" && command.group !== "queue")
-            toast.success(`Done: ${command.summary}`);
+            toast.success(`Done: ${commandTitle(command.summary)}`);
 
           break;
       }
@@ -163,7 +163,7 @@ function CommandForm({
           {command.access === "user" ? "" : ` · ${capabilityLabel(command.access)}`}
         </span>
         <h2 className="font-sans text-xl/xl font-heavy tracking-tight text-text">
-          {command.summary}
+          {commandTitle(command.summary)}
         </h2>
       </div>
       {fields.length === 0 ? null : (

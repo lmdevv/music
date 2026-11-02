@@ -162,11 +162,7 @@ function NowPreview({
         actions={{
           enter: {
             label: playing ? "Pause" : "Resume",
-            icon: playing ? (
-              <PauseIcon fill="currentColor" strokeWidth={0} />
-            ) : (
-              <PlayIcon fill="currentColor" strokeWidth={0} />
-            ),
+            icon: playing ? <PauseIcon fill="currentColor" strokeWidth={0} /> : playIcon,
             run: () => perform(player.togglePlay()),
           },
           "mod+enter": {
