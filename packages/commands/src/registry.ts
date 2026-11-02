@@ -33,6 +33,7 @@ import {
   DirectoryPerson,
   HistoryEntry,
   Home,
+  ControlRevision,
   Invite,
   JAM_ADD_LIMIT_MAX,
   Jam,
@@ -244,7 +245,12 @@ export const commands = {
     kind: "mutation",
     access: "user",
     job: false,
-    args: Schema.Struct({ positionMs: Millis }),
+    args: Schema.Struct({
+      positionMs: Millis,
+      appliedBy: Schema.optionalKey(DeviceId).pipe(
+        Schema.annotateKey({ "music/playerOnly": true }),
+      ),
+    }),
     result: Ok,
   }),
   "playback.jump": command({
@@ -301,6 +307,7 @@ export const commands = {
     access: "user",
     job: false,
     args: Schema.Struct({
+      controlRevision: Schema.optionalKey(ControlRevision),
       deviceId: DeviceId,
       index: QueueIndex,
       /**
@@ -410,7 +417,10 @@ export const commands = {
       plays: Schema.Array(OfflinePlay).check(Schema.isMaxLength(500)),
       resume: Schema.NullOr(OfflineResume),
     }),
-    result: Schema.Struct({ adopted: Schema.Boolean }),
+    result: Schema.Struct({
+      adopted: Schema.Boolean,
+      controlRevision: Schema.optionalKey(ControlRevision),
+    }),
   }),
 
   // Downloads

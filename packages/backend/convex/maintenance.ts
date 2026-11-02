@@ -9,7 +9,7 @@ import { deleteEmptyAlbum } from "./lib/catalog";
 import { DEVICE_RETAINED_MS } from "./lib/devices";
 import { endJam, expiryReason } from "./lib/jams";
 import { deleteLocalLyrics } from "./lib/lyrics";
-import { findSession } from "./lib/playback";
+import { findSession, writePlaybackControl } from "./lib/playback";
 import { DEVICE_ONLINE_MS } from "./lib/present";
 import { normaliseStored, rowQueue, saveQueue } from "./lib/queue";
 import { inOrder } from "./lib/sequence";
@@ -181,11 +181,16 @@ const purgeQueues = async (ctx: MutationCtx, cursor: string | null): Promise<str
 
       // With nothing left to play, playback stops.
       if (session !== null) {
-        await ctx.db.patch(session._id, {
-          positionMs: 0,
-          playing: session.playing && queue.items.length > 0,
-          updatedAt: Date.now(),
-        });
+        await writePlaybackControl(
+          ctx,
+          session,
+          {
+            positionMs: 0,
+            playing: session.playing && queue.items.length > 0,
+            updatedAt: Date.now(),
+          },
+          "restart",
+        );
       }
     }
   });
@@ -351,14 +356,17 @@ export const pauseOrphanedSessions = internalMutation({
 
     await Promise.all(
       orphaned.map(({ session, silentSince }) =>
-        ctx.db.patch(session._id, {
-          playing: false,
-          positionMs: session.positionMs + Math.max(0, silentSince - session.updatedAt),
-          updatedAt: now,
-          // Clear the gone device so clients stop showing "Playing on" it; the next play picks
-          // an online player.
-          activeDeviceId: undefined,
-        }),
+        writePlaybackControl(
+          ctx,
+          session,
+          {
+            playing: false,
+            positionMs: session.positionMs + Math.max(0, silentSince - session.updatedAt),
+            updatedAt: now,
+            activeDeviceId: undefined,
+          },
+          "transport",
+        ),
       ),
     );
   },

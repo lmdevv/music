@@ -30,7 +30,13 @@
  * finish the current song and reset the `MediaSource` for the next one, with a short gap.
  */
 import { delay, MAX_BUSY_RETRIES, retryAfterMs } from "./busy-retry";
-import type { EngineErrorReason, EngineEvent, EngineSource, PlayerEngine } from "./engine";
+import type {
+  EnginePlayback,
+  EngineErrorReason,
+  EngineEvent,
+  EngineSource,
+  PlayerEngine,
+} from "./engine";
 import { codecMimeType, concatBytes, HeaderRead, readHeader } from "./fmp4";
 import type { AudioCodec, StreamHeader } from "./fmp4";
 import {
@@ -215,6 +221,7 @@ interface Session {
   cancelled: boolean;
   /** The end of the timeline was reported (`ended`) since the last seek or `play`. */
   endReported: boolean;
+  loadingPlayback: boolean | null;
   wake: () => void;
 }
 
@@ -287,6 +294,14 @@ export class MseEngine implements PlayerEngine {
     this.#attach();
   }
 
+  /** Reads the current element and any seek target still landing. */
+  samplePlayback(): EnginePlayback {
+    return {
+      positionMs: this.#positionMs(),
+      playing: this.#session?.loadingPlayback ?? (this.#session !== null && !this.#element.paused),
+    };
+  }
+
   /** Starts a fresh timeline with `source` at `startMs`. Resolves once playback can begin. */
   async load(source: EngineSource, startMs: number, autoplay: boolean): Promise<void> {
     this.#cancelLoad?.();
@@ -306,6 +321,7 @@ export class MseEngine implements PlayerEngine {
       return;
     }
 
+    session.loadingPlayback = autoplay;
     const song = this.#song(source, startMs / 1000);
     session.songs.push(song);
 
@@ -318,7 +334,10 @@ export class MseEngine implements PlayerEngine {
     if (!ready || session !== this.#session) return;
     this.#emit({ type: "time", positionMs: startMs });
 
-    if (autoplay) await this.play();
+    const playing = session.loadingPlayback;
+    session.loadingPlayback = null;
+
+    if (playing) await this.play();
     else this.#emit({ type: "paused" });
   }
 
@@ -344,6 +363,8 @@ export class MseEngine implements PlayerEngine {
   /** Starts output. Emits `autoplay-blocked` when the browser wants a user gesture first. */
   async play(): Promise<void> {
     if (this.#session === null) return;
+
+    if (this.#session.loadingPlayback !== null) this.#session.loadingPlayback = true;
     // Playing again after the end (the element starts over) ends again.
     this.#session.endReported = false;
 
@@ -366,6 +387,8 @@ export class MseEngine implements PlayerEngine {
   }
 
   pause(): void {
+    if (this.#session !== null && this.#session.loadingPlayback !== null)
+      this.#session.loadingPlayback = false;
     this.#element.pause();
   }
 
@@ -388,8 +411,8 @@ export class MseEngine implements PlayerEngine {
       Math.max(placement.start, placement.end - BUFFERED_MARGIN),
     );
 
-    this.#emit({ type: "time", positionMs: Math.round((target - placement.start) * 1000) });
     session.target = target;
+    this.#emit({ type: "time", positionMs: Math.round((target - placement.start) * 1000) });
     session.endReported = false;
     // A queued song lies past the duration its appends have reached so far, and the element cuts
     // a seek beyond the duration short. When an append runs meanwhile, `#holdTarget` retries.
@@ -435,6 +458,7 @@ export class MseEngine implements PlayerEngine {
   }
 
   #fail(reason: EngineErrorReason, message: string): void {
+    if (this.#session !== null) this.#session.loadingPlayback = null;
     this.#stopTicker();
     this.#emit({ type: "error", reason, message });
   }
@@ -491,6 +515,7 @@ export class MseEngine implements PlayerEngine {
       aheadLimit: AHEAD_SECONDS,
       cancelled: false,
       endReported: false,
+      loadingPlayback: null,
       wake: () => undefined,
     };
 

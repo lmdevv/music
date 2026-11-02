@@ -538,7 +538,7 @@ export class SessionRouter implements SessionPort {
     const plays = local.plays.slice(0, PLAYS_PER_RECONCILE);
     const last = plays.length === local.plays.length;
 
-    const { adopted } = await this.#client.run("devices.reconcile", {
+    const { adopted, controlRevision } = await this.#client.run("devices.reconcile", {
       deviceId: this.#device.id,
       plays,
       resume: last ? offlineResume(local, this.#clock.now()) : null,
@@ -547,7 +547,7 @@ export class SessionRouter implements SessionPort {
     this.#dropHandedBack(plays);
 
     if (last && revision === this.#revision) {
-      this.#finishHandBack(adopted, local, offers);
+      this.#finishHandBack(adopted, local, offers, controlRevision);
 
       return;
     }
@@ -563,21 +563,22 @@ export class SessionRouter implements SessionPort {
     this.#setLocal({ ...local, plays: local.plays.filter((play) => !sent.has(play)) });
   }
 
-  /**
-   * The session runs on the server again. When the server kept its own, that shows now. When it
-   * took this device's back, its snapshot shows once one arrived after the hand-back with this
-   * device playing the same song; until then the player keeps showing the session it plays, so
-   * the engine sees no change.
-   */
-  #finishHandBack(adopted: boolean, handed: LocalSessionState, offersAtSend: number): void {
+  #finishHandBack(
+    adopted: boolean,
+    handed: LocalSessionState,
+    offersAtSend: number,
+    controlRevision: number | undefined,
+  ): void {
     const server = this.#server;
 
     const shows =
       server !== null &&
       (!adopted ||
-        (this.#offers > offersAtSend &&
-          server.activeDevice?.id === this.#device.id &&
-          server.queue[server.index]?.id === handed.items[handed.index]?.track.id));
+        (controlRevision !== undefined
+          ? (server.control?.revision ?? -1) >= controlRevision
+          : this.#offers > offersAtSend &&
+            server.activeDevice?.id === this.#device.id &&
+            server.queue[server.index]?.id === handed.items[handed.index]?.track.id));
 
     this.#local = null;
     this.#clearStored();

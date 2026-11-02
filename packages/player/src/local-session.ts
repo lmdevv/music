@@ -9,6 +9,7 @@ import { QueueItemId, TrackId } from "@music/commands/ids";
 import type { DeviceKind, OfflineResume, PlaybackState, QueueEntry } from "@music/commands/models";
 import {
   Contributor,
+  PlaybackControl,
   Millis,
   OfflinePlay,
   RepeatMode,
@@ -17,8 +18,11 @@ import {
 } from "@music/commands/models";
 import {
   MAX_QUEUE,
+  INITIAL_PLAYBACK_CONTROL,
   addedOrder,
   isNewPlay,
+  isCurrentReport,
+  nextPlaybackControl,
   isStaleReport,
   keptOrder,
   movedInOrder,
@@ -52,6 +56,7 @@ type LocalEntry = typeof LocalEntry.Type;
  * schema, so a row from an older or damaged store never reaches the player unparsed.
  */
 export const LocalSessionState = Schema.Struct({
+  control: Schema.optionalKey(PlaybackControl),
   items: Schema.Array(LocalEntry),
   index: Index,
   /** The entry IDs in their order before shuffle, while shuffle is on and the order is known. */
@@ -163,6 +168,7 @@ const isPlayable = (entry: LocalEntry | undefined, context: LocalContext): boole
 
 const movedTo = (state: LocalSessionState, index: number, now: number): LocalSessionState => ({
   ...state,
+  control: nextPlaybackControl(state.control, "restart"),
   index,
   positionMs: 0,
   updatedAt: now,
@@ -246,14 +252,28 @@ const localHandlers: LocalHandlers = {
 
   "playback.pause": (state, _args, context) =>
     step(
-      { ...state, positionMs: live(state, context.now), playing: false, updatedAt: context.now },
+      {
+        ...state,
+        control: nextPlaybackControl(state.control, "transport"),
+        positionMs: live(state, context.now),
+        playing: false,
+        updatedAt: context.now,
+      },
       ok,
     ),
 
   "playback.resume": (state, _args, context) =>
     state.items.length === 0
       ? Result.fail(LocalRefusal.Empty())
-      : step({ ...state, playing: true, updatedAt: context.now }, ok),
+      : step(
+          {
+            ...state,
+            control: nextPlaybackControl(state.control, "transport"),
+            playing: true,
+            updatedAt: context.now,
+          },
+          ok,
+        ),
 
   "playback.next": (state, _args, context) => {
     const index = nextPlayable(state, context);
@@ -268,7 +288,15 @@ const localHandlers: LocalHandlers = {
     step(movedTo(state, previousPlayable(state, context), context.now), ok),
 
   "playback.seek": (state, args, context) =>
-    step({ ...state, positionMs: args.positionMs, updatedAt: context.now }, ok),
+    step(
+      {
+        ...state,
+        control: nextPlaybackControl(state.control, "seek", undefined, args.appliedBy),
+        positionMs: args.positionMs,
+        updatedAt: context.now,
+      },
+      ok,
+    ),
 
   "playback.jump": (state, args, context) => {
     const index = state.items.findIndex((entry) => entry.id === args.itemId);
@@ -296,7 +324,11 @@ const localHandlers: LocalHandlers = {
     args.deviceId === context.device.id ? step(state, ok) : Result.fail(LocalRefusal.Offline()),
 
   "playback.report": (state, args, context) => {
-    if (args.deviceId !== context.device.id) return step(state, ok);
+    if (
+      args.deviceId !== context.device.id ||
+      !isCurrentReport(args.controlRevision, state.control)
+    )
+      return step(state, ok);
 
     const index =
       args.itemId === undefined
@@ -308,7 +340,8 @@ const localHandlers: LocalHandlers = {
     if (
       entry === undefined ||
       (args.trackId !== undefined && args.trackId !== entry.track.id) ||
-      isStaleReport(index, state.index, state.movedAt, context.now)
+      (args.controlRevision === undefined &&
+        isStaleReport(index, state.index, state.movedAt, context.now))
     ) {
       return step(state, ok);
     }
@@ -481,6 +514,7 @@ const entryOf = (entry: QueueEntry): LocalEntry => ({
  * clock reference. It plays only if it played on this device.
  */
 export const seedLocal = (server: PlaybackState, device: DeviceId): LocalSessionState => ({
+  control: server.control ?? INITIAL_PLAYBACK_CONTROL,
   items: server.queue.map(entryOf),
   index: server.index,
   // The server keeps its order before shuffle to itself; turning shuffle off here keeps the order.
@@ -503,6 +537,7 @@ export const seedLocal = (server: PlaybackState, device: DeviceId): LocalSession
 
 /** A device's own session with nothing queued, for a device with no session to resume. */
 export const emptyLocal = (now: number): LocalSessionState => ({
+  control: INITIAL_PLAYBACK_CONTROL,
   items: [],
   index: 0,
   unshuffled: undefined,
@@ -522,6 +557,7 @@ export const emptyLocal = (now: number): LocalSessionState => ({
 
 /** The session as the player shows it: playing on this device, never following anyone. */
 export const localView = (state: LocalSessionState, device: LocalDevice): PlaybackState => ({
+  control: state.control ?? INITIAL_PLAYBACK_CONTROL,
   activeDevice: {
     id: device.id,
     name: device.name,
@@ -554,6 +590,7 @@ export const localView = (state: LocalSessionState, device: LocalDevice): Playba
 export const offlineResume = (state: LocalSessionState, now: number): OfflineResume | null =>
   state.changed
     ? {
+        control: state.control ?? INITIAL_PLAYBACK_CONTROL,
         items: state.items.map((entry) => ({ trackId: entry.track.id, itemId: entry.id })),
         index: state.index,
         positionMs: Math.round(live(state, now)),

@@ -21,6 +21,7 @@ class FakeOutput implements AudioOutput {
   released = false;
   /** While set, each seek waits for the test to land it, as AVPlayer's lands a moment later. */
   holdSeeks = false;
+  reportSeeks = true;
   lockScreen: { readonly info: LockScreenInfo | null; readonly live: boolean } | null = null;
   readonly #listeners = new Set<(status: OutputStatus) => void>();
   readonly #heldSeeks: Array<{ readonly land: () => void; readonly refuse: () => void }> = [];
@@ -28,6 +29,11 @@ class FakeOutput implements AudioOutput {
   constructor(url: string) {
     this.url = url;
   }
+
+  samplePlayback = (): Pick<OutputStatus, "positionMs" | "control"> => ({
+    positionMs: this.positionMs,
+    control: this.wantsPlay ? (this.loaded ? "playing" : "waiting") : "paused",
+  });
 
   play = (): void => {
     this.wantsPlay = true;
@@ -47,7 +53,8 @@ class FakeOutput implements AudioOutput {
     }
 
     if (!this.live) this.positionMs = positionMs;
-    this.#report();
+
+    if (this.reportSeeks) this.#report();
   };
 
   setVolume = (): void => {};
@@ -83,6 +90,7 @@ class FakeOutput implements AudioOutput {
   /** The stream played to its end. Like expo-audio, a live stream reports its end at 0. */
   finish(): void {
     this.wantsPlay = false;
+    this.positionMs = this.live ? 0 : this.durationMs;
     this.#report({ finished: true, positionMs: this.live ? 0 : this.durationMs });
   }
 
@@ -112,6 +120,10 @@ class FakeOutput implements AudioOutput {
   reportEndLate(): void {
     this.wantsPlay = false;
     this.#report({ finished: true });
+  }
+
+  notifyPlayingLate(): void {
+    this.#report({ control: "playing", positionMs: 0 });
   }
 
   fail(message: string): void {
@@ -243,6 +255,47 @@ const lastTime = (events: ReadonlyArray<EngineEvent>): number | null =>
 describe("NativeEngine", () => {
   afterEach(() => {
     for (const cleanup of cleanups.splice(0)) cleanup();
+  });
+
+  it("keeps the requested position visible while a live load reopens", async () => {
+    const { engine, media, output, outputs } = await setup();
+    const positions: Array<number> = [];
+    engine.subscribe((event) => {
+      if (event.type === "time") positions.push(engine.samplePlayback().positionMs);
+    });
+    const loaded = engine.load(media.source("a"), 90_000, false);
+    output(0).ready(true);
+    await vi.waitFor(() => expect(outputs).toHaveLength(2));
+
+    expect(positions[0]).toBe(90_000);
+    expect(engine.samplePlayback().positionMs).toBe(90_000);
+    output(1).ready(true);
+    await loaded;
+  });
+
+  it("samples a completed load-time seek before its status callback arrives", async () => {
+    const { engine, media, output } = await setup();
+    const loaded = engine.load(media.source("a"), 90_000, false);
+    output(0).reportSeeks = false;
+    output(0).ready(false);
+    await loaded;
+
+    expect(engine.samplePlayback()).toEqual({ positionMs: 90_000, playing: false });
+  });
+
+  it("reads current native output when an old playing status arrives after pause", async () => {
+    const { engine, media, output, events } = await setup();
+    const loaded = engine.load(media.source("a"), 0, true);
+    output(0).ready(false);
+    await loaded;
+    output(0).advance(5000);
+    engine.pause();
+    const before = events.length;
+
+    output(0).notifyPlayingLate();
+
+    expect(types(events.slice(before))).not.toContain("playing");
+    expect(lastTime(events)).toBe(5000);
   });
 
   it("starts a song from the top before its stream opens and reports it playing", async () => {

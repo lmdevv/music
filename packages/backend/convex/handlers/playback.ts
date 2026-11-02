@@ -6,8 +6,10 @@ import type {
 } from "@music/commands/models";
 import {
   MAX_QUEUE,
+  INITIAL_PLAYBACK_CONTROL,
   addedOrder,
   isNewPlay,
+  isCurrentReport,
   isStaleReport,
   keptOrder,
   movedInOrder,
@@ -25,7 +27,7 @@ import { autoplaySongs } from "../lib/autoplay";
 import { DEVICE_LISTED_MS, DEVICE_LIST_LIMIT, listedDevices } from "../lib/devices";
 import { fail } from "../lib/errors";
 import { tableId } from "../lib/ids";
-import { ensureSession, findSession, livePosition } from "../lib/playback";
+import { ensureSession, findSession, livePosition, writePlaybackControl } from "../lib/playback";
 import { DEVICE_ONLINE_MS, makeContributors, makePresenter, presentDevice } from "../lib/present";
 import {
   itemPosition,
@@ -280,7 +282,12 @@ export const refreshJamAutoplay = async (ctx: MutationCtx, host: Viewer): Promis
 
   if (next === -1) {
     if (session !== null)
-      await ctx.db.patch(session._id, { playing: false, updatedAt: Date.now() });
+      await writePlaybackControl(
+        ctx,
+        session,
+        { playing: false, updatedAt: Date.now() },
+        "transport",
+      );
 
     return;
   }
@@ -329,6 +336,7 @@ const positionFor = async (
       updatedAt: 0,
       volume: 1,
       following: false,
+      control: INITIAL_PLAYBACK_CONTROL,
     };
   }
 
@@ -343,6 +351,7 @@ const positionFor = async (
 
   return {
     activeDevice: device === null ? null : presentDevice(device, Date.now()),
+    control: session.control ?? INITIAL_PLAYBACK_CONTROL,
     positionMs: session.positionMs,
     playing: session.playing,
     updatedAt: session.updatedAt,
@@ -469,7 +478,12 @@ const restartSession = async (
 ): Promise<void> => {
   const now = Date.now();
 
-  await ctx.db.patch(session._id, { positionMs: 0, updatedAt: now, movedAt: now, ...fields });
+  await writePlaybackControl(
+    ctx,
+    session,
+    { positionMs: 0, updatedAt: now, movedAt: now, ...fields },
+    "restart",
+  );
 };
 
 /**
@@ -725,11 +739,16 @@ export const playbackMutations = {
 
     const session = await ensureSession(ctx, viewer.id);
     const now = Date.now();
-    await ctx.db.patch(session._id, {
-      positionMs: livePosition(session, now),
-      playing: false,
-      updatedAt: now,
-    });
+    await writePlaybackControl(
+      ctx,
+      session,
+      {
+        positionMs: livePosition(session, now),
+        playing: false,
+        updatedAt: now,
+      },
+      "transport",
+    );
 
     return ok;
   },
@@ -747,7 +766,12 @@ export const playbackMutations = {
     await saveQueue(ctx, viewer.id, queue);
     await requestPlayingLyrics(ctx, queue);
     const activeDeviceId = await defaultDevice(ctx, viewer, session);
-    await ctx.db.patch(session._id, { playing: true, updatedAt: Date.now(), activeDeviceId });
+    await writePlaybackControl(
+      ctx,
+      session,
+      { playing: true, updatedAt: Date.now(), activeDeviceId },
+      "transport",
+    );
 
     return ok;
   },
@@ -819,7 +843,14 @@ export const playbackMutations = {
     const viewer = playback.owner;
 
     const session = await ensureSession(ctx, viewer.id);
-    await ctx.db.patch(session._id, { positionMs: args.positionMs, updatedAt: Date.now() });
+    await writePlaybackControl(
+      ctx,
+      session,
+      { positionMs: args.positionMs, updatedAt: Date.now() },
+      "seek",
+      undefined,
+      args.appliedBy,
+    );
 
     return ok;
   },
@@ -905,12 +936,19 @@ export const playbackMutations = {
     }
 
     const session = await ensureSession(ctx, viewer.id);
+
+    if (session.activeDeviceId === device.deviceId) return ok;
     const now = Date.now();
-    await ctx.db.patch(session._id, {
-      activeDeviceId: device.deviceId,
-      positionMs: livePosition(session, now),
-      updatedAt: now,
-    });
+    await writePlaybackControl(
+      ctx,
+      session,
+      {
+        activeDeviceId: device.deviceId,
+        positionMs: livePosition(session, now),
+        updatedAt: now,
+      },
+      "restart",
+    );
 
     return ok;
   },
@@ -920,7 +958,11 @@ export const playbackMutations = {
     if ((await resolvePlayback(ctx, viewer)).kind === "member") return ok;
     const session = await ensureSession(ctx, viewer.id);
 
-    if (session.activeDeviceId !== args.deviceId) return ok;
+    if (
+      session.activeDeviceId !== args.deviceId ||
+      !isCurrentReport(args.controlRevision, session.control)
+    )
+      return ok;
 
     const located = await locateReport(ctx, viewer, args.index, {
       trackId: args.trackId,
@@ -931,7 +973,11 @@ export const playbackMutations = {
     const { queue, index, track } = located;
     const now = Date.now();
 
-    if (isStaleReport(index, queue.index, session.movedAt ?? null, now)) return ok;
+    if (
+      args.controlRevision === undefined &&
+      isStaleReport(index, queue.index, session.movedAt ?? null, now)
+    )
+      return ok;
 
     const newPlay = isNewPlay(
       { trackId: track._id, positionMs: args.positionMs, playing: args.playing },
@@ -1166,12 +1212,22 @@ export const playbackMutations = {
 
     // When another device took over meanwhile, a paused device leaves playback there; a playing
     // one takes it back.
-    if (session.activeDeviceId !== args.deviceId && !resume.playing) return { adopted: false };
+    if (session.activeDeviceId !== args.deviceId && !resume.playing) {
+      await writePlaybackControl(ctx, session, {}, "fence", resume.control);
+
+      return { adopted: false };
+    }
+
     const stored = await storedQueue(ctx, viewer.id);
     const resumed = await resumedQueue(ctx, viewer, stored, resume);
 
     // A queue none of whose songs can play here is not handed back; one emptied there is.
-    if (resumed.items.length === 0 && resume.items.length > 0) return { adopted: false };
+    if (resumed.items.length === 0 && resume.items.length > 0) {
+      await writePlaybackControl(ctx, session, {}, "fence", resume.control);
+
+      return { adopted: false };
+    }
+
     const order = playOrder(resumed.items, resumed.index, false, Math.random);
 
     // While shuffled, the entries the server knew keep their order from before shuffle.
@@ -1195,15 +1251,21 @@ export const playbackMutations = {
 
     const now = Date.now();
 
-    await ctx.db.patch(session._id, {
-      activeDeviceId: args.deviceId,
-      positionMs: resumed.current ? resume.positionMs : 0,
-      playing: resume.playing && order.items.length > 0,
-      volume: resume.volume,
-      updatedAt: now,
-      movedAt: now,
-    });
+    const control = await writePlaybackControl(
+      ctx,
+      session,
+      {
+        activeDeviceId: args.deviceId,
+        positionMs: resumed.current ? resume.positionMs : 0,
+        playing: resume.playing && order.items.length > 0,
+        volume: resume.volume,
+        updatedAt: now,
+        movedAt: now,
+      },
+      "reconcile",
+      resume.control,
+    );
 
-    return { adopted: true };
+    return { adopted: true, controlRevision: control.revision };
   },
 } satisfies Partial<MutationHandlers>;
