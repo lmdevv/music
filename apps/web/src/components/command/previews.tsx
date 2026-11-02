@@ -117,7 +117,7 @@ function NowPreview({
   const position = usePlayerPosition();
   const ui = useUi();
   const playing = player.status === "playing";
-  const upNext = player.queue.slice(player.index + 1, player.index + 4);
+  const upNext = player.queue.slice(player.index + 1, player.index + 3);
 
   return (
     <PreviewFrame onBack={onBack}>
@@ -135,11 +135,19 @@ function NowPreview({
         </div>
       </div>
       {upNext.length === 0 ? null : (
-        <div className="flex flex-col gap-1.5">
-          <span className="font-sans text-xs/xs font-semibold text-text-muted">Up next</span>
-          <span className="font-sans text-sm/xs text-text">
-            {upNext.map((next) => next.title).join(" · ")}
-          </span>
+        <div className="flex flex-col">
+          <span className="pb-1.5 font-sans text-xs/xs font-semibold text-text-muted">Up next</span>
+          {upNext.map((next) => (
+            <div
+              key={next.itemId}
+              className="flex h-7.5 items-center gap-2.5 border-t border-border"
+            >
+              <span className="grow truncate font-sans text-sm/xs text-text">{next.title}</span>
+              <span className="max-w-1/2 shrink-0 truncate font-sans text-sm/xs text-text-muted">
+                {next.artist}
+              </span>
+            </div>
+          ))}
         </div>
       )}
       <PreviewActions
@@ -190,7 +198,13 @@ function AlbumPreview({
 
   return (
     <PreviewFrame onBack={onBack}>
-      <button type="button" onClick={open} className="w-fit" aria-label={`Open ${album.title}`}>
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={open}
+        className="w-fit"
+        aria-label={`Open ${album.title}`}
+      >
         <Artwork url={album.artUrl} seed={album.id} className={previewArt} />
       </button>
       <PreviewTitle

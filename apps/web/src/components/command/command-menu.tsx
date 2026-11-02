@@ -218,7 +218,13 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
           onKeyDown={onKeyDown}
           className="h-full min-w-0 grow bg-transparent font-sans text-lg/md text-text outline-none placeholder:text-text-muted"
         />
-        <button type="button" onClick={onClose} className="shrink-0" aria-label="Close">
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={onClose}
+          className="shrink-0"
+          aria-label="Close"
+        >
           <Kbd>ESC</Kbd>
         </button>
       </div>
@@ -241,6 +247,7 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
             ref={list}
             id="command-list"
             role="listbox"
+            tabIndex={-1}
             aria-label="Results and commands"
             className={cn(
               "flex w-full shrink-0 flex-col gap-px overflow-y-auto p-2 lg:w-90 lg:border-r lg:border-border",
