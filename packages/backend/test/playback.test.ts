@@ -692,6 +692,32 @@ describe("controls delivered before older telemetry", () => {
     expect(await history(admin)).toEqual([next.id]);
   });
 
+  it("keeps a natural advance when another connection delivers an older stamped report", async () => {
+    const { admin, rock } = await setup();
+    await admin.music.run("playback.play", { trackIds: rock, deviceId: DEVICE });
+    const held = await captureReport(admin, 100, true);
+    const next = (await admin.music.read("playback.state", {})).queue[1];
+
+    if (next === undefined) throw new Error("No next entry");
+
+    await admin.music.run("playback.report", {
+      ...held,
+      index: 1,
+      trackId: next.id,
+      itemId: next.itemId,
+      positionMs: 145,
+    });
+    await admin.music.run("playback.report", held);
+
+    expect(await admin.music.read("playback.state", {})).toMatchObject({
+      index: 1,
+      positionMs: 145,
+    });
+    await admin.music.run("playback.report", await captureReport(admin, 400, true));
+    expect((await admin.music.read("playback.position", {})).positionMs).toBe(400);
+    expect(await history(admin)).toEqual([next.id]);
+  });
+
   it("keeps a stamped report valid when another queue entry is removed", async () => {
     const { admin, rock } = await setup();
     await admin.music.run("playback.play", { trackIds: rock, deviceId: DEVICE });

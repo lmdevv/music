@@ -328,7 +328,7 @@ describe("handing the session back", () => {
           deviceId: "phone",
           plays: [{ trackId: "b", playedAt: 1_010_000 }],
           resume: {
-            control: { revision: 0, seek: 0, transport: 0 },
+            control: { revision: 1, seek: 0, transport: 0 },
             items: [
               { trackId: "a", itemId: "1" },
               { trackId: "b", itemId: "2" },

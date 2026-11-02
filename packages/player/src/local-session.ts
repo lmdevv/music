@@ -344,20 +344,21 @@ const localHandlers: LocalHandlers = {
       entry.track.durationMs,
     );
 
-    return step(
-      {
-        ...state,
-        index,
-        positionMs: args.positionMs,
-        playing: args.playing,
-        updatedAt: context.now,
-        reportedTrackId: newPlay ? entry.track.id : state.reportedTrackId,
-        plays: newPlay
-          ? [...state.plays, { trackId: entry.track.id, playedAt: context.now }]
-          : state.plays,
-      },
-      ok,
-    );
+    const measured = {
+      ...state,
+      index,
+      positionMs: args.positionMs,
+      playing: args.playing,
+      updatedAt: context.now,
+      reportedTrackId: newPlay ? entry.track.id : state.reportedTrackId,
+      plays: newPlay
+        ? [...state.plays, { trackId: entry.track.id, playedAt: context.now }]
+        : state.plays,
+    };
+
+    if (index !== state.index) measured.control = nextPlaybackControl(state.control, "fence");
+
+    return step(measured, ok);
   },
 
   "queue.add": (state, args, context) => {

@@ -63,6 +63,33 @@ const session = fc
   );
 
 describe("local control ordering", () => {
+  it("keeps a natural advance when an older stamped report arrives afterward", () => {
+    const context = contextOf(["a", "b"]);
+    const initial = seedLocal(server(["a", "b"]), phone.id);
+    const held = { ...report(initial, 0, 100), controlRevision: 0 };
+
+    const advanced = run(
+      "playback.report",
+      initial,
+      { ...report(initial, 1, 145), controlRevision: 0 },
+      context,
+    );
+
+    const afterOld = run("playback.report", advanced, held, context);
+
+    expect(afterOld).toMatchObject({ index: 1, positionMs: 145 });
+
+    const fresh = run(
+      "playback.report",
+      afterOld,
+      { ...report(afterOld, 1, 400), controlRevision: afterOld.control?.revision ?? 0 },
+      context,
+    );
+
+    expect(fresh).toMatchObject({ index: 1, positionMs: 400 });
+    expect(fresh.plays).toEqual([{ trackId: TrackId.make("b"), playedAt: context.now }]);
+  });
+
   it("fences a delayed report after a local pause and seek, then accepts a fresh sample", () => {
     const context = contextOf(["a"]);
     const initial = seedLocal(server(["a"]), phone.id);

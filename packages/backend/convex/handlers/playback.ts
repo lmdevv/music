@@ -881,11 +881,14 @@ export const playbackMutations = {
       track.durationMs,
     );
 
-    await ctx.db.patch(session._id, {
+    const fields = {
       positionMs: args.positionMs,
       playing: args.playing,
       updatedAt: now,
-    });
+    };
+
+    if (index === queue.index) await ctx.db.patch(session._id, fields);
+    else await writePlaybackControl(ctx, session, fields, "fence");
 
     const moved = {
       ...queue,
