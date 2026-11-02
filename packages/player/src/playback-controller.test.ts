@@ -20,7 +20,6 @@ const deviceId = DeviceId.make("this-browser");
 
 const SIX_HOURS = 6 * 60 * 60 * 1000;
 
-/** A queue entry for the track `id`, at queue item `itemId`. */
 const entry = (id: string, itemId: string): QueueEntry => ({
   itemId: QueueItemId.make(itemId),
   addedBy: null,
@@ -45,7 +44,6 @@ const entry = (id: string, itemId: string): QueueEntry => ({
 
 const song = entry("song", "1");
 
-/** The session fields some tests set; the rest stay as `session` makes them. */
 type SessionFields = Partial<
   Pick<PlaybackState, "activeDevice" | "queue" | "index" | "positionMs" | "control">
 >;
@@ -75,14 +73,12 @@ interface Mutation {
   readonly args: unknown;
 }
 
-/** One `load` an engine received. */
 interface Load {
   readonly kind: EngineKind;
   readonly url: string;
   readonly startMs: number;
 }
 
-/** What the test engines did, across every engine the controller created. */
 interface EngineRecord {
   readonly created: Array<EngineKind>;
   readonly loads: Array<Load>;
@@ -90,10 +86,6 @@ interface EngineRecord {
   readonly seeks: Array<number>;
 }
 
-/**
- * An engine that reports `playing` and `paused` as soon as it is told to play or pause, and
- * records its loads in `record`. `emit` stands in for what the browser or the OS cause.
- */
 const instantEngine = (
   kind: EngineKind,
   record: EngineRecord,
@@ -163,10 +155,6 @@ const decodeStreamArgs = Schema.decodeUnknownSync(
 
 const decodeProfile = Schema.decodeUnknownSync(StreamProfile);
 
-/**
- * A local media service: `/media/health` answers 200, and every stream URL answers
- * `streamStatus` (a `403` is a refused signature).
- */
 const fakeMediaService = async () => {
   const state = { streamStatus: 200 };
 
@@ -189,11 +177,6 @@ const fakeMediaService = async () => {
   };
 };
 
-/**
- * A Convex transport that records every mutation and answers like the server: a `stream.url`
- * is a URL on `base` signed for `ttlMs` (six hours, or minutes for a Jam member) from `now()`,
- * and the same arguments again get the same answer, as Convex's query cache gives them.
- */
 const recordingTransport = (
   mutations: Array<Mutation>,
   base: string,
@@ -228,14 +211,9 @@ const recordingTransport = (
 const reports = (mutations: ReadonlyArray<Mutation>): ReadonlyArray<unknown> =>
   mutations.flatMap(({ name, args }) => (name === "playback.report" ? [args] : []));
 
-/** The profile a stream URL asks for. */
 const profileOf = (url: string | undefined): StreamProfile | null =>
   url === undefined ? null : decodeProfile(new URL(url).searchParams.get("p"));
 
-/**
- * The host seams of a controller with no system media controls: `foreground()` runs what the
- * controller registered for the app's return to the foreground.
- */
 const testHost = (
   resolveUrl: (url: string) => string = (url) => url,
 ): Pick<ControllerEnvironment, "nowPlaying" | "onForeground"> & {
@@ -256,21 +234,16 @@ const testHost = (
   };
 };
 
-/** A started controller on a recording transport and instant engines, with a settable clock. */
 const setup = async (options: {
   readonly gapless: boolean;
   readonly loadReady?: () => Promise<void>;
   readonly quality?: StreamQuality;
-  /** How far the server's clock is ahead of this device's. */
   readonly serverAheadMs?: number;
-  /** How long the server's stream URLs last. */
   readonly ttlMs?: number;
-  /** How the host turns a signed stream URL into the one it fetches. */
   readonly resolveUrl?: (url: string) => string;
 }) => {
   const media = await fakeMediaService();
   const mutations: Array<Mutation> = [];
-  /** `now` is the wall clock; `monotonic` the clock the live position runs on. */
   const clock = { now: 1_000_000, monotonic: 0 };
   const record: EngineRecord = { created: [], loads: [], plays: 0, seeks: [] };
   const engines: Array<ReturnType<typeof instantEngine>> = [];
@@ -319,7 +292,6 @@ const setup = async (options: {
     clock,
     record,
     foreground: host.foreground,
-    /** The engine in use now. */
     engine: () => {
       const engine = engines.at(-1);
 
@@ -608,7 +580,6 @@ describe("PlaybackController", () => {
     await vi.waitFor(() => expect(controller.getSnapshot().engineStatus).toBe("playing"));
     const before = reports(mutations).length;
 
-    // A stale snapshot from an earlier Pause arrives after the user pressed Play again.
     controller.sync(session(false, 2));
 
     expect(controller.getSnapshot().engineStatus).toBe("paused");
@@ -624,7 +595,6 @@ describe("PlaybackController", () => {
     controller.sync(following);
     await vi.waitFor(() => expect(controller.getSnapshot().engineStatus).toBe("playing"));
 
-    // The song ends here first: the host's device moves the queue on, this one waits for it.
     engine().emit({ type: "ended" });
     engine().emit({ type: "paused" });
     await Promise.resolve();
@@ -640,7 +610,6 @@ describe("PlaybackController", () => {
   it("listening along, starts at the live position when the host reported a while ago", async () => {
     const { controller, clock, record, stop } = await setup({ gapless: false });
 
-    // The host's last report is 14 seconds old: they have played on since.
     controller.sync(session(true, clock.now - 14_000, true));
     await vi.waitFor(() => expect(record.loads).toHaveLength(1));
 
@@ -692,7 +661,6 @@ describe("PlaybackController", () => {
 
     await controller.togglePlay();
 
-    // The engine paused at once, then plays on with the host.
     expect(controller.getSnapshot().engineStatus).toBe("playing");
     expect(record.plays).toBe(plays + 1);
     stop();
@@ -706,7 +674,6 @@ describe("PlaybackController", () => {
     await controller.togglePlay();
     expect(controller.getSnapshot().engineStatus).toBe("playing");
 
-    // The session still says paused: the snapshot with the Play has not arrived yet.
     engine().emit({ type: "paused" });
 
     await vi.waitFor(() => expect(reports(mutations).at(-1)).toMatchObject({ playing: false }));
@@ -784,7 +751,6 @@ describe("PlaybackController", () => {
     await vi.waitFor(() => expect(record.loads).toHaveLength(1));
     expect(profileOf(record.loads[0]?.url)).toBe("original");
 
-    // The HTML engine only sees an unplayable source; the media service says why.
     media.state.streamStatus = 403;
     clock.now += 60_000;
     engine().emit({ type: "error", reason: "unsupported", message: "Format error" });
@@ -822,7 +788,6 @@ describe("PlaybackController", () => {
     await controller.togglePlay();
     await controller.togglePlay();
 
-    // Every URL looks expired on this clock; only a refusal can tell, so playback resumes.
     expect(record.plays).toBe(1);
     expect(record.loads).toHaveLength(1);
     stop();
@@ -900,13 +865,11 @@ describe("PlaybackController", () => {
     await vi.waitFor(() => expect(record.loads).toHaveLength(1));
     await controller.togglePlay();
 
-    // Two minutes in, the URL is good: resuming plays on.
     clock.now += 2 * 60_000;
     await controller.togglePlay();
     expect(record.loads).toHaveLength(1);
     await controller.togglePlay();
 
-    // Past halfway, it is signed again before it is used.
     clock.now += 60_000;
     await controller.togglePlay();
     await vi.waitFor(() => expect(record.loads).toHaveLength(2));
@@ -916,7 +879,6 @@ describe("PlaybackController", () => {
 
   it("reports an error instead of signing again when a fresh URL is refused too", async () => {
     const { controller, engine, record, stop } = await setup({ gapless: true });
-    // Paused, so nothing plays in between: a song that played since may be signed again.
     controller.sync(session(false, 1));
     await vi.waitFor(() => expect(record.loads).toHaveLength(1));
 
@@ -962,7 +924,6 @@ describe("PlaybackController", () => {
   });
 });
 
-/** A started controller playing `song` on this browser, the engine at `atMs`. */
 const playingAt = async (atMs: number) => {
   const harness = await setup({ gapless: false });
 

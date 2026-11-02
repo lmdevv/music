@@ -264,7 +264,6 @@ describe("a command the server doesn't answer", () => {
     server.release();
     await vi.waitFor(() => expect(router.mode()).toBe("server"));
 
-    // The server runs the old commands first; the hand-back after them carries the new seek.
     expect(server.names()).toEqual(["playback.seek", "playback.transfer", "devices.reconcile"]);
     expect(server.ran[2]?.args).toMatchObject({ resume: { positionMs: 60_000 } });
   });
@@ -442,7 +441,6 @@ describe("handing the session back", () => {
     server.release();
     await vi.waitFor(() => expect(router.mode()).toBe("server"));
 
-    // Nothing ran here when the first went out, so it handed back only plays.
     expect(server.ran.map(({ args }) => args)).toMatchObject([
       { resume: null },
       { resume: { index: 1 } },
@@ -459,7 +457,6 @@ describe("handing the session back", () => {
     server.setConnected(true);
     await settle();
 
-    // Convex shows a mutation's effect before it answers the mutation.
     const adopted = sessionOf(["a", "b", "c"], { index: 1 });
 
     router.offerServer(adopted);

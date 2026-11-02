@@ -1,9 +1,3 @@
-/**
- * A device's own playback session, for while it can't reach the server: the same queue and the
- * same rules (`@music/commands/queue-rules`) as the server's session, applied on this device to
- * the songs it holds copies of. Pure: each command is one step from a state to the next, which
- * the session router persists and later hands back to the server whole (`devices.reconcile`).
- */
 import type { DeviceId } from "@music/commands/ids";
 import { QueueItemId, TrackId } from "@music/commands/ids";
 import type { DeviceKind, OfflineResume, PlaybackState, QueueEntry } from "@music/commands/models";
@@ -187,7 +181,6 @@ const newEntries = (
     track: { ...track, liked: false },
   }));
 
-/** Songs without a copy drop out, as the server drops songs whose file is missing. */
 const playableSongs = (trackIds: ReadonlyArray<TrackId>, index: number, context: LocalContext) => {
   const found = trackIds.map((trackId) => context.playable(trackId));
   const tracks = found.filter((track) => track !== null);
@@ -278,7 +271,6 @@ const localHandlers: LocalHandlers = {
   "playback.next": (state, _args, context) => {
     const index = nextPlayable(state, context);
 
-    // Autoplay needs the server, so a queue that runs out here stops.
     return index === null
       ? step({ ...movedTo(state, state.index, context.now), playing: false }, ok)
       : step(movedTo(state, index, context.now), ok);
@@ -494,7 +486,6 @@ export const stepLocal = <Name extends SessionMutation>(
   }));
 };
 
-/** The number in an entry ID made here (`local-<n>`), or 0 for any other ID. */
 const localNumber = (itemId: string): number => {
   const match = /^local-(\d+)$/.exec(itemId);
 
@@ -517,7 +508,6 @@ export const seedLocal = (server: PlaybackState, device: DeviceId): LocalSession
   control: server.control ?? INITIAL_PLAYBACK_CONTROL,
   items: server.queue.map(entryOf),
   index: server.index,
-  // The server keeps its order before shuffle to itself; turning shuffle off here keeps the order.
   unshuffled: undefined,
   shuffle: server.shuffle,
   repeat: server.repeat,
@@ -526,9 +516,7 @@ export const seedLocal = (server: PlaybackState, device: DeviceId): LocalSession
   updatedAt: server.updatedAt,
   playing: server.activeDevice?.id === device && server.playing,
   volume: server.volume,
-  // The view may already hold entries made here, if the session left the server again quickly.
   nextItem: 1 + Math.max(0, ...server.queue.map((entry) => localNumber(entry.itemId))),
-  // The server counted the current song when it started; counting it again would double it.
   reportedTrackId: server.queue[server.index]?.id ?? null,
   movedAt: null,
   changed: false,

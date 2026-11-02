@@ -77,10 +77,6 @@ const NoArgs = Schema.Struct({});
 
 const Ok = Schema.Struct({ ok: Schema.Literal(true) });
 
-/**
- * A library folder, as an absolute path on the server. Unlike a name it can't be cleaned (that
- * would name another folder), so one with a control character is refused, without repeating it.
- */
 const FolderPath = Schema.String.check(
   Schema.makeFilter(
     (path: string) =>
@@ -94,7 +90,6 @@ const TrackIds = Schema.Array(TrackId).check(Schema.isMinLength(1), Schema.isMax
 
 const QueueIndex = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
-/** A Jam's link code, or the whole link (`https://…/jam/<code>`); the server takes the code. */
 const JamCode = Schema.Trimmed.check(Schema.isMinLength(1), Schema.isMaxLength(500));
 
 /**
@@ -102,7 +97,6 @@ const JamCode = Schema.Trimmed.check(Schema.isMinLength(1), Schema.isMaxLength(5
  * read this registry, so an action added here exists everywhere.
  */
 export const commands = {
-  // Library
   "library.home": command({
     summary:
       "Recently added and recently played albums, recently played artists, and library totals",
@@ -171,7 +165,6 @@ export const commands = {
     result: SearchResults,
   }),
 
-  // Playback
   "playback.state": command({
     summary: "Show what is playing, where, and the queue",
     group: "playback",
@@ -323,7 +316,6 @@ export const commands = {
     result: Ok,
   }),
 
-  // Queue
   "queue.list": command({
     summary: "Show the queue, the current song's index, shuffle, and repeat",
     group: "queue",
@@ -341,7 +333,6 @@ export const commands = {
     access: "user",
     job: false,
     args: Schema.Struct({ trackIds: TrackIds, next: Schema.optionalKey(Schema.Boolean) }),
-    // `ok` stays for clients from before entries had IDs, which read `{ ok: true }`.
     result: Schema.Struct({ ok: Schema.Literal(true), itemIds: Schema.Array(QueueItemId) }),
   }),
   "queue.remove": command({
@@ -383,7 +374,6 @@ export const commands = {
     result: Ok,
   }),
 
-  // Devices
   "devices.list": command({
     summary: "List devices seen in the last day and the one playing",
     group: "devices",
@@ -423,7 +413,6 @@ export const commands = {
     }),
   }),
 
-  // Downloads
   "downloads.list": command({
     summary: "List the albums, playlists, and songs each of your devices keeps downloaded",
     group: "downloads",
@@ -478,13 +467,11 @@ export const commands = {
     access: "user",
     job: false,
     args: Schema.Struct({
-      // Mutable, as Convex takes the arguments of a query it subscribes to.
       held: Schema.mutable(Schema.Array(HeldLyrics)).check(Schema.isMaxLength(HELD_LYRICS_LIMIT)),
     }),
     result: Schema.Array(LyricsChange),
   }),
 
-  // Likes and history
   "likes.list": command({
     summary: "List up to 1,000 liked songs, newest first (likes.page reads them all)",
     group: "likes",
@@ -524,7 +511,6 @@ export const commands = {
     result: Schema.Array(HistoryEntry),
   }),
 
-  // Playlists
   "playlists.list": command({
     summary: "List your playlists",
     group: "playlists",
@@ -672,7 +658,6 @@ export const commands = {
     result: Ok,
   }),
 
-  // Links
   "links.get": command({
     summary:
       "Get a link to an album, artist, playlist, or song you can open (a song opens its album)",
@@ -684,7 +669,6 @@ export const commands = {
     result: ShareLink,
   }),
 
-  // Streaming
   "stream.url": command({
     summary: "Get a signed stream URL for a song",
     group: "playback",
@@ -715,7 +699,6 @@ export const commands = {
     result: TrackLyrics,
   }),
 
-  // Libraries and jobs (admin)
   "libraries.list": command({
     summary: "List library folders you can see",
     group: "libraries",
@@ -826,7 +809,6 @@ export const commands = {
     result: Ok,
   }),
 
-  // Account, keys, and people
   "account.me": command({
     summary: "Show the signed-in user",
     group: "account",
@@ -976,7 +958,6 @@ export const commands = {
     result: Ok,
   }),
 
-  // Server settings
   "server.settings": command({
     summary:
       "Show server settings: whether Jam links can create guest accounts and whether lyrics are looked up on LRCLIB",
@@ -1011,7 +992,6 @@ export const commands = {
     result: Schema.Struct({ libraries: Schema.Int }),
   }),
 
-  // Jams
   "jam.start": command({
     summary: "Start a Jam from your playback: people who open its link share your queue and player",
     group: "jams",
