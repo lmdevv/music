@@ -4,7 +4,7 @@ import { Schema } from "effect";
 import { HeartIcon } from "lucide-react";
 import { describe, expect, it } from "vitest";
 
-import { browseItems, groupOf, primaryLabel, searchItems, titleOf } from "./items";
+import { browseItems, groupOf, searchItems, titleOf } from "./items";
 import type { Item } from "./items";
 
 const track = (id: string, title: string): Track =>
@@ -84,8 +84,8 @@ describe("groupOf", () => {
   });
 });
 
-describe("titleOf and primaryLabel", () => {
-  it("names each kind of row and what Enter does to it", () => {
+describe("titleOf", () => {
+  it("names each kind of row", () => {
     const song = track("t1", "Sinnerman");
 
     expect(titleOf({ kind: "now", id: "now", section: "Now playing", track: song })).toBe(
@@ -94,12 +94,7 @@ describe("titleOf and primaryLabel", () => {
     expect(titleOf({ kind: "artist", id: "ar", section: "", artist: artist("ar1", "Nina") })).toBe(
       "Nina",
     );
-    expect(primaryLabel({ kind: "now", id: "now", section: "", track: song }, true)).toBe("Pause");
-    expect(primaryLabel({ kind: "now", id: "now", section: "", track: song }, false)).toBe(
-      "Resume",
-    );
-    expect(primaryLabel(command("playlists.create"), false)).toBe("Run");
-    expect(primaryLabel(action("a", "Shuffle liked songs", ""), false)).toBe("Open");
+    expect(titleOf(action("a", "Shuffle liked songs", ""))).toBe("Shuffle liked songs");
   });
 });
 

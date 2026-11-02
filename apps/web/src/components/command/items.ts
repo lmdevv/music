@@ -119,32 +119,6 @@ const score = (item: Item, query: string): number => {
 };
 
 /**
- * What Enter does to the row, as the footer names it.
- *
- * @param playing - Whether something is playing now, which turns "Resume" into "Pause".
- */
-export const primaryLabel = (item: Item, playing: boolean): string => {
-  switch (item.kind) {
-    case "now":
-      return playing ? "Pause" : "Resume";
-    case "album":
-      return "Play album";
-    case "artist":
-      return "Play artist";
-    case "track":
-      return "Play";
-    case "playlist":
-      return "Open playlist";
-    case "command":
-      return "Run";
-    case "action":
-      return item.label;
-    default:
-      return "Open";
-  }
-};
-
-/**
  * The rows before anything is typed: the song playing, two recent playlists and albums, then
  * every action and command.
  */

@@ -1,6 +1,12 @@
+import { Button } from "@music/ui/components/button";
+import { Kbd } from "@music/ui/components/kbd";
+import { cn } from "@music/ui/lib/utils";
 import { ArrowLeftIcon } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import type { ReactNode } from "react";
+
+import { CHORDS, CHORD_LABELS } from "./menu-keys";
+import type { Chord, ChordActions, PreviewAction } from "./menu-keys";
 
 /** Classes for the large artwork at the top of a preview. */
 export const previewArt = "size-37 rounded-md shadow-art-preview";
@@ -11,27 +17,92 @@ export interface PreviewProps {
   readonly onClose: () => void;
   /** Returns from the preview to the list on phones, where only one of them shows. */
   readonly onBack: () => void;
-  /** Hands the menu the preview's primary action for Enter and the footer, or null to clear it. */
-  readonly registerPrimary: (run: (() => void) | null) => void;
+  /** Hands the menu the preview's actions for its chords and footer, or null to clear them. */
+  readonly registerActions: (actions: ChordActions | null) => void;
 }
 
-/** Registers the preview's primary action for Enter and the footer while it is shown. */
-export const usePrimary = (
-  registerPrimary: PreviewProps["registerPrimary"],
-  run: () => void,
+const useRegisterActions = (
+  registerActions: PreviewProps["registerActions"],
+  actions: ChordActions,
 ): void => {
-  const latest = useRef(run);
+  const latest = useRef(actions);
 
-  useEffect(() => {
-    latest.current = run;
+  useLayoutEffect(() => {
+    latest.current = actions;
   });
 
-  useEffect(() => {
-    registerPrimary(() => latest.current());
+  // Re-register only when what the menu shows changes, not on every render: the now-playing
+  // preview re-renders on each position tick, and every registration re-renders the menu. A layout
+  // effect, so the footer never paints without the new selection's Enter label.
+  const shown = CHORDS.map((chord) => {
+    const action = actions[chord];
 
-    return () => registerPrimary(null);
-  }, [registerPrimary]);
+    return action === undefined
+      ? ""
+      : `${action.label}|${action.disabled === true}|${action.pending === true}`;
+  }).join("\n");
+
+  useLayoutEffect(() => {
+    const registered: Partial<Record<Chord, PreviewAction>> = {};
+
+    for (const chord of CHORDS) {
+      const action = latest.current[chord];
+
+      if (action !== undefined)
+        registered[chord] = { ...action, run: () => latest.current[chord]?.run() };
+    }
+
+    registerActions(registered);
+
+    return () => registerActions(null);
+  }, [registerActions, shown]);
 };
+
+/**
+ * A preview's buttons, the Enter one solid, each with a keycap for its chord where the menu has a
+ * keyboard footer (large screens). Registers them with the menu while shown, so the chords pressed
+ * in the search field run them.
+ */
+export function PreviewActions({
+  actions,
+  registerActions,
+}: {
+  readonly actions: ChordActions;
+  readonly registerActions: PreviewProps["registerActions"];
+}) {
+  useRegisterActions(registerActions, actions);
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {CHORDS.map((chord) => {
+        const action = actions[chord];
+
+        if (action === undefined) return null;
+
+        return (
+          <Button
+            key={chord}
+            variant={chord === "enter" ? "solid" : "secondary"}
+            size="sm"
+            className={cn(action.icon !== undefined && "pl-3", "lg:pr-2")}
+            disabled={action.disabled === true}
+            pending={action.pending === true}
+            onClick={action.run}
+          >
+            {action.icon}
+            {action.label}
+            <Kbd
+              aria-hidden
+              className="border-current/40 bg-transparent text-current opacity-(--opacity-muted) max-lg:hidden"
+            >
+              {CHORD_LABELS[chord]}
+            </Kbd>
+          </Button>
+        );
+      })}
+    </div>
+  );
+}
 
 /** The preview pane's padded column, with a Back button on phones. */
 export function PreviewFrame({

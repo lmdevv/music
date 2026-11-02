@@ -27,7 +27,7 @@ import type { MenuContext } from "./args-form";
 import { useCommandDefaults } from "./command-defaults";
 import { groupOf } from "./items";
 import { jobMeta } from "./outcome";
-import { PreviewFrame, PreviewTitle, usePrimary } from "./preview-frame";
+import { PreviewActions, PreviewFrame, PreviewTitle } from "./preview-frame";
 import type { PreviewProps } from "./preview-frame";
 
 const listFormat = new Intl.ListFormat("en", { type: "conjunction" });
@@ -78,7 +78,7 @@ function CommandForm({
   context,
   onClose,
   onBack,
-  registerPrimary,
+  registerActions,
   positionMs,
 }: CommandPreviewProps & { readonly positionMs: number | null }) {
   const convex = useConvex();
@@ -152,8 +152,6 @@ function CommandForm({
     }
   };
 
-  usePrimary(registerPrimary, () => void run());
-
   if (outcome !== null)
     return <OutcomePreview outcome={outcome} onClose={onClose} onBack={onBack} />;
 
@@ -189,11 +187,12 @@ function CommandForm({
           {error}
         </p>
       )}
-      <div className="flex gap-2">
-        <Button variant="solid" size="sm" pending={pending} onClick={() => void run()}>
-          {pending ? "Running…" : "Run"}
-        </Button>
-      </div>
+      <PreviewActions
+        registerActions={registerActions}
+        actions={{
+          enter: { label: pending ? "Running…" : "Run", pending, run: () => void run() },
+        }}
+      />
     </PreviewFrame>
   );
 }
