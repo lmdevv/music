@@ -200,6 +200,32 @@ function FileInfoDialog({
   );
 }
 
+/** Binds the track menu's keys on its popup, so they run only while that menu has focus. */
+function TrackMenuKeys({
+  popup,
+  playNext,
+  addToQueue,
+  like,
+}: {
+  readonly popup: HTMLDivElement | null;
+  readonly playNext: (() => void) | null;
+  readonly addToQueue: (() => void) | null;
+  readonly like: (() => void) | null;
+}) {
+  const bindings = [
+    { hotkey: HOTKEYS["track-menu.play-next"], callback: playNext },
+    { hotkey: HOTKEYS["track-menu.add-to-queue"], callback: addToQueue },
+    { hotkey: HOTKEYS["track-menu.like"], callback: like },
+  ];
+
+  useHotkeys(
+    bindings.flatMap(({ hotkey, callback }) => (callback === null ? [] : [{ hotkey, callback }])),
+    { target: popup },
+  );
+
+  return null;
+}
+
 /**
  * The track row menu from Paper (05 Add to playlist): play next, add to queue, add to a playlist,
  * like, go to the album or artist, and file info. `extra` adds context items such as "Remove from
@@ -242,29 +268,16 @@ export function TrackMenu({
     action();
   };
 
-  useHotkeys(
-    [
-      {
-        hotkey: HOTKEYS["track-menu.play-next"],
-        callback: closeAnd(() => playNext([track])),
-        options: { enabled: playable },
-      },
-      {
-        hotkey: HOTKEYS["track-menu.add-to-queue"],
-        callback: closeAnd(() => addToQueue([track])),
-        options: { enabled: playable },
-      },
-      {
-        hotkey: HOTKEYS["track-menu.like"],
-        callback: closeAnd(() => void toggle()),
-        options: { enabled: !withheld },
-      },
-    ],
-    { target: popup },
-  );
-
   return (
     <>
+      {open ? (
+        <TrackMenuKeys
+          popup={popup}
+          playNext={playable ? closeAnd(() => playNext([track])) : null}
+          addToQueue={playable ? closeAnd(() => addToQueue([track])) : null}
+          like={withheld ? null : closeAnd(() => void toggle())}
+        />
+      ) : null}
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger
           aria-label={`More actions for ${track.title}`}
@@ -279,10 +292,16 @@ export function TrackMenu({
         <DropdownMenuContent ref={setPopup} align={align}>
           {playable ? (
             <>
-              <DropdownMenuItem shortcut="⇧ ↵" onClick={() => playNext([track])}>
+              <DropdownMenuItem
+                shortcut={HOTKEYS["track-menu.play-next"].defaultHotkey}
+                onClick={() => playNext([track])}
+              >
                 Play next
               </DropdownMenuItem>
-              <DropdownMenuItem shortcut="Q" onClick={() => addToQueue([track])}>
+              <DropdownMenuItem
+                shortcut={HOTKEYS["track-menu.add-to-queue"].defaultHotkey}
+                onClick={() => addToQueue([track])}
+              >
                 Add to queue
               </DropdownMenuItem>
               <DropdownMenuSeparator />
@@ -293,7 +312,10 @@ export function TrackMenu({
           ) : (
             <>
               <PlaylistSubmenu tracks={[track]} />
-              <DropdownMenuItem shortcut="L" onClick={() => void toggle()}>
+              <DropdownMenuItem
+                shortcut={HOTKEYS["track-menu.like"].defaultHotkey}
+                onClick={() => void toggle()}
+              >
                 {liked ? "Unlike" : "Like"}
               </DropdownMenuItem>
               {extra === undefined ? null : (

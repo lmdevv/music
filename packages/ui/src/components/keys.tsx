@@ -40,7 +40,6 @@ export function Keys({
     <kbd data-slot="keys" className={cn("inline-flex shrink-0 gap-0.5", className)} {...props}>
       {keyLabels(hotkey).map((label, index) => (
         <kbd
-          // A sequence can repeat a key, so the position tells the caps apart.
           key={index}
           className={cn(
             "inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-xs px-1 font-sans text-xs/xs font-medium",

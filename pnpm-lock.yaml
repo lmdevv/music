@@ -107,6 +107,12 @@ settings:
 
 catalogs:
   default:
+    '@tanstack/hotkeys':
+      specifier: 0.22.1
+      version: 0.22.1
+    '@tanstack/react-hotkeys':
+      specifier: 0.20.2
+      version: 0.20.2
     '@types/node':
       specifier: ^26.4.1
       version: 26.6.5
@@ -448,7 +454,7 @@ importers:
         specifier: ^4.3.3
         version: 4.3.3(vite@8.3.4(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
       '@tanstack/react-hotkeys':
-        specifier: 0.20.2
+        specifier: 'catalog:'
         version: 0.20.2(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@tanstack/react-router':
         specifier: ^1.170.32
@@ -662,7 +668,7 @@ importers:
         specifier: ^1.8.0
         version: 1.9.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@tanstack/hotkeys':
-        specifier: 0.22.1
+        specifier: 'catalog:'
         version: 0.22.1
       class-variance-authority:
         specifier: ^0.7.1

@@ -1,6 +1,6 @@
 import { AlbumId, ArtistId, PlaylistId } from "@music/commands/ids";
 import { Dialog, DialogBackdrop, DialogPopup, DialogPortal } from "@music/ui/components/dialog";
-import { Kbd } from "@music/ui/components/kbd";
+import { Keys } from "@music/ui/components/keys";
 import { Spinner } from "@music/ui/components/spinner";
 import { cn } from "@music/ui/lib/utils";
 import { useHotkeys } from "@tanstack/react-hotkeys";
@@ -15,7 +15,7 @@ import { HOTKEYS } from "@/lib/hotkeys";
 
 import type { MenuContext } from "./args-form";
 import { ItemRow } from "./item-row";
-import { CHORDS, CHORD_LABELS, runnableAction } from "./menu-keys";
+import { CHORDS, runnableAction } from "./menu-keys";
 import type { Chord, ChordActions } from "./menu-keys";
 import { Preview } from "./previews";
 import { useMenuItems } from "./use-menu-items";
@@ -243,7 +243,7 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
           className="shrink-0"
           aria-label="Close"
         >
-          <Kbd>ESC</Kbd>
+          <Keys hotkey="Escape" />
         </button>
       </div>
 
@@ -311,13 +311,13 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
         {footerLabel === null ? null : (
           <span className="flex items-center gap-2 font-sans text-sm/xs font-medium text-text">
             {footerLabel}
-            <Kbd>{CHORD_LABELS["command-menu.enter"]}</Kbd>
+            <Keys hotkey={HOTKEYS["command-menu.enter"].defaultHotkey} />
           </span>
         )}
         <span aria-hidden className="h-4 w-px bg-border" />
         <span className="flex items-center gap-2 font-sans text-sm/xs text-text-muted">
           Close
-          <Kbd>ESC</Kbd>
+          <Keys hotkey="Escape" />
         </span>
       </div>
     </>

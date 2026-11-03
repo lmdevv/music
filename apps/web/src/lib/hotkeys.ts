@@ -1,6 +1,5 @@
 import { defineAppHotkeys } from "@tanstack/react-hotkeys";
 
-/** The group of hotkeys that work anywhere in the app. Settings lists these. */
 export const GLOBAL_GROUP = "Global";
 
 const COMMAND_MENU = "Command menu";
@@ -54,11 +53,6 @@ export const HOTKEYS = defineAppHotkeys({
   "command-menu.alt-enter": {
     hotkey: "Alt+Enter",
     meta: { name: "Run the selected row's fourth action", group: COMMAND_MENU },
-  },
-  // Shown in the menu only: its dialog closes on Escape by itself.
-  "command-menu.close": {
-    hotkey: "Escape",
-    meta: { name: "Close the command menu", group: COMMAND_MENU },
   },
   "track-menu.play-next": {
     hotkey: "Shift+Enter",
