@@ -15,17 +15,18 @@ import {
 } from "@music/ui/components/dropdown-menu";
 import { Button } from "@music/ui/components/button";
 import { cn } from "@music/ui/lib/utils";
+import { useHotkeys } from "@tanstack/react-hotkeys";
 import { useNavigate } from "@tanstack/react-router";
 import { MoreHorizontalIcon, PlusIcon, SearchIcon } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { KeyboardEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { toast } from "sonner";
 
 import { Artwork } from "@/components/library/artwork";
 import { useUi } from "@/components/shell/ui-state";
 import { toastFailure } from "@/lib/action";
 import { formatCount, formatDuration, formatQuality } from "@/lib/format";
-import { isTyping } from "@/lib/keys";
+import { HOTKEYS } from "@/lib/hotkeys";
 import { useCopyLink } from "@/lib/use-copy-link";
 import { useLike } from "@/lib/use-like";
 import { useOpenedOnce } from "@/lib/use-opened-once";
@@ -234,26 +235,33 @@ export function TrackMenu({
   const infoMounted = useOpenedOnce(info);
   const [open, setOpen] = useState(false);
 
-  const onShortcut = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.metaKey || event.ctrlKey || event.altKey || isTyping(event.nativeEvent)) return;
+  const [popup, setPopup] = useState<HTMLDivElement | null>(null);
 
-    const key = event.key.toLowerCase();
-
-    const action =
-      playable && key === "enter" && event.shiftKey
-        ? () => playNext([track])
-        : playable && key === "q"
-          ? () => addToQueue([track])
-          : key === "l" && !withheld
-            ? () => void toggle()
-            : null;
-
-    if (action === null) return;
-    event.preventDefault();
-    event.stopPropagation();
+  const closeAnd = (action: () => void) => () => {
     setOpen(false);
     action();
   };
+
+  useHotkeys(
+    [
+      {
+        hotkey: HOTKEYS["track-menu.play-next"],
+        callback: closeAnd(() => playNext([track])),
+        options: { enabled: playable },
+      },
+      {
+        hotkey: HOTKEYS["track-menu.add-to-queue"],
+        callback: closeAnd(() => addToQueue([track])),
+        options: { enabled: playable },
+      },
+      {
+        hotkey: HOTKEYS["track-menu.like"],
+        callback: closeAnd(() => void toggle()),
+        options: { enabled: !withheld },
+      },
+    ],
+    { target: popup },
+  );
 
   return (
     <>
@@ -268,7 +276,7 @@ export function TrackMenu({
         >
           {trigger ?? <MoreHorizontalIcon className="size-5" />}
         </DropdownMenuTrigger>
-        <DropdownMenuContent align={align} onKeyDownCapture={onShortcut}>
+        <DropdownMenuContent ref={setPopup} align={align}>
           {playable ? (
             <>
               <DropdownMenuItem shortcut="⇧ ↵" onClick={() => playNext([track])}>

@@ -447,6 +447,9 @@ importers:
       '@tailwindcss/vite':
         specifier: ^4.3.3
         version: 4.3.3(vite@8.3.4(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
+      '@tanstack/react-hotkeys':
+        specifier: 0.20.2
+        version: 0.20.2(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@tanstack/react-router':
         specifier: ^1.170.32
         version: 1.170.41(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -2738,6 +2741,13 @@ packages:
   '@tanstack/hotkeys@0.22.1':
     resolution: {integrity: sha512-NG7ISGKnbm95BRVU6p16r7tiI4SfEu8awZN4SXJpXs/oIyHHh3LZ1x7YJsrmF+pE09owfOsPXi1E1oJpThB1tg==}
     engines: {node: '>=20'}
+
+  '@tanstack/react-hotkeys@0.20.2':
+    resolution: {integrity: sha512-vCto+S97KYRqYnnflzxLa5euyhZbce8OUbWM0SSA3Yo9QNzzZr/MZHUMYs9ECpVYGxwgIhR8P4z7O3+6HZ14Wg==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      react: '>=18.0.0'
+      react-dom: '>=18.0.0'
 
   '@tanstack/react-router@1.170.41':
     resolution: {integrity: sha512-Mpvw8Wm5MGDbTqI8Yc9flLKxbOHwoWocv0H2aGKcgw2a017oK5nZWqa954P+DrUx/8fI98YNywnHP5XcD3tQ9w==}
@@ -8071,6 +8081,12 @@ snapshots:
   '@tanstack/history@1.162.4': {}
 
   '@tanstack/hotkeys@0.22.1': {}
+
+  '@tanstack/react-hotkeys@0.20.2(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+    dependencies:
+      '@tanstack/hotkeys': 0.22.1
+      react: 19.3.0
+      react-dom: 19.3.0(react@19.3.0)
 
   '@tanstack/react-router@1.170.41(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:

@@ -56,7 +56,7 @@ export function PreviewActions({
         return (
           <Button
             key={chord}
-            variant={chord === "enter" ? "solid" : "secondary"}
+            variant={chord === "command-menu.enter" ? "solid" : "secondary"}
             size="sm"
             className={cn(action.icon !== undefined && "pl-3", "lg:pr-2")}
             disabled={action.disabled === true}
