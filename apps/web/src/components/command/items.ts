@@ -51,6 +51,8 @@ export type Item =
       readonly section: string;
       readonly title: string;
       readonly detail: string;
+      /** More words search matches, never shown, such as a screen's command name. */
+      readonly keywords?: string;
       readonly icon: LucideIcon;
       readonly shortcut?: string;
       readonly label: string;
@@ -90,7 +92,7 @@ const keywordsOf = (item: Item): string => {
     case "command":
       return `${item.name} ${commands[item.name].group} ${commands[item.name].summary}`;
     case "action":
-      return item.detail;
+      return `${item.detail} ${item.keywords ?? ""}`;
     case "now":
     case "album":
     case "artist":

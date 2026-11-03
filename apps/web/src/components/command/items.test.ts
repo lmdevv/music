@@ -195,6 +195,24 @@ describe("searchItems", () => {
     expect(ids(items)).toEqual(["devices", "go-playlists", "new-playlist", "cmd-playlists.create"]);
   });
 
+  it("finds an action by its hidden keywords without showing them", () => {
+    const songs: Item = {
+      kind: "action",
+      id: "go-tracks.list",
+      section: "Go to",
+      title: "Songs",
+      detail: "Open Songs",
+      keywords: "tracks.list",
+      icon: HeartIcon,
+      label: "Open",
+      run: () => undefined,
+    };
+
+    expect(
+      ids(searchItems({ query: "tracks", results: undefined, playlists: [], actions: [songs] })),
+    ).toEqual(["go-tracks.list"]);
+  });
+
   it("needs every word of the query somewhere in the title or keywords", () => {
     expect(
       ids(searchItems({ query: "playlists create", results: undefined, playlists: [], actions })),

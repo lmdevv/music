@@ -135,6 +135,7 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
       section: "Go to",
       title: screen.title,
       detail: `Open ${screen.title}`,
+      keywords: screen.name,
       icon: screen.icon,
       label: "Open",
       run: go(screen.to),
